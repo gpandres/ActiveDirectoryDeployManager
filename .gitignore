@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dist_portable/
+AD_Deploy_Manager-win32-x64/
+out/
+.env
+*.log
+npm-debug.log*
+.DS_Store

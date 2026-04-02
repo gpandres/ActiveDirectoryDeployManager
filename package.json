@@ -1,0 +1,33 @@
+{
+  "name": "ad-app-deploy-manager",
+  "version": "1.0.0",
+  "description": "Active Directory App Deployment Manager - Drop & Run GPO System",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "npx electron-packager . \"AD_Deploy_Manager\" --platform=win32 --arch=x64 --electron-version=33.0.0 --out=dist --overwrite",
+    "build:portable": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.omnisec.appdeploymanager",
+    "productName": "AppDeploy Manager",
+    "directories": {
+      "output": "dist_portable"
+    },
+    "win": {
+      "target": "portable",
+      "icon": "null"
+    },
+    "portable": {
+      "artifactName": "AppDeployManager-Portable.exe"
+    }
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^26.8.1",
+    "electron-packager": "^17.1.2"
+  }
+}
