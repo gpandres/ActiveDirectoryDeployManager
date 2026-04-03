@@ -33,8 +33,8 @@ const BundlesPage = {
         ${this.bundles.length === 0 ? `
           <div class="empty-state">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-muted);margin-bottom:16px"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
-            <p>No hay bundles configurados</p>
-            <p style="font-size:var(--font-sm);margin-top:8px">Crea un bundle para agrupar varias apps en un solo despliegue GPO</p>
+            <p>${t('bundles.noBundles')}</p>
+            <p style="font-size:var(--font-sm);margin-top:8px">${t('bundles.createBundleHint')}</p>
           </div>
         ` : `
           <div class="cards-grid">
@@ -179,9 +179,9 @@ const BundlesPage = {
           <div class="form-group">
             <label class="checkbox-wrapper">
               <input type="checkbox" id="wiz-bundle-notify" ${state.notifyUser ? 'checked' : ''}>
-              <span>🔔 Notificar al usuario durante la instalación</span>
+              <span>🔔 ${t('bundles.notifyUserLabel')}</span>
             </label>
-            <div class="form-hint">El usuario verá un mensaje de "instalando..." y "completado" en su bandeja del sistema</div>
+            <div class="form-hint">${t('bundles.notifyUserHint')}</div>
           </div>
           <hr style="border-color:var(--border-color);margin:16px 0">
 
@@ -201,7 +201,7 @@ const BundlesPage = {
             <div class="form-group">
               <label class="form-label">${t('apps.selectOus')}</label>
               <select class="form-select" id="wiz-bundle-ou">
-                <option value="">— ${t('common.cancel')} —</option>
+              <option value="">${t('bundles.cancelOption')}</option>
                 ${flatOUs.map(ou => `<option value="${this.esc(ou.dn)}" ${state.ouDN === ou.dn ? 'selected' : ''}>${'  '.repeat(ou.depth)}${ou.depth > 0 ? '↳ ' : ''}${this.esc(ou.name)}</option>`).join('')}
               </select>
             </div>
@@ -278,11 +278,11 @@ const BundlesPage = {
   _wizNext() {
     this._saveStepData();
     if (this._wizState.step === 1 && !this._wizState.name.trim()) {
-      App.toast('Escribe un nombre para el bundle', 'warning');
+      App.toast(t('bundles.nameRequired'), 'warning');
       return;
     }
     if (this._wizState.step === 2 && this._wizState.selectedApps.length === 0) {
-      App.toast('Selecciona al menos una aplicación', 'warning');
+      App.toast(t('bundles.selectAtLeastOne'), 'warning');
       return;
     }
     this._wizState.step++;
@@ -339,7 +339,7 @@ const BundlesPage = {
     const hasGPO = !!bundle.gpoName;
 
     App.openModal(t('apps.deleteConfirm'), `
-      <p>¿Eliminar el bundle <strong>${this.esc(bundle.name)}</strong>?</p>
+      <p>${t('bundles.deleteBundleMsg').replace('{bundle}', `<strong>${this.esc(bundle.name)}</strong>`)}</p>
       <p style="color:var(--text-muted);font-size:var(--font-sm);margin-top:8px">${t('bundles.individualAppsNotDeleted')}</p>
       ${hasGPO ? `
         <div class="form-group mt-md" style="background: rgba(255,50,50,0.08); border: 1px solid rgba(255,50,50,0.25); border-radius:8px; padding:12px;">
@@ -454,7 +454,7 @@ const BundlesPage = {
     const hasGPO = !!bundle.gpoName;
 
     App.openModal(t('apps.disableConfirm'), `
-      <p>¿Deshabilitar el despliegue de <strong>${this.esc(bundle.name)}</strong>?</p>
+      <p>${t('bundles.disableBundleMsg').replace('{bundle}', `<strong>${this.esc(bundle.name)}</strong>`)}</p>
       ${hasGPO ? `
         <div class="form-group mt-md" style="background: rgba(255,165,0,0.08); border: 1px solid rgba(255,165,0,0.25); border-radius:8px; padding:12px;">
           <p style="margin:0 0 8px 0; color:var(--warning-color); font-weight:600;">⚠️ GPO: "${this.esc(bundle.gpoName)}"</p>
@@ -482,7 +482,7 @@ const BundlesPage = {
     document.getElementById('btn-bundle-confirm-disable').addEventListener('click', async () => {
       const btn = document.getElementById('btn-bundle-confirm-disable');
       btn.disabled = true;
-      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;margin-right:6px;"></span> Procesando...';
+      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;margin-right:6px;"></span> ' + t('apps.processingLoader');
 
       try {
         if (hasGPO) {
@@ -492,15 +492,15 @@ const BundlesPage = {
 
           if (unlinkGPO && bundle.ouDN) {
             const r = await window.api.ad.unlinkGPOfromOU(bundle.gpoName, bundle.ouDN);
-            if (r.success) App.toast('GPO desvinculada de la UO', 'success');
+            if (r.success) App.toast(t('bundles.gpoUnlinkedOu'), 'success');
           }
           if (cleanScript) {
             const r = await window.api.ad.removeGPOStartupScript(bundle.gpoName);
-            if (r.success) App.toast('Script de arranque limpiado', 'success');
+            if (r.success) App.toast(t('bundles.startupScriptCleaned'), 'success');
           }
           if (deleteGPO) {
             const r = await window.api.ad.deleteGPO(bundle.gpoName);
-            if (r.success) App.toast(`GPO "${bundle.gpoName}" eliminada`, 'success');
+            if (r.success) App.toast(t('bundles.gpoDeletedSuccess').replace('{gpo}', bundle.gpoName), 'success');
             await window.api.bundles.update(id, { deployed: false, deployedPath: '', gpoName: '' });
           } else {
             await window.api.bundles.update(id, { deployed: false, deployedPath: '' });
@@ -510,20 +510,20 @@ const BundlesPage = {
         }
 
         await window.api.activity.add('bundle_disable', { bundleId: id, bundleName: bundle.name });
-        App.toast(`Bundle "${bundle.name}" deshabilitado`, 'success');
+        App.toast(t('bundles.bundleDisabled').replace('{bundle}', bundle.name), 'success');
         App.closeModal();
         App.navigate('bundles');
       } catch (err) {
         App.toast('Error: ' + err.message, 'error');
         btn.disabled = false;
-        btn.textContent = 'Deshabilitar';
+        btn.textContent = t('apps.disable');
       }
     });
   },
 
   async previewScript(id) {
     const script = await window.api.bundles.generateScript(id);
-    App.openModal('Script del Bundle', `
+    App.openModal(t('bundles.bundleScriptTitle'), `
       <div class="code-header">
         <span>bundle_install.ps1</span>
       </div>

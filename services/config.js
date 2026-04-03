@@ -12,8 +12,8 @@ function getConfigPath() {
 }
 
 const DEFAULT_CONFIG = {
-  networkSharePath: '\\\\SERVER\\share\\apps',
-  logDirectory: 'C:\\ProgramData\\Maqueta_Logs',
+  networkSharePath: '',
+  logDirectory: 'C:\\ProgramData\\AppDeploy_Logs',
   defaultGPO: '',
   language: 'es',
   firstRun: true

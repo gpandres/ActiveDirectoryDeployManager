@@ -78,9 +78,9 @@ const AppsPage = {
         </div>
         <div class="app-card-badges">
           <span class="badge badge-primary">${this.esc(app.installerType?.toUpperCase() || 'EXE')}</span>
-          ${app.gpoName ? `<span class="badge badge-info">${this.esc(app.gpoName)}</span>` : '<span class="badge badge-neutral">Sin GPO</span>'}
+          ${app.gpoName ? `<span class="badge badge-info">${this.esc(app.gpoName)}</span>` : `<span class="badge badge-neutral">${t('apps.noGpoBadge')}</span>`}
           ${app.assignedOUs && app.assignedOUs.length > 0 ? `<span class="badge badge-success">${app.assignedOUs.length} UO(s)</span>` : ''}
-          ${isDeployed ? '<span class="badge badge-success">Desplegada</span>' : ''}
+          ${isDeployed ? `<span class="badge badge-success">${t('apps.deployedBadge')}</span>` : ''}
           <span class="badge badge-info">v${this.esc(app.version || '1.0.0')}</span>
           ${app.notifyUser ? '<span class="badge badge-warning">🔔</span>' : ''}
         </div>
@@ -104,7 +104,7 @@ const AppsPage = {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             ${t('apps.edit')}
           </button>
-          <button class="btn btn-sm btn-danger" onclick="AppsPage.deleteApp('${app.id}')" title="${t('common.delete')}">
+          <button class="btn btn-sm btn-danger" style="padding: 4px 6px;" onclick="AppsPage.deleteApp('${app.id}')" title="${t('common.delete')}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
           </button>
         </div>
@@ -153,13 +153,13 @@ const AppsPage = {
 
   async bulkAssignGPO() {
     const gpoName = document.getElementById('bulk-gpo-select').value;
-    if (!gpoName) { App.toast('Selecciona una GPO primero', 'warning'); return; }
+    if (!gpoName) { App.toast(t('apps.selectGpoFirst'), 'warning'); return; }
     if (this.selectedIds.size === 0) return;
 
     try {
       const ids = Array.from(this.selectedIds);
       await window.api.apps.bulkAssignGPO(ids, gpoName);
-      App.toast(`GPO "${gpoName}" asignada a ${ids.length} app(s)`, 'success');
+      App.toast(t('apps.gpoAssignedBulk').replace('{gpo}', gpoName).replace('{count}', ids.length), 'success');
       this.clearSelection();
       App.navigate('apps');
     } catch (err) {
@@ -203,11 +203,12 @@ const AppsPage = {
           <div class="wizard-step ${state.step >= 4 ? 'active' : ''}">
             <span class="wizard-step-number">4</span><span>${t('apps.step4')}</span>
           </div>
-        </div>`;
+        </div>
+        <div class="wizard-content" style="min-height: 480px; display: flex; flex-direction: column;">`;
 
       if (state.step === 1) {
         body += `
-          <h4 style="font-size: var(--font-md); margin-bottom: var(--space-md); color: var(--text-secondary);">📦 Catálogo de Aplicaciones</h4>
+          <h4 style="font-size: var(--font-md); margin-bottom: var(--space-md); color: var(--text-secondary);">📦 ${t('apps.catalogTitle')}</h4>
           <div class="template-categories" style="display: flex; flex-direction: column; gap: var(--space-lg); margin-bottom: var(--space-xl)">
         `;
         
@@ -248,7 +249,7 @@ const AppsPage = {
           <div class="form-group">
             <label class="form-label">${t('apps.appName')}</label>
             <input class="form-input" id="wiz-name" value="${this.esc(state.name)}" placeholder="Ej: Google Chrome">
-            <p class="form-hint">Se usará como nombre de la carpeta en el share de red</p>
+            <p class="form-hint">${t('apps.nameHint')}</p>
           </div>
           
           ${state.template !== 'custom' ? `
@@ -258,15 +259,15 @@ const AppsPage = {
                 <input class="form-input" id="wiz-installer" value="${this.esc(state.installerPath)}" placeholder="C:\\Descargas\\app.exe" readonly style="flex:1">
                 <button class="btn btn-secondary" id="btn-pick-installer">${t('apps.browse')}</button>
               </div>
-              <p class="form-hint">Se copiará al servidor al completar el asistente.</p>
+              <p class="form-hint">${t('apps.installerHint')}</p>
             </div>
           ` : ''}
 
           ${['sap-gui', 'office'].includes(state.template) ? `
             <div class="form-group">
-              <label class="form-label">Archivo de Configuración XML</label>
+              <label class="form-label">${t('apps.xmlConfig')}</label>
               <div class="flex gap-sm">
-                <input class="form-input" id="wiz-xml" value="${this.esc(state.configXmlPath)}" placeholder="Opcional: C:\\ruta\\config.xml" readonly style="flex:1">
+                <input class="form-input" id="wiz-xml" value="${this.esc(state.configXmlPath)}" placeholder="${t('apps.xmlHint')}" readonly style="flex:1">
                 <button class="btn btn-secondary" id="btn-pick-xml">${t('apps.browse')}</button>
               </div>
             </div>
@@ -337,7 +338,7 @@ const AppsPage = {
           <div class="form-group mb-md">
             <label class="form-label">${t('apps.selectOus')}</label>
             <select class="form-select" id="wiz-ou">
-              <option value="">-- Selecciona una UO (Recomendado) --</option>
+              <option value="">${t('apps.selectOuRecommended')}</option>
             </select>
           </div>
 
@@ -351,7 +352,7 @@ const AppsPage = {
           <div class="form-group" style="opacity: ${state.createGPO ? '0.5' : '1'}; pointer-events: ${state.createGPO ? 'none' : 'auto'};">
             <label class="form-label">${t('apps.selectGpo')}</label>
             <select class="form-select" id="wiz-gpo">
-              <option value="">Sin GPO vinculada</option>
+              <option value="">${t('apps.noGpoOption')}</option>
             </select>
           </div>`;
       } else if (state.step === 4) {
@@ -365,10 +366,12 @@ const AppsPage = {
           </div>
           <div class="code-header">
             <span>📄 install.ps1</span>
-            <button class="btn btn-ghost btn-sm" onclick="AppsPage.copyScript()">Copiar</button>
+            <button class="btn btn-ghost btn-sm" onclick="AppsPage.copyScript()">${t('apps.copyBtn')}</button>
           </div>
-          <pre class="code-preview" id="script-preview">Generando script...</pre>`;
+          <pre class="code-preview" id="script-preview">${t('apps.generatingScript')}</pre>`;
       }
+
+      body += `</div>`;
 
       const footer = `
         ${state.step > 1 ? `<button class="btn btn-secondary" id="wiz-prev">${t('apps.back')}</button>` : ''}
@@ -429,6 +432,16 @@ const AppsPage = {
         const file = await window.api.config.selectFile([{ name: 'Instaladores', extensions: ['exe', 'msi', 'ps1'] }]);
         if (file) {
           state.installerPath = file;
+          
+          if (file.toLowerCase().endsWith('.msi')) {
+             if (!state.silentArgs || state.silentArgs === '/S') {
+                 state.silentArgs = '/qn /norestart'; 
+             }
+          } else if (file.toLowerCase().endsWith('.exe')) {
+             if (!state.silentArgs || state.silentArgs === '/qn /norestart' || state.silentArgs === '/qn') {
+                 state.silentArgs = '/S';
+             }
+          }
           renderWizard();
         }
       });
@@ -575,21 +588,22 @@ const AppsPage = {
       });
       preview.textContent = script;
     } catch (err) {
-      preview.textContent = '# Error generando script: ' + err.message;
+      preview.textContent = '# ' + t('apps.errorGeneratingScript') + ' ' + err.message;
     }
   },
 
   async finishWizard(state, isEdit, existingApp) {
     if (!state.name.trim()) {
-      App.toast('El nombre de la app es obligatorio', 'warning');
+      App.toast(t('apps.nameRequired'), 'warning');
       return;
     }
 
     try {
       const deployBtn = document.getElementById('wiz-deploy');
       if (deployBtn) {
+        deployBtn.style.width = deployBtn.offsetWidth + 'px';
         deployBtn.disabled = true;
-        deployBtn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;margin-right:6px;"></span> Desplegando...';
+        deployBtn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;margin-right:6px;"></span> ' + t('apps.deployingLoader');
       }
 
       const appData = {
@@ -631,25 +645,25 @@ const AppsPage = {
         await window.api.activity.add(isEdit ? 'app_update' : 'app_create', {
           appName: state.name, version: state.version, template: state.template
         });
-        App.toast(t('apps.appCreated').replace('created', 'creada') /* Fallback logic since this is complex string, I will do better: */, 'success');
+        App.toast(t('apps.appCreated'), 'success');
         App.toast(t('apps.deploySuccess'), 'success');
 
         // Create GPO automatically if chosen
         if (state.createGPO) {
           const newGpoName = `Deploy_${state.name.replace(/\\s/g, "_")}`;
-          App.toast(`Construyendo GPO: ${newGpoName}...`, 'info');
+          App.toast(`${t('apps.generatingGpo')} ${newGpoName}...`, 'info');
           const gpoResult = await window.api.ad.createGPO(newGpoName, deployResult.path, state.ouDN);
           
           if (gpoResult.success) {
             await window.api.apps.update(app.id, { gpoName: newGpoName });
-            App.toast(`GPO "${newGpoName}" creada e inyectada con éxito`, 'success');
+            App.toast(t('apps.gpoCreatedSuccess').replace('{gpo}', newGpoName), 'success');
             this.gposCache = null; // Invalidate cache
           } else {
-            App.toast(`Aviso: Archivos alojados en el Server, pero falló la auto-creación GPO: ${gpoResult.error}`, 'warning');
+            App.toast(`${t('apps.gpoWarningOnlyServer')} ${gpoResult.error}`, 'warning');
           }
         }
       } else {
-        App.toast(`App guardada pero error al desplegar: ${deployResult.error}`, 'error');
+        App.toast(`${t('apps.appSavedDeployError')} ${deployResult.error}`, 'error');
       }
 
       App.closeModal();
@@ -663,7 +677,7 @@ const AppsPage = {
     const preview = document.getElementById('script-preview');
     if (preview) {
       navigator.clipboard.writeText(preview.textContent);
-      App.toast('Script copiado al portapapeles', 'success');
+      App.toast(t('apps.scriptCopied'), 'success');
     }
   },
 
@@ -677,7 +691,7 @@ const AppsPage = {
     App.openModal(`Script: ${app.name}`, `
       <div class="code-header">
         <span>📄 install.ps1</span>
-        <button class="btn btn-ghost btn-sm" onclick="AppsPage.copyScript()">Copiar</button>
+        <button class="btn btn-ghost btn-sm" onclick="AppsPage.copyScript()">${t('apps.copyBtn')}</button>
       </div>
       <pre class="code-preview" id="script-preview">${this.esc(script)}</pre>
     `);
@@ -691,13 +705,13 @@ const AppsPage = {
       const result = await window.api.scripts.deploy(app);
       if (result.success) {
         await window.api.apps.update(id, { deployed: true, deployedPath: result.path });
-        App.toast(`Script de "${app.name}" desplegado en: ${result.path}`, 'success');
+        App.toast(t('apps.deployedToPath').replace('{app}', app.name).replace('{path}', result.path), 'success');
         App.navigate('apps');
       } else {
         App.toast(`Error: ${result.error}`, 'error');
       }
     } catch (err) {
-      App.toast('Error al desplegar: ' + err.message, 'error');
+      App.toast(t('apps.deployError') + ' ' + err.message, 'error');
     }
   },
 
@@ -736,8 +750,9 @@ const AppsPage = {
 
     document.getElementById('btn-confirm-disable').addEventListener('click', async () => {
       const btn = document.getElementById('btn-confirm-disable');
+      btn.style.width = btn.offsetWidth + 'px';
       btn.disabled = true;
-      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;margin-right:6px;"></span> Procesando...';
+      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;margin-right:6px;"></span> ' + t('apps.processingLoader');
 
       try {
         const deleteFiles = document.getElementById('chk-delete-deploy-files').checked;
@@ -750,9 +765,9 @@ const AppsPage = {
           for (const ouDN of app.assignedOUs) {
             const result = await window.api.ad.unlinkGPOfromOU(app.gpoName, ouDN);
             if (result.success) {
-              App.toast(`GPO desvinculada de: ${ouDN.split(',')[0]}`, 'success');
+              App.toast(t('apps.gpoUnlinkedOu').replace('{ou}', ouDN.split(',')[0]), 'success');
             } else {
-              App.toast(`No se pudo desvincular de ${ouDN.split(',')[0]}: ${result.error}`, 'warning');
+              App.toast(t('apps.gpoUnlinkFailed').replace('{ou}', ouDN.split(',')[0]) + ' ' + result.error, 'warning');
             }
           }
         }
@@ -761,9 +776,9 @@ const AppsPage = {
         if (hasGPO && cleanScript) {
           const cleanResult = await window.api.ad.removeGPOStartupScript(app.gpoName);
           if (cleanResult.success) {
-            App.toast(`Script de arranque limpiado del SYSVOL`, 'success');
+            App.toast(t('apps.sysvolCleaned'), 'success');
           } else {
-            App.toast(`Aviso al limpiar SYSVOL: ${cleanResult.error}`, 'warning');
+            App.toast(`${t('apps.sysvolCleanWarn')} ${cleanResult.error}`, 'warning');
           }
         }
 
@@ -771,9 +786,9 @@ const AppsPage = {
         if (hasGPO && deleteGPO) {
           const delResult = await window.api.ad.deleteGPO(app.gpoName);
           if (delResult.success) {
-            App.toast(`GPO "${app.gpoName}" eliminada`, 'success');
+            App.toast(t('apps.gpoDeletedMsg').replace('{gpo}', app.gpoName), 'success');
           } else {
-            App.toast(`No se pudo eliminar la GPO: ${delResult.error}`, 'warning');
+            App.toast(`${t('apps.gpoDeleteFailed')} ${delResult.error}`, 'warning');
           }
         }
 
@@ -798,13 +813,13 @@ const AppsPage = {
           await window.api.activity.add('app_disable', { appName: app.name, deletedFiles: false, deletedGPO: deleteGPO });
         }
 
-        App.toast(`Despliegue de "${app.name}" deshabilitado correctamente`, 'success');
+        App.toast(t('apps.disableSuccess').replace('{app}', app.name), 'success');
         App.closeModal();
         App.navigate('apps');
       } catch (err) {
         App.toast('Error: ' + err.message, 'error');
         btn.disabled = false;
-        btn.textContent = 'Deshabilitar';
+        btn.textContent = t('apps.disable');
       }
     });
   },
@@ -854,7 +869,7 @@ const AppsPage = {
     document.getElementById('btn-confirm-delete').addEventListener('click', async () => {
       const btn = document.getElementById('btn-confirm-delete');
       btn.disabled = true;
-      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;margin-right:6px;"></span> Eliminando...';
+      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;margin-right:6px;"></span> ' + t('apps.deletingLoader');
 
       try {
         const deleteFiles = document.getElementById('chk-delete-files').checked;
@@ -876,13 +891,13 @@ const AppsPage = {
         }
 
         await window.api.apps.delete(id, deleteFiles);
-        App.toast(`"${app.name}" eliminada correctamente`, 'success');
+        App.toast(t('apps.deleteSuccess').replace('{app}', app.name), 'success');
         App.closeModal();
         App.navigate('apps');
       } catch (err) {
         App.toast('Error: ' + err.message, 'error');
         btn.disabled = false;
-        btn.textContent = 'Eliminar Todo';
+        btn.textContent = t('apps.deleteAllBtn');
       }
     });
   },
@@ -922,37 +937,37 @@ const AppsPage = {
 
   showSilentArgsHelper(state, renderWizard) {
     const args = [
-      { category: 'MSI (Windows Installer)', items: [
-        { arg: '/qn', desc: 'Instalación completamente silenciosa (sin interfaz)' },
-        { arg: '/qb', desc: 'Interfaz básica (solo barra de progreso)' },
-        { arg: '/qr', desc: 'Interfaz reducida (progreso y finalización)' },
-        { arg: '/norestart', desc: 'No reiniciar tras la instalación' },
-        { arg: '/passive', desc: 'Sin interacción pero con barra de progreso' },
-        { arg: '/l*v "C:\\install.log"', desc: 'Registro detallado de la instalación' },
-        { arg: 'ALLUSERS=1', desc: 'Instalar para todos los usuarios' },
-        { arg: 'INSTALLDIR="C:\\Program Files\\App"', desc: 'Especificar directorio de instalación' },
-        { arg: '/qn /norestart', desc: '⭐ Combo recomendado para MSI' },
+      { category: t('apps.argsCatMsi'), items: [
+        { arg: '/qn', desc: t('apps.argsMsiQn') },
+        { arg: '/qb', desc: t('apps.argsMsiQb') },
+        { arg: '/qr', desc: t('apps.argsMsiQr') },
+        { arg: '/norestart', desc: t('apps.argsMsiNoRestart') },
+        { arg: '/passive', desc: t('apps.argsMsiPassive') },
+        { arg: '/l*v "C:\\install.log"', desc: t('apps.argsMsiLog') },
+        { arg: 'ALLUSERS=1', desc: t('apps.argsMsiAllUsers') },
+        { arg: 'INSTALLDIR="C:\\Program Files\\App"', desc: t('apps.argsMsiInstallDir') },
+        { arg: '/qn /norestart', desc: t('apps.argsMsiCombo') },
       ]},
-      { category: 'EXE (Instaladores comunes)', items: [
-        { arg: '/S', desc: 'Silencioso (NSIS — Chrome, 7-Zip, Notepad++...)' },
-        { arg: '/s', desc: 'Silencioso (algunos EXE — variante en minúscula)' },
-        { arg: '/silent', desc: 'Silencioso (Inno Setup — VLC, WinSCP...)' },
-        { arg: '/verysilent', desc: 'Muy silencioso, sin splash (Inno Setup)' },
-        { arg: '/SILENT /NORESTART', desc: '⭐ Combo Inno Setup recomendado' },
-        { arg: '/quiet', desc: 'Silencioso (InstallShield, algunos EXE)' },
-        { arg: '/quiet /norestart', desc: '⭐ Combo InstallShield recomendado' },
-        { arg: '-ms', desc: 'Silencioso (FortiClient, algunos .exe)' },
-        { arg: '--silent --accept-license', desc: 'Silencioso con aceptación de licencia' },
+      { category: t('apps.argsCatExe'), items: [
+        { arg: '/S', desc: t('apps.argsExeNsis') },
+        { arg: '/s', desc: t('apps.argsExeLower') },
+        { arg: '/silent', desc: t('apps.argsExeInnoSilent') },
+        { arg: '/verysilent', desc: t('apps.argsExeInnoVery') },
+        { arg: '/SILENT /NORESTART', desc: t('apps.argsExeInnoCombo') },
+        { arg: '/quiet', desc: t('apps.argsExeQuiet') },
+        { arg: '/quiet /norestart', desc: t('apps.argsExeQuietCombo') },
+        { arg: '-ms', desc: t('apps.argsExeMs') },
+        { arg: '--silent --accept-license', desc: t('apps.argsExeAcceptLicense') },
       ]},
-      { category: 'Especiales', items: [
-        { arg: 'TRANSFORMS="config.mst"', desc: 'Aplicar transformación MST a un MSI' },
-        { arg: '/extract:"C:\\temp"', desc: 'Extraer contenido sin instalar (algunos EXE)' },
-        { arg: '/configure config.xml', desc: 'Office — usar archivo de configuración XML' },
+      { category: t('apps.argsCatSpecial'), items: [
+        { arg: 'TRANSFORMS="config.mst"', desc: t('apps.argsSpecialMst') },
+        { arg: '/extract:"C:\\temp"', desc: t('apps.argsSpecialExtract') },
+        { arg: '/configure config.xml', desc: t('apps.argsSpecialOffice') },
       ]},
     ];
 
     const body = `
-      <p style="color:var(--text-secondary);margin-bottom:16px;font-size:var(--font-sm);">Haz click en cualquier argumento para copiarlo al campo de argumentos silenciosos.</p>
+      <p style="color:var(--text-secondary);margin-bottom:16px;font-size:var(--font-sm);">${t('apps.clickToCopyArgs')}</p>
       ${args.map(cat => `
         <div style="margin-bottom:20px;">
           <div style="font-weight:600;color:var(--text-primary);margin-bottom:8px;font-size:var(--font-sm);text-transform:uppercase;letter-spacing:0.5px;">${cat.category}</div>
@@ -980,9 +995,9 @@ const AppsPage = {
         state.silentArgs = selected;
         App.closeModal();
         renderWizard();
-        App.toast(`Argumento "${selected}" aplicado`, 'success');
+        App.toast(t('apps.argsCopied').replace('{arg}', selected), 'success');
       } else {
-        App.toast('Selecciona un argumento de la lista', 'warning');
+        App.toast(t('apps.selectArgWarning'), 'warning');
       }
     });
   }

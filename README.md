@@ -1,10 +1,10 @@
-# AppDeploy Manager
+# Active Directory Deploy Manager
 
 <div align="center">
   <img src="img/screenshot.png" alt="AppDeploy Manager Screenshot" width="800"/>
 </div>
 
-**AppDeploy Manager** es una poderosa aplicación diseñada para SysAdmins y equipos de TI. Permite desplegar software de manera desatendida ("Drop & Run") utilizando las directivas de Active Directory (GPOs). A través de una interfaz moderna y unificada, puedes asignar ejecutables o MSIs automatizados directamente en las Unidades Organizativas (OUs) de tu compañía.
+**Active Directory Deploy Manager** es una aplicación diseñada para SysAdmins y equipos de TI. Permite desplegar software de manera desatendida ("Drop & Run") utilizando las directivas de Active Directory (GPOs). A través de una interfaz moderna y unificada, puedes asignar ejecutables o MSIs automatizados directamente en las Unidades Organizativas (OUs) de tu compañía.
 
 ## 🚀 Características Principales
 

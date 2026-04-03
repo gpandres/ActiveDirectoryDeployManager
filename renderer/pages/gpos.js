@@ -10,7 +10,7 @@ const GposPage = {
         </div>
         <button class="btn btn-primary" id="btn-refresh-gpos">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 1 0 2.13-5.83L2 8"/></svg>
-          ${t('gpos.refreshGPOs')}
+          ${t('gpos.refresh')}
         </button>
       </div>
 

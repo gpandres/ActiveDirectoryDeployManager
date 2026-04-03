@@ -46,7 +46,7 @@ const SettingsPage = {
         <div class="form-group">
           <label class="form-label">${t('settings.logs')}</label>
           <div class="input-with-btn">
-            <input class="form-input" id="cfg-log-dir" value="${this.esc(config.logDirectory)}" placeholder="C:\\ProgramData\\Maqueta_Logs">
+            <input class="form-input" id="cfg-log-dir" value="${this.esc(config.logDirectory)}" placeholder="C:\\ProgramData\\AppDeploy_Logs">
             <button class="btn btn-secondary" id="btn-browse-log">${t('settings.browse')}</button>
           </div>
           <p class="form-hint">${t('settings.logsHint')}</p>

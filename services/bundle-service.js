@@ -155,7 +155,7 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
 }
 
 $BundleName = "${bundle.name}"
-$LogDir = "C:\\ProgramData\\Maqueta_Logs"
+$LogDir = "C:\\ProgramData\\AppDeploy_Logs"
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 $BundleTracker = "$LogDir\\Tracker_Bundle_$($BundleName -replace '\\s','_').txt"
 $BundleVersion = "${bundle.version}"

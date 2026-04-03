@@ -236,7 +236,7 @@ const DashboardPage = {
       if (app.deployed && app.deployedPath) {
         if (!app.gpoName) {
           warn++;
-          issues.push({ type: 'warn', msg: `"${app.name}" desplegada pero sin GPO asignada` });
+          issues.push({ type: 'warn', msg: t('dashboard.issueWarnNoGpo').replace('{app}', app.name) });
         } else if (!app.version || app.version === '1.0.0') {
           ok++; // Default version is fine
         } else {
@@ -244,20 +244,20 @@ const DashboardPage = {
         }
       } else if (app.gpoName && !app.deployed) {
         warn++;
-        issues.push({ type: 'warn', msg: `"${app.name}" tiene GPO pero no está desplegada` });
+        issues.push({ type: 'warn', msg: t('dashboard.issueWarnNotDeployed').replace('{app}', app.name) });
       } else if (!app.deployed && !app.gpoName) {
         error++;
-        issues.push({ type: 'error', msg: `"${app.name}" no desplegada y sin GPO` });
+        issues.push({ type: 'error', msg: t('dashboard.issueErrorNoDeployNoGpo').replace('{app}', app.name) });
       } else {
         ok++;
       }
     });
     const total = ok + warn + error;
-    let label = 'Sin apps', color = 'badge-neutral';
+    let label = t('dashboard.statusNoApps'), color = 'badge-neutral';
     if (total > 0) {
-      if (error === 0 && warn === 0) { label = 'Todo OK'; color = 'badge-success'; }
-      else if (error === 0) { label = `${warn} aviso(s)`; color = 'badge-warning'; }
-      else { label = `${error} error(es)`; color = 'badge-danger'; }
+      if (error === 0 && warn === 0) { label = t('dashboard.statusAllOk'); color = 'badge-success'; }
+      else if (error === 0) { label = `${warn} ${t('dashboard.statusWarnings')}`; color = 'badge-warning'; }
+      else { label = `${error} ${t('dashboard.statusErrors')}`; color = 'badge-danger'; }
     }
     return { ok, warn, error, issues, label, color };
   },

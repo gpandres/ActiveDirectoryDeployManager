@@ -84,7 +84,7 @@ const App = {
     });
     // Render page
     const container = document.getElementById('main-content');
-    container.innerHTML = '<div class="spinner"></div><p class="loading-text">Cargando...</p>';
+    container.innerHTML = '<div class="spinner"></div><p class="loading-text">' + t('common.loading') + '</p>';
 
     setTimeout(async () => {
       switch (page) {
@@ -96,7 +96,7 @@ const App = {
         case 'bundles': await BundlesPage.render(container); break;
         case 'deployments': await DeploymentsPage.render(container); break;
         case 'settings': await SettingsPage.render(container); break;
-        default: container.innerHTML = '<p>Página no encontrada</p>';
+        default: container.innerHTML = '<p>' + t('common.pageNotFound') + '</p>';
       }
     }, 80);
   },
@@ -105,7 +105,7 @@ const App = {
   async checkRSAT() {
     const statusEl = document.getElementById('rsat-status');
     statusEl.className = 'rsat-status checking';
-    statusEl.querySelector('.rsat-text').textContent = 'Comprobando RSAT...';
+    statusEl.querySelector('.rsat-text').textContent = t('common.checkingRsat');
 
     try {
       const result = await window.api.ad.checkRSAT();
@@ -114,16 +114,16 @@ const App = {
       
       if (this.rsatMissingGPMC) {
         statusEl.className = 'rsat-status warning';
-        statusEl.querySelector('.rsat-text').textContent = 'Faltan módulos GPMC';
+        statusEl.querySelector('.rsat-text').textContent = t('common.rsatMissingGpmc');
       } else {
         statusEl.className = `rsat-status ${result.available ? 'ok' : 'error'}`;
-        statusEl.querySelector('.rsat-text').textContent = result.available ? 'RSAT OK' : 'RSAT no disponible';
+        statusEl.querySelector('.rsat-text').textContent = result.available ? 'RSAT OK' : t('common.rsatNotAvailable');
       }
     } catch (err) {
       this.rsatAvailable = false;
       this.rsatMissingGPMC = false;
       statusEl.className = 'rsat-status error';
-      statusEl.querySelector('.rsat-text').textContent = 'Error RSAT';
+      statusEl.querySelector('.rsat-text').textContent = t('common.rsatError');
     }
   },
 
@@ -183,7 +183,7 @@ const App = {
         <div class="rsat-warning" style="background-color: var(--secondary-color); border-left-color: #f39c12;">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f39c12" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
           <div>
-            <strong style="color:#f39c12">Instala el Módulo GroupPolicy</strong> — Aunque AD está activo, las GPOs están deshabilitadas sin este módulo. Ejecuta como Administrador en PowerShell:
+            <strong style="color:#f39c12">${t('common.rsatWarningTitle')}</strong> — ${t('common.rsatWarningMsg')}
             <code>Add-WindowsCapability -Online -Name Rsat.GroupPolicy.Management.Tools~~~~0.0.1.0</code>
           </div>
         </div>`;
@@ -193,7 +193,7 @@ const App = {
       <div class="rsat-warning">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
         <div>
-          <strong>RSAT no está instalado</strong> — Las funciones de Active Directory están deshabilitadas.
+          <strong>${t('common.rsatNotInstalledTitle')}</strong> — ${t('common.rsatNotInstalledMsg')}
           Ejecuta como Administrador en PowerShell:
           <code>Add-WindowsCapability -Online -Name Rsat.ActiveDirectory.DS-LDS.Tools~~~~0.0.1.0</code>
         </div>

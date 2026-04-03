@@ -14,9 +14,9 @@ const TEMPLATES = {
   bitdefender: { category: 'Seguridad', name: 'Bitdefender BEST', description: 'Despliegue estándar BEST', fields: [] },
   crowdstrike: { category: 'Seguridad', name: 'CrowdStrike Falcon', description: 'Instala EXE con inyección de CID', fields: [{ key: 'cid', label: 'Customer ID (CID)', default: '', hint: 'CID de CrowdStrike Falcon' }] },
   zscaler: { category: 'Conectividad', name: 'Zscaler Client Connector', description: 'Despliegue de Zscaler ZCC', fields: [{key:'cloudName', label:'CLOUDNAME', default:'zscaler', hint:'Ej: zscaler, zscalerone'}, {key:'userDomain', label:'USERDOMAIN', default:'', hint:'Dominio de la empresa para SSO'}, {key:'strictEnforcement', label:'Strict Enforcement', type:'checkbox', default:true, hint:'Prevenir que el usuario lo desactive'}] },
-  globalprotect: { category: 'Conectividad', name: 'GlobalProtect', description: 'Instalador MSI con inyección de PORTAL', fields: [{key:'portal', label:'Portal VPN', default:'vpn.tuempresa.com', hint:'FQDN del portal'}] },
+  globalprotect: { category: 'Conectividad', name: 'GlobalProtect', description: 'Instalador MSI con inyección de PORTAL', fields: [{key:'portal', label:'Portal VPN', default:'', hint:'FQDN del portal (ej: vpn.empresa.com)'}] },
   ciscosecureclient: { category: 'Conectividad', name: 'Cisco Secure Client', description: 'Instala MSI y copia profiles XML', fields: [{key:'profileXml', label:'Perfil XML', default:'profile.xml', hint:'Este XML debe estar junto al MSI'}] },
-  forticlient: { category: 'Conectividad', name: 'FortiClient VPN', description: 'Instala MSI + configura túnel VPN', fields: [ { key: 'vpnName', label: 'Nombre del túnel VPN', default: 'EMPRESA', hint: 'Nombre del perfil VPN' }, { key: 'vpnDescription', label: 'Descripción', default: 'VPN Corporativa', hint: '' }, { key: 'vpnServer', label: 'Servidor:Puerto', default: '', hint: 'Ej: 192.168.1.1:10443' }, { key: 'ssoEnabled', label: 'Habilitar Single Sign-On (SSO)', type: 'checkbox', default: true, hint: 'Usa SAML/SSO para autenticarse' }, { key: 'serverCert', label: 'Validar Servidor CA', type: 'checkbox', default: false, hint: 'Casilla desmarcada (0) de serie' }, { key: 'noWarnInvalidCert', label: 'Silenciar Alerta de Certificado Inválido', type: 'checkbox', default: true, hint: 'No alertar en certificados auto-firmados' } ] },
+  forticlient: { category: 'Conectividad', name: 'FortiClient VPN', description: 'Instala MSI + configura túnel VPN', fields: [ { key: 'vpnName', label: 'Nombre del túnel VPN', default: '', hint: 'Nombre del perfil VPN' }, { key: 'vpnDescription', label: 'Descripción', default: 'VPN Corporativa', hint: '' }, { key: 'vpnServer', label: 'Servidor:Puerto', default: '', hint: 'Ej: 192.168.1.1:10443' }, { key: 'ssoEnabled', label: 'Habilitar Single Sign-On (SSO)', type: 'checkbox', default: true, hint: 'Usa SAML/SSO para autenticarse' }, { key: 'serverCert', label: 'Validar Servidor CA', type: 'checkbox', default: false, hint: 'Casilla desmarcada (0) de serie' }, { key: 'noWarnInvalidCert', label: 'Silenciar Alerta de Certificado Inválido', type: 'checkbox', default: true, hint: 'No alertar en certificados auto-firmados' } ] },
   lansweeper: { category: 'RMM', name: 'Lansweeper (LsAgent)', description: 'Agente local de inventario LsAgent', fields: [{key:'server', label:'SERVER', default:'', hint:'IP/FQDN de Lansweeper (si es local)'}, {key:'port', label:'PORT', default:'9524', hint:'Puerto'}, {key:'agentKey', label:'AGENTKEY (Cloud Relay)', default:'', hint:'Para sincronización por la nube'}] },
   ninjaone: { category: 'RMM', name: 'NinjaOne / Datto RMM', description: 'Instalación genérica RMM por token', fields: [{key:'token', label:'Token / Clave', default:'', hint:'Token de organización'}] },
   freshservice: { category: 'RMM', name: 'Freshservice Agent', description: 'Instala MSI con inyección de Token de Registro', fields: [{ key: 'token', label: 'Registration Token', default: '', hint: 'Token de la consola Freshservice' }] },
@@ -181,7 +181,7 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
     ? `Send-UserToast -ToastTitle "${ToastTitleProcess}" -ToastMessage "${ToastMsgProcess}" -IconType "Warning"`
     : '';
   return `
-$LogDir = "C:\\ProgramData\\Maqueta_Logs"
+$LogDir = "C:\\ProgramData\\AppDeploy_Logs"
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 $NombreApp = (Get-Item $PSScriptRoot).Name
 $TrackerFile = "$LogDir\\Tracker_$NombreApp.json"
@@ -257,7 +257,7 @@ ${getTrackerSaveLogic(notify)}
 }
 
 function generateFreshservice(cfg) {
-  const token = cfg.customParams?.token || 'TU_TOKEN_AQUI';
+  const token = cfg.customParams?.token || '';
   const notify = cfg.notifyUser || false;
   return `# =========================================================================
 # FRESHSERVICE AGENT - DROP & RUN
@@ -280,7 +280,7 @@ ${getTrackerSaveLogic(notify)}
 }
 
 function generateCrowdstrike(cfg) {
-  const cid = cfg.customParams?.cid || 'TU_CID_AQUI';
+  const cid = cfg.customParams?.cid || '';
   const notify = cfg.notifyUser || false;
   return `# =========================================================================
 # CROWDSTRIKE FALCON - DROP & RUN
@@ -340,7 +340,7 @@ try {
 }
 
 function generateForticlient(cfg) {
-  const vpnName = cfg.customParams?.vpnName || 'EMPRESA';
+  const vpnName = cfg.customParams?.vpnName || 'VPN';
   const vpnDesc = cfg.customParams?.vpnDescription || 'VPN Corporativa';
   const vpnServer = cfg.customParams?.vpnServer || '0.0.0.0:443';
   const sso = cfg.customParams?.ssoEnabled === false ? 0 : 1;
@@ -409,7 +409,6 @@ ${code}
 `;
 }
 
-module.exports = scriptService;
 function generateWazuh(cfg) {
   const manager = cfg.customParams?.manager || '';
   const group = cfg.customParams?.group || 'default';
@@ -505,7 +504,7 @@ ${getTrackerSaveLogic(notify)}
 }
 
 function generateGlobalProtect(cfg) {
-  const portal = cfg.customParams?.portal || 'vpn.tuempresa.com';
+  const portal = cfg.customParams?.portal || '';
   const notify = cfg.notifyUser || false;
   return `# =========================================================================
 # GLOBALPROTECT - DROP & RUN
@@ -670,3 +669,5 @@ ${getTrackerSaveLogic(notify)}
 } catch {}
 `;
 }
+
+module.exports = scriptService;

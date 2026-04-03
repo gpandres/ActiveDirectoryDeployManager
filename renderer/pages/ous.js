@@ -13,13 +13,13 @@ const OUsPage = {
             <span class="header-icon">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             </span>
-            Unidades Organizativas
+            ${t('ous.title')}
           </h1>
-          <p class="page-subtitle">Explorar estructura de Active Directory y gestionar asignaciones</p>
+          <p class="page-subtitle">${t('ous.subtitle')}</p>
         </div>
         <button class="btn btn-secondary" id="btn-refresh-ous">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-          Actualizar
+          ${t('ous.refresh')}
         </button>
       </div>
 
@@ -27,19 +27,19 @@ const OUsPage = {
 
       <div class="flex gap-lg" style="align-items:flex-start;">
         <div class="card" style="flex:1; min-width:300px;">
-          <div class="card-title">Árbol de UOs</div>
+          <div class="card-title">${t('ous.treeTitle')}</div>
           <div id="ou-tree-container" class="mt-md">
             ${App.rsatAvailable ?
-              '<div class="spinner"></div><p class="loading-text">Cargando UOs...</p>' :
-              '<div class="empty-state"><p class="empty-state-text">Activa RSAT para ver las UOs del dominio.</p></div>'
+              '<div class="spinner"></div><p class="loading-text">' + t('ous.loadingOus') + '</p>' :
+              '<div class="empty-state"><p class="empty-state-text">' + t('ous.emptyOusRsat') + '</p></div>'
             }
           </div>
         </div>
 
         <div class="card" style="flex:1; min-width:300px;" id="ou-detail-panel">
-          <div class="card-title">Detalles de la UO</div>
+          <div class="card-title">${t('ous.detailsTitle')}</div>
           <div class="empty-state mt-md">
-            <p class="empty-state-text">Selecciona una UO del árbol para ver sus detalles.</p>
+            <p class="empty-state-text">${t('ous.selectOuPanel')}</p>
           </div>
         </div>
       </div>
@@ -54,7 +54,7 @@ const OUsPage = {
 
   async loadOUs() {
     const treeContainer = document.getElementById('ou-tree-container');
-    treeContainer.innerHTML = '<div class="spinner"></div><p class="loading-text">Cargando UOs...</p>';
+    treeContainer.innerHTML = '<div class="spinner"></div><p class="loading-text">' + t('ous.loadingOus') + '</p>';
 
     try {
       const result = await window.api.ad.getOUs();
@@ -64,13 +64,13 @@ const OUsPage = {
       } else {
         treeContainer.innerHTML = `
           <div class="empty-state">
-            <p class="empty-state-text">${result.error || 'No se encontraron UOs.'}</p>
+            <p class="empty-state-text">${result.error || t('ous.noOusFound')}</p>
           </div>`;
       }
     } catch (err) {
       treeContainer.innerHTML = `
         <div class="empty-state">
-          <p class="empty-state-text">Error al conectar con AD: ${err.message}</p>
+          <p class="empty-state-text">${t('ous.errorConnecting')} ${err.message}</p>
         </div>`;
     }
   },
@@ -139,7 +139,7 @@ const OUsPage = {
       <p class="text-muted text-sm mt-sm mb-md" style="word-break:break-all;">${this.escapeHTML(dn)}</p>
 
       <div class="mb-md">
-        <strong class="text-sm" style="color:var(--text-secondary)">Apps Asignadas (${assignedApps.length})</strong>
+        <strong class="text-sm" style="color:var(--text-secondary)">${t('ous.assignedApps')} (${assignedApps.length})</strong>
         ${assignedApps.length > 0 ? `
           <div class="mt-sm">
             ${assignedApps.map(app => `
@@ -148,22 +148,22 @@ const OUsPage = {
                   <span style="color:var(--text-primary)">${this.escapeHTML(app.name)}</span>
                   ${app.gpoName ? `<span class="badge badge-info" style="margin-left:8px">${this.escapeHTML(app.gpoName)}</span>` : ''}
                 </div>
-                <button class="btn btn-danger btn-sm" onclick="OUsPage.unassignApp('${app.id}', '${this.escapeAttr(dn)}')">Quitar</button>
+                <button class="btn btn-danger btn-sm" onclick="OUsPage.unassignApp('${app.id}', '${this.escapeAttr(dn)}')">${t('ous.removeBtn')}</button>
               </div>
             `).join('')}
           </div>
-        ` : '<p class="text-muted text-sm mt-sm">No hay apps asignadas a esta UO.</p>'}
+        ` : `<p class="text-muted text-sm mt-sm">${t('ous.unassignedAppsEmpty')}</p>`}
       </div>
 
       ${unassignedApps.length > 0 ? `
         <div class="mt-lg">
-          <strong class="text-sm" style="color:var(--text-secondary)">Asignar App</strong>
+          <strong class="text-sm" style="color:var(--text-secondary)">${t('ous.assignAppTitle')}</strong>
           <div class="flex gap-sm mt-sm">
             <select class="form-select" id="assign-app-select" style="flex:1;">
-              <option value="">Seleccionar app...</option>
+              <option value="">${t('ous.selectAppSelect')}</option>
               ${unassignedApps.map(app => `<option value="${app.id}">${this.escapeHTML(app.name)}</option>`).join('')}
             </select>
-            <button class="btn btn-primary btn-sm" onclick="OUsPage.assignApp()">Asignar</button>
+            <button class="btn btn-primary btn-sm" onclick="OUsPage.assignApp()">${t('ous.assignBtn')}</button>
           </div>
         </div>
       ` : ''}
@@ -180,10 +180,10 @@ const OUsPage = {
       const ous = app.assignedOUs || [];
       ous.push(this.selectedOU);
       await window.api.apps.update(appId, { assignedOUs: ous });
-      App.toast('App asignada a la UO', 'success');
+      App.toast(t('ous.appAssignedSuccess'), 'success');
       this.showOUDetail(this.selectedOU);
     } catch (err) {
-      App.toast('Error al asignar: ' + err.message, 'error');
+      App.toast(t('common.error') + ': ' + err.message, 'error');
     }
   },
 
@@ -192,10 +192,10 @@ const OUsPage = {
       const app = await window.api.apps.get(appId);
       const ous = (app.assignedOUs || []).filter(ou => ou !== ouDN);
       await window.api.apps.update(appId, { assignedOUs: ous });
-      App.toast('App desasignada', 'success');
+      App.toast(t('ous.appUnassignedSuccess'), 'success');
       this.showOUDetail(ouDN);
     } catch (err) {
-      App.toast('Error: ' + err.message, 'error');
+      App.toast(t('common.error') + ': ' + err.message, 'error');
     }
   },
 
