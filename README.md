@@ -4,57 +4,57 @@
   <img src="img/screenshot.png" alt="AppDeploy Manager Screenshot" width="800"/>
 </div>
 
-**Active Directory Deploy Manager** es una aplicación diseñada para SysAdmins y equipos de TI. Permite desplegar software de manera desatendida ("Drop & Run") utilizando las directivas de Active Directory (GPOs). A través de una interfaz moderna y unificada, puedes asignar ejecutables o MSIs automatizados directamente en las Unidades Organizativas (OUs) de tu compañía.
+**Active Directory Deploy Manager** is an application designed for SysAdmins and IT teams. It allows for unattended software deployment ("Drop & Run") using Active Directory Group Policy Objects (GPOs). Through a modern and unified interface, you can assign automated executables or MSIs directly to your company's Organizational Units (OUs).
 
-## 🚀 Características Principales
+## 🚀 Key Features
 
-- **Interfaz Gráfica de AD:** Explora tus Unidades Organizativas (OUs) y visualiza exactamente qué aplicaciones se están desplegando a través de tus GPOs.
-- **Catálogo Corporativo de Plantillas:** Despliega software complejo con 1 clic. Incluye plantillas autogenerables para:
-  - *Seguridad*: Wazuh, SentinelOne, Cortex XDR, Bitdefender, CrowdStrike Falcon.
-  - *Conectividad*: GlobalProtect, Zscaler, FortiClient, Cisco Secure Client.
-  - *Soporte & RMM*: TeamViewer, AnyDesk, Lansweeper, NinjaOne, Freshservice.
-  - *Endpoints*: Microsoft Office, SAP GUI, Chrome Enterprise y Custom scripts (Raw PowerShell).
-- **Control de Logs & Caching:** Cada AppDeploy generado incluye lógica PSScripts que descarga el software al disco duro (`C:\Temp\Deploy`) primero, y además guarda tokens de "ya instalado" para prevenir repetidos despliegues si la GPO se vuelve a lanzar.
-- **Alertas Visuales Locales (User Toast):** El sistema levanta notificaciones nativas de Windows directamente conectadas a la *Session 0* para avisar al usuario final de que una instalación corporativa se está llevando a cabo.
-- **Internacionalización y Asistente (Setup):** Setup configurable en el primer arranque para rutear tu `Red de Share` y soporte multi-idioma nativo.
+- **AD Graphical Interface:** Browse your Organizational Units (OUs) and visualize exactly which applications are being deployed through your GPOs.
+- **Corporate Template Catalog:** Deploy complex software with 1 click. Includes auto-generating templates for:
+  - *Security*: Wazuh, SentinelOne, Cortex XDR, Bitdefender, CrowdStrike Falcon.
+  - *Connectivity*: GlobalProtect, Zscaler, FortiClient, Cisco Secure Client.
+  - *Support & RMM*: TeamViewer, AnyDesk, Lansweeper, NinjaOne, Freshservice.
+  - *Endpoints*: Microsoft Office, SAP GUI, Chrome Enterprise, and Custom scripts (Raw PowerShell).
+- **Logs & Caching Control:** Every generated AppDeploy includes PSScript logic that first downloads the software to the hard drive (`C:\Temp\Deploy`), and also saves "already installed" tokens to prevent repeated deployments if the GPO is triggered again.
+- **Local Visual Alerts (User Toast):** The system raises native Windows notifications directly connected to *Session 0* to notify the end user that a corporate installation is taking place.
+- **Internationalization and Setup Assistant:** Configurable setup on first boot to route your `Share Network` and native multi-language support.
 
-## ⚙️ Requisitos Previos
+## ⚙️ Prerequisites
 
-- Entorno **Windows** (Preferiblemente Windows 10 / 11 / Server 2016+).
-- Máquina conectada a un Dominio de **Active Directory** con privilegios administrativos (Domain Admin para la creación de GPOs).
-- Herramientas RSAT de Active Directory instaladas localmente (el programa las verificará y te guiará para instalarlas si te faltan).
-- **Node.js** (solo para modo desarrollador/compilación).
+- **Windows** Environment (Preferably Windows 10 / 11 / Server 2016+).
+- Machine connected to an **Active Directory** Domain with administrative privileges (Domain Admin for GPO creation).
+- Active Directory RSAT tools installed locally (the program will check for them and guide you to install them if missing).
+- **Node.js** (only for developer/build mode).
 
-## 🛠️ Instalación y Compilación Local
+## 🛠️ Local Installation and Build
 
-Si deseas correr la aplicación nativamente desde el código fuente o compilar tu propio ejecutable:
+If you want to run the application natively from the source code or build your own executable:
 
-1. Clona el repositorio e instala las dependencias:
+1. Clone the repository and install the dependencies:
    ```bash
    git clone https://github.com/gpandres/ActiveDirectoryDeployManager
    cd ActiveDirectoryDeployManager
    npm install
    ```
 
-2. Ejecuta la aplicación en modo desarrollo:
+2. Run the application in development mode:
    ```bash
    npm start
    ```
 
-3. Compila a ejecutable:
+3. Build the executable:
    ```bash
    npm run build
    ```
-   *(También puedes utilizar `npm run build:portable` si configuraste webpack/electron-builder).*
+   *(You can also use `npm run build:portable` if you configured webpack/electron-builder).*
 
-## 📖 Arquitectura y Cómo Funciona
+## 📖 Architecture and How It Works
 
-1. Seleccionas un `.EXE` o `.MSI` local y rellenas su plantilla.
-2. AppDeploy copia el instalador a tu ruta compartida (`\\Servidor\Share`).
-3. Se autogenera un `install.ps1` maestro y se inyecta en la GPO.
-4. El AD asocia el script a los ordenadores de la OU.
-5. Al reiniciar los equipos, evalúan el `install.ps1` y ejecutan tu despliegue de forma distribuida en bloque.
+1. You select a local `.EXE` or `.MSI` and fill out its template.
+2. AppDeploy copies the installer to your shared path (`\\Server\Share`).
+3. A master `install.ps1` is auto-generated and injected into the GPO.
+4. AD links the script to the computers in the OU.
+5. Upon rebooting, the computers evaluate the `install.ps1` and execute your deployment in a distributed batch manner.
 
 ---
 
-> AppDeploy Manager ha sido construido utilizando **Electron.js** acoplado al subsistema nativo de terminal de PowerShell. No posee integraciones Cloud, todo sucede en control total de tus redes internas.
+> AppDeploy Manager was built using **Electron.js** coupled with the native PowerShell terminal subsystem. It has no Cloud integrations; everything happens under the full control of your internal networks.
