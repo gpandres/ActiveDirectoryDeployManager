@@ -275,6 +275,9 @@ const FALLBACK_EN = {
     rsatMissing: "RSAT GPMC is not available. Cannot load GPOs.",
     empty: "No GPOs found in domain.",
     createdByApp: "Created by AppDeploy",
+    filterAll: "All GPOs",
+    filterAppOnly: "AppDeploy only",
+    emptyFiltered: "No GPOs created by AppDeploy found.",
     errorConnecting: "Error connecting to AD:",
     id: "ID (GUID)",
     modified: "Modified",
@@ -311,6 +314,8 @@ const FALLBACK_EN = {
     removeBtn: "Remove",
     appAssignedSuccess: "App assigned to OU",
     appUnassignedSuccess: "App unassigned",
+    gpoLinkFailed: "Failed to link GPO to OU",
+    gpoUnlinkFailed: "Failed to unlink GPO from OU",
     refresh: "Refresh"
   },
   deployments: {
@@ -651,6 +656,9 @@ const DEFAULT_ES = {
     rsatMissing: "RSAT GPMC no está disponible. No se pueden cargar GPOs.",
     empty: "No se encontraron GPOs en el dominio.",
     createdByApp: "Creada por AppDeploy",
+    filterAll: "Todas las GPOs",
+    filterAppOnly: "Solo AppDeploy",
+    emptyFiltered: "No se encontraron GPOs creadas por AppDeploy.",
     errorConnecting: "Error conectando con AD:",
     id: "ID (GUID)",
     modified: "Modificación",
@@ -687,6 +695,8 @@ const DEFAULT_ES = {
     removeBtn: "Quitar",
     appAssignedSuccess: "App asignada a la UO",
     appUnassignedSuccess: "App desasignada",
+    gpoLinkFailed: "Error al vincular la GPO a la UO",
+    gpoUnlinkFailed: "Error al desvincular la GPO de la UO",
     refresh: "Actualizar"
   },
   deployments: {

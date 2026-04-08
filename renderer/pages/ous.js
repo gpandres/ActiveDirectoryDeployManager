@@ -177,6 +177,16 @@ const OUsPage = {
 
     try {
       const app = await window.api.apps.get(appId);
+
+      // Link GPO to OU in Active Directory if the app has a GPO
+      if (app.gpoName) {
+        const linkResult = await window.api.ad.linkGPOtoOU(app.gpoName, this.selectedOU);
+        if (!linkResult.success) {
+          App.toast(t('ous.gpoLinkFailed') + ': ' + linkResult.error, 'error');
+          return;
+        }
+      }
+
       const ous = app.assignedOUs || [];
       ous.push(this.selectedOU);
       await window.api.apps.update(appId, { assignedOUs: ous });
@@ -190,6 +200,16 @@ const OUsPage = {
   async unassignApp(appId, ouDN) {
     try {
       const app = await window.api.apps.get(appId);
+
+      // Unlink GPO from OU in Active Directory if the app has a GPO
+      if (app.gpoName) {
+        const unlinkResult = await window.api.ad.unlinkGPOfromOU(app.gpoName, ouDN);
+        if (!unlinkResult.success) {
+          App.toast(t('ous.gpoUnlinkFailed') + ': ' + unlinkResult.error, 'error');
+          return;
+        }
+      }
+
       const ous = (app.assignedOUs || []).filter(ou => ou !== ouDN);
       await window.api.apps.update(appId, { assignedOUs: ous });
       App.toast(t('ous.appUnassignedSuccess'), 'success');

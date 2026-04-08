@@ -1,5 +1,6 @@
 const GposPage = {
   gposCache: null,
+  filterAppOnly: true,
 
   async render(container) {
     container.innerHTML = `
@@ -8,10 +9,19 @@ const GposPage = {
           <h1 class="page-title">${t('gpos.title')}</h1>
           <p class="page-subtitle">${t('gpos.subtitle')}</p>
         </div>
-        <button class="btn btn-primary" id="btn-refresh-gpos">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 1 0 2.13-5.83L2 8"/></svg>
-          ${t('gpos.refresh')}
-        </button>
+        <div style="display: flex; align-items: center; gap: 16px;">
+          <label class="gpo-filter-toggle" style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;">
+            <span style="font-size: 13px; color: var(--text-muted);" id="gpo-filter-label">${t('gpos.filterAll')}</span>
+            <div class="gpo-switch" id="gpo-filter-switch">
+              <input type="checkbox" id="gpo-filter-checkbox" ${this.filterAppOnly ? 'checked' : ''}>
+              <span class="gpo-switch-slider"></span>
+            </div>
+          </label>
+          <button class="btn btn-primary" id="btn-refresh-gpos">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 1 0 2.13-5.83L2 8"/></svg>
+            ${t('gpos.refresh')}
+          </button>
+        </div>
       </div>
 
       ${App.rsatWarningHTML()}
@@ -45,6 +55,13 @@ const GposPage = {
       this.loadGPOs();
     });
 
+    document.getElementById('gpo-filter-checkbox').addEventListener('change', (e) => {
+      this.filterAppOnly = e.target.checked;
+      const label = document.getElementById('gpo-filter-label');
+      label.textContent = this.filterAppOnly ? t('gpos.filterAppOnly') : t('gpos.filterAll');
+      this.loadGPOs();
+    });
+
     if (App.rsatAvailable && !App.rsatMissingGPMC) {
       await this.loadGPOs();
     } else {
@@ -67,12 +84,16 @@ const GposPage = {
         this.gposCache = result.data.sort((a, b) => a.DisplayName.localeCompare(b.DisplayName));
       }
 
-      if (this.gposCache.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 40px;">${t('gpos.empty')}</td></tr>`;
+      const displayList = this.filterAppOnly
+        ? this.gposCache.filter(g => g.DisplayName.startsWith('Deploy_'))
+        : this.gposCache;
+
+      if (displayList.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 40px;">${this.filterAppOnly ? t('gpos.emptyFiltered') : t('gpos.empty')}</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = this.gposCache.map(g => `
+      tbody.innerHTML = displayList.map(g => `
         <tr style="border-bottom: 1px solid var(--border-color); transition: background 0.2s;">
           <td style="padding: 16px;">
             <div style="font-weight: 500; display:flex; align-items:center; gap:8px;">
