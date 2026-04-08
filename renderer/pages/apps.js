@@ -68,8 +68,8 @@ const AppsPage = {
     const templateInfo = templates.find(t => t.id === app.template) || { name: app.template };
     const isDeployed = app.deployed !== false && app.deployedPath;
     return `
-      <div class="app-card" data-id="${app.id}">
-        <input type="checkbox" class="checkbox-select" data-id="${app.id}" onchange="AppsPage.toggleSelect('${app.id}', this.checked)">
+      <div class="app-card" data-id="${app.id}" onclick="AppsPage.showAppDetail('${app.id}')" style="cursor:pointer;">
+        <input type="checkbox" class="checkbox-select" data-id="${app.id}" onchange="AppsPage.toggleSelect('${app.id}', this.checked)" onclick="event.stopPropagation()">
         <div class="app-card-header">
           <div>
             <div class="app-card-name">${this.esc(app.name)}</div>
@@ -84,7 +84,7 @@ const AppsPage = {
           <span class="badge badge-info">v${this.esc(app.version || '1.0.0')}</span>
           ${app.notifyUser ? '<span class="badge badge-warning">🔔</span>' : ''}
         </div>
-        <div class="app-card-actions">
+        <div class="app-card-actions" onclick="event.stopPropagation()">
           <button class="btn btn-sm btn-secondary" onclick="AppsPage.previewScript('${app.id}')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             ${t('apps.script')}
@@ -110,6 +110,105 @@ const AppsPage = {
         </div>
       </div>
     `;
+  },
+
+  // ─── Detail Modal ──────────────────────────────────
+  async showAppDetail(id) {
+    const app = await window.api.apps.get(id);
+    if (!app) return;
+
+    const templates = await window.api.scripts.getTemplates();
+    const templateInfo = templates.find(t => t.id === app.template) || { name: app.template };
+    const isDeployed = app.deployed !== false && app.deployedPath;
+
+    const row = (label, value) => value ? `
+      <div style="display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border-color);">
+        <span style="color:var(--text-muted); font-size:13px;">${label}</span>
+        <span style="color:var(--text-primary); font-size:13px; font-weight:500; text-align:right; max-width:60%; word-break:break-all;">${value}</span>
+      </div>` : '';
+
+    const ousHtml = app.assignedOUs && app.assignedOUs.length > 0
+      ? app.assignedOUs.map(ou => `<div style="font-size:12px; color:var(--text-secondary); padding:4px 8px; background:var(--bg-tertiary); border-radius:4px; margin-top:4px; word-break:break-all;">${this.esc(ou)}</div>`).join('')
+      : `<span style="color:var(--text-muted); font-size:13px;">${t('apps.detailNoOUs')}</span>`;
+
+    const paramsHtml = app.customParams && Object.keys(app.customParams).length > 0
+      ? Object.entries(app.customParams).map(([k, v]) => row(this.esc(k), this.esc(String(v)))).join('')
+      : '';
+
+    const body = `
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <!-- Header -->
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div style="width:48px; height:48px; border-radius:12px; background:var(--accent-primary-dim); display:flex; align-items:center; justify-content:center;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          </div>
+          <div>
+            <div style="font-size:18px; font-weight:700; color:var(--text-primary);">${this.esc(app.name)}</div>
+            <div style="font-size:13px; color:var(--text-muted);">${this.esc(templateInfo.name)}</div>
+          </div>
+        </div>
+
+        <!-- Status badges -->
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          <span class="badge badge-primary">${this.esc(app.installerType?.toUpperCase() || 'EXE')}</span>
+          <span class="badge badge-info">v${this.esc(app.version || '1.0.0')}</span>
+          ${isDeployed ? `<span class="badge badge-success">${t('apps.deployedBadge')}</span>` : `<span class="badge badge-neutral">${t('apps.detailNotDeployed')}</span>`}
+          ${app.gpoName ? `<span class="badge badge-info">${this.esc(app.gpoName)}</span>` : `<span class="badge badge-neutral">${t('apps.noGpoBadge')}</span>`}
+          ${app.notifyUser ? `<span class="badge badge-warning">${t('apps.detailNotifyEnabled')}</span>` : ''}
+        </div>
+
+        <!-- General Info -->
+        <div class="card" style="padding:12px 16px; margin:0;">
+          <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionGeneral')}</div>
+          ${row(t('apps.detailTemplate'), this.esc(templateInfo.name))}
+          ${row(t('apps.detailInstallerType'), this.esc(app.installerType?.toUpperCase() || 'EXE'))}
+          ${row(t('apps.detailSilentArgs'), app.silentArgs ? '<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">' + this.esc(app.silentArgs) + '</code>' : '-')}
+          ${row(t('apps.detailVersion'), this.esc(app.version || '1.0.0'))}
+          ${row(t('apps.detailNotifyUser'), app.notifyUser ? '&#10003;' : '&#10007;')}
+        </div>
+
+        <!-- Paths -->
+        <div class="card" style="padding:12px 16px; margin:0;">
+          <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionPaths')}</div>
+          ${row(t('apps.detailInstaller'), app.installerPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(app.installerPath) + '</span>' : '-')}
+          ${app.configXmlPath ? row(t('apps.detailConfigXml'), '<span style="font-family:monospace; font-size:12px;">' + this.esc(app.configXmlPath) + '</span>') : ''}
+          ${row(t('apps.detailDeployPath'), app.deployedPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(app.deployedPath) + '</span>' : '-')}
+          ${app.lastDeployHash ? row(t('apps.detailHash'), '<span style="font-family:monospace; font-size:11px;">' + this.esc(app.lastDeployHash.substring(0, 16)) + '...</span>') : ''}
+        </div>
+
+        <!-- GPO & OUs -->
+        <div class="card" style="padding:12px 16px; margin:0;">
+          <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionTargeting')}</div>
+          ${row(t('apps.detailGpo'), app.gpoName ? this.esc(app.gpoName) : '-')}
+          <div style="padding:10px 0; border-bottom:1px solid var(--border-color);">
+            <span style="color:var(--text-muted); font-size:13px;">${t('apps.detailAssignedOUs')}</span>
+            <div style="margin-top:6px;">${ousHtml}</div>
+          </div>
+        </div>
+
+        ${paramsHtml ? `
+        <!-- Custom Parameters -->
+        <div class="card" style="padding:12px 16px; margin:0;">
+          <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionParams')}</div>
+          ${paramsHtml}
+        </div>
+        ` : ''}
+
+        <!-- Timestamps -->
+        <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-muted); padding-top:4px;">
+          <span>${t('apps.detailCreated')}: ${app.createdAt ? new Date(app.createdAt).toLocaleString() : '-'}</span>
+          <span>${t('apps.detailUpdated')}: ${app.updatedAt ? new Date(app.updatedAt).toLocaleString() : '-'}</span>
+        </div>
+      </div>
+    `;
+
+    App.openModal(t('apps.detailTitle'), body, `
+      <button class="btn btn-secondary" onclick="App.closeModal()">${t('common.close')}</button>
+      <button class="btn btn-secondary" onclick="App.closeModal(); AppsPage.editApp('${app.id}')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        ${t('apps.edit')}
+      </button>
+    `);
   },
 
   // ─── Selection ─────────────────────────────────────
@@ -595,6 +694,17 @@ const AppsPage = {
   async finishWizard(state, isEdit, existingApp) {
     if (!state.name.trim()) {
       App.toast(t('apps.nameRequired'), 'warning');
+      return;
+    }
+
+    // Check for duplicate name
+    const allApps = await window.api.apps.getAll();
+    const duplicate = allApps.find(a =>
+      a.name.toLowerCase() === state.name.trim().toLowerCase() &&
+      (!isEdit || a.id !== existingApp?.id)
+    );
+    if (duplicate) {
+      App.toast(t('apps.nameDuplicate').replace('{name}', state.name.trim()), 'error');
       return;
     }
 
