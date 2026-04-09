@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('api', {
     update: (id, data) => ipcRenderer.invoke('apps:update', id, data),
     delete: (id, deleteFiles) => ipcRenderer.invoke('apps:delete', id, deleteFiles),
     bulkAssignGPO: (ids, gpoName) => ipcRenderer.invoke('apps:bulkAssignGPO', ids, gpoName),
+    applyAssignmentPlan: (plan) => ipcRenderer.invoke('apps:applyAssignmentPlan', plan),
     getInstallerVersion: (filePath) => ipcRenderer.invoke('apps:getInstallerVersion', filePath),
     computeHash: (filePath) => ipcRenderer.invoke('apps:computeHash', filePath)
   },

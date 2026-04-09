@@ -1490,3 +1490,405 @@ tr:hover td { background: rgba(108, 99, 255, 0.03); }
   color: var(--text-primary);
 }
 
+/* ═══════════════════════════════════════════════════════
+   OUs Page — Assignment-centric redesign
+   ═══════════════════════════════════════════════════════ */
+
+/* View toggle */
+.view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-card);
+}
+.view-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.view-toggle-btn:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+.view-toggle-btn.active {
+  background: var(--accent-primary-dim);
+  color: var(--accent-primary);
+  font-weight: 600;
+}
+
+/* Stats bar */
+.ous-stats-bar {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+.stat-pill-value {
+  font-weight: 700;
+  color: var(--accent-primary);
+  font-size: 15px;
+}
+.stat-pill-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Layout: tree + panel */
+.ous-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.ous-tree-card {
+  flex: 0 0 340px;
+  min-width: 280px;
+  max-height: calc(100vh - 280px);
+  overflow-y: auto;
+}
+.ous-panel-card {
+  flex: 1;
+  min-width: 0;
+  max-height: calc(100vh - 280px);
+  overflow-y: auto;
+}
+
+/* Search box */
+.ous-search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0 10px;
+  margin-top: 8px;
+}
+.ous-search-box svg { flex-shrink: 0; color: var(--text-muted); }
+.ous-search-box .form-input {
+  background: transparent;
+  border: none;
+  padding: 8px 0;
+  flex: 1;
+}
+.ous-search-box .form-input:focus { outline: none; box-shadow: none; }
+
+/* Tree enhancements */
+.tree-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.tree-node:hover { background: var(--bg-card-hover); }
+.tree-node.selected {
+  background: var(--accent-primary-dim);
+  color: var(--accent-primary);
+  font-weight: 600;
+}
+.tree-node.has-assignments .tree-label {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.tree-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--accent-primary);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* Panel header */
+.panel-header-sub {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-top: 4px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* Bulk action bar */
+.bulk-actions-bar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+}
+
+/* Assignment list rows */
+.assignment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.assignment-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.assignment-row:hover:not(.is-disabled) {
+  background: var(--bg-card-hover);
+  border-color: var(--accent-primary);
+}
+.assignment-row.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.assignment-app-info { flex: 1; min-width: 0; }
+.assignment-app-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+.assignment-app-meta {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+/* Checkbox states */
+.assignment-checkbox {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border-color);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--bg-tertiary);
+  transition: all 0.15s;
+  color: white;
+}
+.assignment-checkbox.state-all {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+.assignment-checkbox.state-some {
+  background: var(--accent-primary-dim);
+  border-color: var(--accent-primary);
+}
+.checkbox-dash {
+  width: 10px;
+  height: 2px;
+  background: var(--accent-primary);
+  border-radius: 1px;
+}
+.assignment-checkbox.pending {
+  box-shadow: 0 0 0 2px var(--accent-warning, #f5a623);
+}
+.assignment-checkbox.disabled {
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+  opacity: 0.4;
+}
+
+/* Badges */
+.badge-pending {
+  background: #f5a62333;
+  color: #f5a623;
+  border: 1px solid #f5a623;
+}
+
+/* Pending changes floating bar */
+.ous-pending-bar {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-card);
+  border: 1px solid var(--accent-primary);
+  border-radius: 12px;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+  min-width: 400px;
+}
+.ous-pending-bar.hidden { display: none; }
+.pending-bar-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pending-bar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Context menu */
+.ctx-menu {
+  position: fixed;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  z-index: 200;
+  min-width: 180px;
+}
+.ctx-item {
+  padding: 8px 12px;
+  font-size: 13px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+.ctx-item:hover {
+  background: var(--accent-primary-dim);
+  color: var(--accent-primary);
+}
+
+/* Alert */
+.alert {
+  padding: 12px 14px;
+  border-radius: 6px;
+  border-left: 3px solid;
+  background: var(--bg-tertiary);
+}
+.alert-warning {
+  border-color: #f5a623;
+  color: var(--text-primary);
+}
+
+/* Matrix view */
+.matrix-search-bar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.matrix-search-bar .ous-search-box {
+  flex: 1;
+  margin-top: 0;
+}
+.matrix-wrapper {
+  overflow: auto;
+  max-height: calc(100vh - 320px);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-card);
+}
+.matrix-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.matrix-table th,
+.matrix-table td {
+  border: 1px solid var(--border-color);
+  padding: 0;
+}
+.matrix-row-head,
+.matrix-row-head-spacer {
+  position: sticky;
+  left: 0;
+  background: var(--bg-card);
+  z-index: 2;
+  padding: 10px 14px;
+  text-align: left;
+  min-width: 220px;
+}
+.matrix-row-head-spacer {
+  background: var(--bg-tertiary);
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.matrix-col-head {
+  background: var(--bg-tertiary);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 120px;
+  min-width: 40px;
+  max-width: 40px;
+  vertical-align: bottom;
+}
+.matrix-col-head-inner {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  padding: 8px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  text-align: left;
+}
+.matrix-app-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.matrix-app-gpo {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.matrix-cell {
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.matrix-cell:hover:not(.is-disabled) {
+  background: var(--bg-card-hover);
+}
+.matrix-cell.is-disabled {
+  background: repeating-linear-gradient(45deg, transparent, transparent 4px, var(--bg-tertiary) 4px, var(--bg-tertiary) 8px);
+  cursor: not-allowed;
+}
+.matrix-cell .assignment-checkbox {
+  margin: 8px auto;
+}
+
+.hidden { display: none !important; }

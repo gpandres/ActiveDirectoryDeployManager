@@ -173,6 +173,76 @@ const appService = {
     return { success: true, updated };
   },
 
+  // Apply an assignment plan in a single call.
+  // plan = { toAssign: [{ appId, ouDN }], toUnassign: [{ appId, ouDN }] }
+  // Calls AD link/unlink per pair and updates each app's assignedOUs
+  // atomically based on the actual AD result (only persists pairs that
+  // AD confirms).
+  async applyAssignmentPlan(plan) {
+    const adService = require('./ad-service');
+    const toAssign = Array.isArray(plan?.toAssign) ? plan.toAssign : [];
+    const toUnassign = Array.isArray(plan?.toUnassign) ? plan.toUnassign : [];
+
+    const results = {
+      success: true,
+      assigned: [],
+      unassigned: [],
+      failures: []
+    };
+
+    // Load once, mutate, save once at the end
+    const apps = loadApps();
+    const byId = new Map(apps.map(a => [a.id, a]));
+
+    // Unassignments first — reduces chance of unique-link conflicts
+    for (const { appId, ouDN } of toUnassign) {
+      const app = byId.get(appId);
+      if (!app) {
+        results.failures.push({ action: 'unassign', appId, ouDN, error: 'App not found' });
+        continue;
+      }
+      if (app.gpoName) {
+        const adResult = await adService.unlinkGPOfromOU(app.gpoName, ouDN);
+        if (!adResult.success) {
+          results.success = false;
+          results.failures.push({ action: 'unassign', appId, ouDN, appName: app.name, error: adResult.error });
+          continue;
+        }
+      }
+      app.assignedOUs = (app.assignedOUs || []).filter(dn => dn !== ouDN);
+      app.updatedAt = new Date().toISOString();
+      results.unassigned.push({ appId, ouDN });
+    }
+
+    for (const { appId, ouDN } of toAssign) {
+      const app = byId.get(appId);
+      if (!app) {
+        results.failures.push({ action: 'assign', appId, ouDN, error: 'App not found' });
+        continue;
+      }
+      if (app.gpoName) {
+        const adResult = await adService.linkGPOtoOU(app.gpoName, ouDN);
+        if (!adResult.success) {
+          results.success = false;
+          results.failures.push({ action: 'assign', appId, ouDN, appName: app.name, error: adResult.error });
+          continue;
+        }
+      } else {
+        results.failures.push({ action: 'assign', appId, ouDN, appName: app.name, error: 'App has no GPO' });
+        results.success = false;
+        continue;
+      }
+      const ous = new Set(app.assignedOUs || []);
+      ous.add(ouDN);
+      app.assignedOUs = Array.from(ous);
+      app.updatedAt = new Date().toISOString();
+      results.assigned.push({ appId, ouDN });
+    }
+
+    saveApps(apps);
+    return results;
+  },
+
   getInstallerVersion(filePath) {
     return new Promise((resolve) => {
       try {

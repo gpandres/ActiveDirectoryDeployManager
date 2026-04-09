@@ -123,6 +123,7 @@ app.whenReady().then(() => {
   ipcMain.handle('apps:update', (_, id, data) => appService.update(id, data));
   ipcMain.handle('apps:delete', (_, id, deleteFiles) => appService.remove(id, deleteFiles));
   ipcMain.handle('apps:bulkAssignGPO', (_, ids, gpoName) => appService.bulkAssignGPO(ids, gpoName));
+  ipcMain.handle('apps:applyAssignmentPlan', (_, plan) => appService.applyAssignmentPlan(plan));
   ipcMain.handle('apps:getInstallerVersion', (_, filePath) => appService.getInstallerVersion(filePath));
   ipcMain.handle('apps:computeHash', (_, filePath) => ({ hash: appService.computeFileHash(filePath) }));
 
