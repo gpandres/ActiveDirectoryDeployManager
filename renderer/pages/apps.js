@@ -116,6 +116,27 @@ const AppsPage = {
     `;
   },
 
+  // ─── Helpers ───────────────────────────────────────
+  // Returns the .exe/.msi path inside the app's share folder, or null if
+  // the app isn't deployed / no installer is present on the share.
+  async resolveSharedInstaller(appName) {
+    try {
+      if (!appName) return null;
+      const result = await window.api.files.getContents(appName);
+      if (!result || !result.success || !Array.isArray(result.data)) return null;
+      const installer = result.data.find(f =>
+        f.extension === '.exe' || f.extension === '.msi'
+      );
+      if (!installer) return null;
+      const config = await window.api.config.get();
+      if (!config || !config.networkSharePath) return null;
+      const base = config.networkSharePath.replace(/[\\/]+$/, '');
+      return base + '\\' + appName + '\\' + installer.name;
+    } catch (e) {
+      return null;
+    }
+  },
+
   // ─── Detail Modal ──────────────────────────────────
   async showAppDetail(id) {
     const app = await window.api.apps.get(id);
@@ -124,6 +145,10 @@ const AppsPage = {
     const templates = await window.api.scripts.getTemplates();
     const templateInfo = templates.find(t => t.id === app.template) || { name: app.template };
     const isDeployed = app.deployed !== false && app.deployedPath;
+
+    // Prefer the share location for the installer (where it actually lives now)
+    const sharedInstaller = await this.resolveSharedInstaller(app.name);
+    const displayInstallerPath = sharedInstaller || app.installerPath;
 
     const row = (label, value) => value ? `
       <div style="display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border-color);">
@@ -179,7 +204,7 @@ const AppsPage = {
         <!-- Paths -->
         <div class="card" style="padding:12px 16px; margin:0;">
           <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionPaths')}</div>
-          ${row(t('apps.detailInstaller'), app.installerPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(app.installerPath) + '</span>' : '-')}
+          ${row(t('apps.detailInstaller'), displayInstallerPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(displayInstallerPath) + '</span>' : '-')}
           ${app.configXmlPath ? row(t('apps.detailConfigXml'), '<span style="font-family:monospace; font-size:12px;">' + this.esc(app.configXmlPath) + '</span>') : ''}
           ${row(t('apps.detailDeployPath'), app.deployedPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(app.deployedPath) + '</span>' : '-')}
           ${app.lastDeployHash ? row(t('apps.detailHash'), '<span style="font-family:monospace; font-size:11px;">' + this.esc(app.lastDeployHash.substring(0, 16)) + '...</span>') : ''}
@@ -537,13 +562,21 @@ const AppsPage = {
     const templates = await window.api.scripts.getTemplates();
     const isEdit = !!existingApp;
 
+    // When editing, prefer the installer path on the share (where it actually
+    // lives now) instead of the original local path used at creation time.
+    let initialInstallerPath = existingApp?.installerPath || '';
+    if (existingApp) {
+      const sharedPath = await this.resolveSharedInstaller(existingApp.name);
+      if (sharedPath) initialInstallerPath = sharedPath;
+    }
+
     // State
     const state = {
       step: 1,
       template: existingApp?.template || '',
       name: existingApp?.name || '',
       silentArgs: existingApp?.silentArgs || '/S',
-      installerPath: existingApp?.installerPath || '',
+      installerPath: initialInstallerPath,
       configXmlPath: existingApp?.configXmlPath || '',
       customParams: existingApp?.customParams || {},
       ouDN: existingApp?.ouDN || (existingApp?.assignedOUs && existingApp.assignedOUs[0]) || '',
