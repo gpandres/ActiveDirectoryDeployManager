@@ -1,6 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { exec } = require('child_process');
+const os = require('os');
 
 let appsFilePath = null;
 
@@ -12,7 +14,57 @@ function getAppsPath() {
   return appsFilePath;
 }
 
+// ─── Share-backed storage (Option A: share is source of truth) ────────
+// Local userData copy acts as a cache so the app still works offline.
+function getShareMetaPath(filename) {
+  try {
+    const configService = require('./config');
+    const cfg = configService.getConfig();
+    if (!cfg || !cfg.networkSharePath) return null;
+    return path.join(cfg.networkSharePath, '.appdeploy-meta', filename);
+  } catch (e) {
+    return null;
+  }
+}
+
+function tryReadShare(filename) {
+  const sharePath = getShareMetaPath(filename);
+  if (!sharePath) return null;
+  try {
+    if (fs.existsSync(sharePath)) {
+      return JSON.parse(fs.readFileSync(sharePath, 'utf-8'));
+    }
+  } catch (err) {
+    console.warn(`[share] Could not read ${filename} from share:`, err.message);
+  }
+  return null;
+}
+
+function tryWriteShare(filename, data) {
+  const sharePath = getShareMetaPath(filename);
+  if (!sharePath) return false;
+  try {
+    const dir = path.dirname(sharePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(sharePath, JSON.stringify(data, null, 2), 'utf-8');
+    return true;
+  } catch (err) {
+    console.warn(`[share] Could not write ${filename} to share:`, err.message);
+    return false;
+  }
+}
+
 function loadApps() {
+  // Share is authoritative — pull from there if available
+  const fromShare = tryReadShare('apps-config.json');
+  if (fromShare !== null) {
+    // Mirror to local cache for offline fallback
+    try {
+      fs.writeFileSync(getAppsPath(), JSON.stringify(fromShare, null, 2), 'utf-8');
+    } catch (e) {}
+    return fromShare;
+  }
+  // Fallback to local cache (offline or share not yet configured)
   try {
     const p = getAppsPath();
     if (fs.existsSync(p)) {
@@ -25,7 +77,10 @@ function loadApps() {
 }
 
 function saveApps(apps) {
+  // Always write local cache
   fs.writeFileSync(getAppsPath(), JSON.stringify(apps, null, 2), 'utf-8');
+  // Best-effort mirror to share
+  tryWriteShare('apps-config.json', apps);
 }
 
 function generateId() {
@@ -118,6 +173,83 @@ const appService = {
     return { success: true, updated };
   },
 
+  getInstallerVersion(filePath) {
+    return new Promise((resolve) => {
+      try {
+        if (!filePath || !fs.existsSync(filePath)) {
+          return resolve({ success: false, error: 'File not found' });
+        }
+        const ext = path.extname(filePath).toLowerCase();
+        let psCommand;
+
+        if (ext === '.exe') {
+          psCommand = `$v = (Get-Item -LiteralPath '${filePath.replace(/'/g, "''")}').VersionInfo; if ($v.ProductVersion) { Write-Output $v.ProductVersion } elseif ($v.FileVersion) { Write-Output $v.FileVersion } else { Write-Output '' }`;
+        } else if (ext === '.msi') {
+          psCommand = `
+            $msiPath = '${filePath.replace(/'/g, "''")}'
+            $installer = New-Object -ComObject WindowsInstaller.Installer
+            $db = $installer.GetType().InvokeMember('OpenDatabase','InvokeMethod',$null,$installer,@($msiPath,0))
+            $view = $db.GetType().InvokeMember('OpenView','InvokeMethod',$null,$db,@("SELECT Value FROM Property WHERE Property = 'ProductVersion'"))
+            $view.GetType().InvokeMember('Execute','InvokeMethod',$null,$view,$null) | Out-Null
+            $record = $view.GetType().InvokeMember('Fetch','InvokeMethod',$null,$view,$null)
+            if ($record) {
+              $ver = $record.GetType().InvokeMember('StringData','GetProperty',$null,$record,1)
+              Write-Output $ver
+            }
+            $view.GetType().InvokeMember('Close','InvokeMethod',$null,$view,$null) | Out-Null
+          `;
+        } else {
+          return resolve({ success: false, error: 'Unsupported file type' });
+        }
+
+        const tmpFile = path.join(os.tmpdir(), `ver_${Date.now()}_${Math.floor(Math.random()*1000)}.ps1`);
+        fs.writeFileSync(tmpFile, psCommand, { encoding: 'utf8' });
+        exec(`powershell -NoProfile -ExecutionPolicy Bypass -File "${tmpFile}"`, { maxBuffer: 1024 * 1024 }, (error, stdout) => {
+          try { fs.unlinkSync(tmpFile); } catch (e) {}
+          if (error) {
+            return resolve({ success: false, error: error.message });
+          }
+          const version = (stdout || '').trim();
+          if (!version) {
+            return resolve({ success: false, error: 'No version metadata found' });
+          }
+          resolve({ success: true, version });
+        });
+      } catch (err) {
+        resolve({ success: false, error: err.message });
+      }
+    });
+  },
+
+  cleanupTempFiles() {
+    // Sweep orphaned temp PS scripts (ad_script_*.ps1 and ver_*.ps1)
+    // created by runPowerShell() and getInstallerVersion().
+    // Only deletes files older than 60 seconds to avoid racing
+    // with a concurrent operation that's currently using the file.
+    try {
+      const tmpDir = os.tmpdir();
+      const minAgeMs = 60 * 1000;
+      const now = Date.now();
+      const patterns = [/^ad_script_\d+_\d+\.ps1$/, /^ver_\d+_\d+\.ps1$/];
+      const files = fs.readdirSync(tmpDir);
+      let removed = 0;
+      for (const file of files) {
+        if (!patterns.some(re => re.test(file))) continue;
+        const full = path.join(tmpDir, file);
+        try {
+          const stat = fs.statSync(full);
+          if (now - stat.mtimeMs >= minAgeMs) {
+            fs.unlinkSync(full);
+            removed++;
+          }
+        } catch (e) {}
+      }
+      return { success: true, removed };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
   computeFileHash(filePath) {
     try {
       if (!fs.existsSync(filePath)) return null;
@@ -155,9 +287,7 @@ const appService = {
       }
       if (data.bundles && Array.isArray(data.bundles)) {
         const bundleService = require('./bundle-service');
-        const { app } = require('electron');
-        const bundlesPath = path.join(app.getPath('userData'), 'bundles-config.json');
-        fs.writeFileSync(bundlesPath, JSON.stringify(data.bundles, null, 2), 'utf-8');
+        bundleService.replaceAll(data.bundles);
       }
       return { success: true };
     } catch (err) {

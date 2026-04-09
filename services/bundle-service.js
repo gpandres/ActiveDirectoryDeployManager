@@ -11,7 +11,55 @@ function getBundlesPath() {
   return bundlesFilePath;
 }
 
+// ─── Share-backed storage (Option A: share is source of truth) ────────
+function getShareMetaPath(filename) {
+  try {
+    const configService = require('./config');
+    const cfg = configService.getConfig();
+    if (!cfg || !cfg.networkSharePath) return null;
+    return path.join(cfg.networkSharePath, '.appdeploy-meta', filename);
+  } catch (e) {
+    return null;
+  }
+}
+
+function tryReadShare(filename) {
+  const sharePath = getShareMetaPath(filename);
+  if (!sharePath) return null;
+  try {
+    if (fs.existsSync(sharePath)) {
+      return JSON.parse(fs.readFileSync(sharePath, 'utf-8'));
+    }
+  } catch (err) {
+    console.warn(`[share] Could not read ${filename} from share:`, err.message);
+  }
+  return null;
+}
+
+function tryWriteShare(filename, data) {
+  const sharePath = getShareMetaPath(filename);
+  if (!sharePath) return false;
+  try {
+    const dir = path.dirname(sharePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(sharePath, JSON.stringify(data, null, 2), 'utf-8');
+    return true;
+  } catch (err) {
+    console.warn(`[share] Could not write ${filename} to share:`, err.message);
+    return false;
+  }
+}
+
 function loadBundles() {
+  // Share is authoritative
+  const fromShare = tryReadShare('bundles-config.json');
+  if (fromShare !== null) {
+    try {
+      fs.writeFileSync(getBundlesPath(), JSON.stringify(fromShare, null, 2), 'utf-8');
+    } catch (e) {}
+    return fromShare;
+  }
+  // Fallback to local cache
   try {
     const p = getBundlesPath();
     if (fs.existsSync(p)) {
@@ -25,6 +73,7 @@ function loadBundles() {
 
 function saveBundles(bundles) {
   fs.writeFileSync(getBundlesPath(), JSON.stringify(bundles, null, 2), 'utf-8');
+  tryWriteShare('bundles-config.json', bundles);
 }
 
 function generateId() {
@@ -76,6 +125,11 @@ const bundleService = {
     const bundles = loadBundles();
     const filtered = bundles.filter(b => b.id !== id);
     saveBundles(filtered);
+    return { success: true };
+  },
+
+  replaceAll(bundles) {
+    saveBundles(Array.isArray(bundles) ? bundles : []);
     return { success: true };
   },
 

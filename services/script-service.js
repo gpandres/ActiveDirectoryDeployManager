@@ -69,6 +69,9 @@ const scriptService = {
 
   async deployScript(appConfig) {
     try {
+      // Sweep orphaned temp PS scripts before each deploy
+      try { require('./app-service').cleanupTempFiles(); } catch (e) {}
+
       const config = configService.getConfig();
       const appFolder = path.join(config.networkSharePath, appConfig.name);
 

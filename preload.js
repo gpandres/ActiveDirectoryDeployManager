@@ -37,7 +37,9 @@ contextBridge.exposeInMainWorld('api', {
     create: (data) => ipcRenderer.invoke('apps:create', data),
     update: (id, data) => ipcRenderer.invoke('apps:update', id, data),
     delete: (id, deleteFiles) => ipcRenderer.invoke('apps:delete', id, deleteFiles),
-    bulkAssignGPO: (ids, gpoName) => ipcRenderer.invoke('apps:bulkAssignGPO', ids, gpoName)
+    bulkAssignGPO: (ids, gpoName) => ipcRenderer.invoke('apps:bulkAssignGPO', ids, gpoName),
+    getInstallerVersion: (filePath) => ipcRenderer.invoke('apps:getInstallerVersion', filePath),
+    computeHash: (filePath) => ipcRenderer.invoke('apps:computeHash', filePath)
   },
 
   // Scripts
