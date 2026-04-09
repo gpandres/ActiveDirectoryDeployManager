@@ -68,8 +68,8 @@ const AppsPage = {
     const templateInfo = templates.find(t => t.id === app.template) || { name: app.template };
     const isDeployed = app.deployed !== false && app.deployedPath;
     return `
-      <div class="app-card" data-id="${app.id}">
-        <input type="checkbox" class="checkbox-select" data-id="${app.id}" onchange="AppsPage.toggleSelect('${app.id}', this.checked)">
+      <div class="app-card" data-id="${app.id}" onclick="AppsPage.showAppDetail('${app.id}')" style="cursor:pointer;">
+        <input type="checkbox" class="checkbox-select" data-id="${app.id}" onchange="AppsPage.toggleSelect('${app.id}', this.checked)" onclick="event.stopPropagation()">
         <div class="app-card-header">
           <div>
             <div class="app-card-name">${this.esc(app.name)}</div>
@@ -84,12 +84,16 @@ const AppsPage = {
           <span class="badge badge-info">v${this.esc(app.version || '1.0.0')}</span>
           ${app.notifyUser ? '<span class="badge badge-warning">🔔</span>' : ''}
         </div>
-        <div class="app-card-actions">
+        <div class="app-card-actions" onclick="event.stopPropagation()">
           <button class="btn btn-sm btn-secondary" onclick="AppsPage.previewScript('${app.id}')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             ${t('apps.script')}
           </button>
           ${isDeployed ? `
+            <button class="btn btn-sm btn-primary" onclick="AppsPage.quickUpdate('${app.id}')" title="${t('apps.quickUpdateTitle')}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg>
+              ${t('apps.quickUpdate')}
+            </button>
             <button class="btn btn-sm btn-warning" onclick="AppsPage.disableDeploy('${app.id}')">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
               ${t('apps.disable')}
@@ -110,6 +114,392 @@ const AppsPage = {
         </div>
       </div>
     `;
+  },
+
+  // ─── Helpers ───────────────────────────────────────
+  // Returns the .exe/.msi path inside the app's share folder, or null if
+  // the app isn't deployed / no installer is present on the share.
+  async resolveSharedInstaller(appName) {
+    try {
+      if (!appName) return null;
+      const result = await window.api.files.getContents(appName);
+      if (!result || !result.success || !Array.isArray(result.data)) return null;
+      const installer = result.data.find(f =>
+        f.extension === '.exe' || f.extension === '.msi'
+      );
+      if (!installer) return null;
+      const config = await window.api.config.get();
+      if (!config || !config.networkSharePath) return null;
+      const base = config.networkSharePath.replace(/[\\/]+$/, '');
+      return base + '\\' + appName + '\\' + installer.name;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  // ─── Detail Modal ──────────────────────────────────
+  async showAppDetail(id) {
+    const app = await window.api.apps.get(id);
+    if (!app) return;
+
+    const templates = await window.api.scripts.getTemplates();
+    const templateInfo = templates.find(t => t.id === app.template) || { name: app.template };
+    const isDeployed = app.deployed !== false && app.deployedPath;
+
+    // Prefer the share location for the installer (where it actually lives now)
+    const sharedInstaller = await this.resolveSharedInstaller(app.name);
+    const displayInstallerPath = sharedInstaller || app.installerPath;
+
+    const row = (label, value) => value ? `
+      <div style="display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border-color);">
+        <span style="color:var(--text-muted); font-size:13px;">${label}</span>
+        <span style="color:var(--text-primary); font-size:13px; font-weight:500; text-align:right; max-width:60%; word-break:break-all;">${value}</span>
+      </div>` : '';
+
+    const ouNameFromDN = (dn) => {
+      const match = (dn || '').match(/^OU=([^,]+)/i);
+      return match ? match[1] : dn;
+    };
+
+    const ousHtml = app.assignedOUs && app.assignedOUs.length > 0
+      ? app.assignedOUs.map(ou => `<div style="font-size:12px; color:var(--text-secondary); padding:4px 8px; background:var(--bg-tertiary); border-radius:4px; margin-top:4px;" title="${this.esc(ou)}">${this.esc(ouNameFromDN(ou))}</div>`).join('')
+      : `<span style="color:var(--text-muted); font-size:13px;">${t('apps.detailNoOUs')}</span>`;
+
+    const paramsHtml = app.customParams && Object.keys(app.customParams).length > 0
+      ? Object.entries(app.customParams).map(([k, v]) => row(this.esc(k), this.esc(String(v)))).join('')
+      : '';
+
+    const body = `
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <!-- Header -->
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div style="width:48px; height:48px; border-radius:12px; background:var(--accent-primary-dim); display:flex; align-items:center; justify-content:center; font-size:26px;">
+            ${this.templateIcon(app.template)}
+          </div>
+          <div>
+            <div style="font-size:18px; font-weight:700; color:var(--text-primary);">${this.esc(app.name)}</div>
+            <div style="font-size:13px; color:var(--text-muted);">${this.esc(templateInfo.name)}</div>
+          </div>
+        </div>
+
+        <!-- Status badges -->
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          <span class="badge badge-primary">${this.esc(app.installerType?.toUpperCase() || 'EXE')}</span>
+          <span class="badge badge-info">v${this.esc(app.version || '1.0.0')}</span>
+          ${isDeployed ? `<span class="badge badge-success">${t('apps.deployedBadge')}</span>` : `<span class="badge badge-neutral">${t('apps.detailNotDeployed')}</span>`}
+          ${app.gpoName ? `<span class="badge badge-info">${this.esc(app.gpoName)}</span>` : `<span class="badge badge-neutral">${t('apps.noGpoBadge')}</span>`}
+          ${app.notifyUser ? `<span class="badge badge-warning">${t('apps.detailNotifyEnabled')}</span>` : ''}
+        </div>
+
+        <!-- General Info -->
+        <div class="card" style="padding:12px 16px; margin:0;">
+          <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionGeneral')}</div>
+          ${row(t('apps.detailTemplate'), this.esc(templateInfo.name))}
+          ${row(t('apps.detailInstallerType'), this.esc(app.installerType?.toUpperCase() || 'EXE'))}
+          ${row(t('apps.detailSilentArgs'), app.silentArgs ? '<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">' + this.esc(app.silentArgs) + '</code>' : '-')}
+          ${row(t('apps.detailVersion'), this.esc(app.version || '1.0.0'))}
+          ${row(t('apps.detailNotifyUser'), app.notifyUser ? '&#10003;' : '&#10007;')}
+        </div>
+
+        <!-- Paths -->
+        <div class="card" style="padding:12px 16px; margin:0;">
+          <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionPaths')}</div>
+          ${row(t('apps.detailInstaller'), displayInstallerPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(displayInstallerPath) + '</span>' : '-')}
+          ${app.configXmlPath ? row(t('apps.detailConfigXml'), '<span style="font-family:monospace; font-size:12px;">' + this.esc(app.configXmlPath) + '</span>') : ''}
+          ${row(t('apps.detailDeployPath'), app.deployedPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(app.deployedPath) + '</span>' : '-')}
+          ${app.lastDeployHash ? row(t('apps.detailHash'), '<span style="font-family:monospace; font-size:11px;">' + this.esc(app.lastDeployHash.substring(0, 16)) + '...</span>') : ''}
+        </div>
+
+        <!-- GPO & OUs -->
+        <div class="card" style="padding:12px 16px; margin:0;">
+          <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionTargeting')}</div>
+          ${row(t('apps.detailGpo'), app.gpoName ? this.esc(app.gpoName) : '-')}
+          <div style="padding:10px 0; border-bottom:1px solid var(--border-color);">
+            <span style="color:var(--text-muted); font-size:13px;">${t('apps.detailAssignedOUs')}</span>
+            <div style="margin-top:6px;">${ousHtml}</div>
+          </div>
+        </div>
+
+        ${paramsHtml ? `
+        <!-- Custom Parameters -->
+        <div class="card" style="padding:12px 16px; margin:0;">
+          <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionParams')}</div>
+          ${paramsHtml}
+        </div>
+        ` : ''}
+
+        ${app.versionHistory && app.versionHistory.length > 0 ? `
+        <!-- Version History -->
+        <div class="card" style="padding:12px 16px; margin:0;">
+          <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:8px;">${t('apps.detailSectionHistory')} (${app.versionHistory.length})</div>
+          <div style="display:flex; flex-direction:column; gap:6px; max-height:200px; overflow-y:auto;">
+            ${app.versionHistory.slice().reverse().map(h => `
+              <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:var(--bg-tertiary); border-radius:6px; font-size:12px;">
+                <div style="display:flex; flex-direction:column; gap:2px;">
+                  <span style="color:var(--text-primary); font-weight:600;">v${this.esc(h.version || '?')}</span>
+                  ${h.hash ? `<span style="font-family:monospace; font-size:10px; color:var(--text-muted);">${this.esc(h.hash.substring(0, 16))}...</span>` : ''}
+                </div>
+                <span style="color:var(--text-muted); font-size:11px;">${h.replacedAt ? new Date(h.replacedAt).toLocaleString() : ''}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        ` : ''}
+
+        <!-- Timestamps -->
+        <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-muted); padding-top:4px;">
+          <span>${t('apps.detailCreated')}: ${app.createdAt ? new Date(app.createdAt).toLocaleString() : '-'}</span>
+          <span>${t('apps.detailUpdated')}: ${app.updatedAt ? new Date(app.updatedAt).toLocaleString() : '-'}</span>
+        </div>
+      </div>
+    `;
+
+    App.openModal(t('apps.detailTitle'), body, `
+      <button class="btn btn-secondary" onclick="App.closeModal()">${t('common.close')}</button>
+      <button class="btn btn-secondary" onclick="App.closeModal(); AppsPage.editApp('${app.id}')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        ${t('apps.edit')}
+      </button>
+    `);
+  },
+
+  // ─── Quick Update ─────────────────────────────────
+  compareVersions(a, b) {
+    const pa = (a || '0').split('.').map(n => parseInt(n) || 0);
+    const pb = (b || '0').split('.').map(n => parseInt(n) || 0);
+    const len = Math.max(pa.length, pb.length);
+    for (let i = 0; i < len; i++) {
+      const na = pa[i] || 0;
+      const nb = pb[i] || 0;
+      if (na > nb) return 1;
+      if (na < nb) return -1;
+    }
+    return 0;
+  },
+
+  async quickUpdate(id) {
+    const app = await window.api.apps.get(id);
+    if (!app) return;
+
+    const templates = await window.api.scripts.getTemplates();
+    const templateInfo = templates.find(t => t.id === app.template) || { name: app.template };
+
+    // Local state for the quick update flow
+    const state = {
+      newInstallerPath: '',
+      newVersion: '',
+      newHash: '',
+      sameFile: false,
+      isDowngrade: false
+    };
+
+    const renderModal = () => {
+      const body = `
+        <div style="display:flex; flex-direction:column; gap:14px;">
+          <!-- Info banner -->
+          <div style="padding:12px; background:rgba(30,144,255,0.08); border:1px solid rgba(30,144,255,0.2); border-radius:8px;">
+            <p style="margin:0; color:var(--text-secondary); font-size:13px;">
+              ${t('apps.quickUpdateIntro')}
+            </p>
+          </div>
+
+          <!-- Header -->
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div style="width:44px; height:44px; border-radius:10px; background:var(--accent-primary-dim); display:flex; align-items:center; justify-content:center; font-size:24px;">
+              ${this.templateIcon(app.template)}
+            </div>
+            <div>
+              <div style="font-size:17px; font-weight:700; color:var(--text-primary);">${this.esc(app.name)}</div>
+              <div style="font-size:12px; color:var(--text-muted);">${this.esc(templateInfo.name)}</div>
+            </div>
+          </div>
+
+          <!-- Current state -->
+          <div class="card" style="padding:12px 16px; margin:0;">
+            <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:8px;">${t('apps.quickUpdateCurrent')}</div>
+            <div style="display:flex; justify-content:space-between; padding:6px 0; font-size:13px;">
+              <span style="color:var(--text-muted);">${t('apps.detailVersion')}</span>
+              <span style="color:var(--text-primary); font-weight:500;">v${this.esc(app.version || '1.0.0')}</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; padding:6px 0; font-size:13px;">
+              <span style="color:var(--text-muted);">${t('apps.detailInstaller')}</span>
+              <span style="font-family:monospace; font-size:11px; color:var(--text-primary); max-width:60%; text-align:right; word-break:break-all;">${this.esc(app.installerPath || '-')}</span>
+            </div>
+            ${app.lastDeployHash ? `
+            <div style="display:flex; justify-content:space-between; padding:6px 0; font-size:13px;">
+              <span style="color:var(--text-muted);">SHA-256</span>
+              <span style="font-family:monospace; font-size:11px; color:var(--text-muted);">${this.esc(app.lastDeployHash.substring(0, 16))}...</span>
+            </div>
+            ` : ''}
+          </div>
+
+          <!-- File picker -->
+          <div>
+            <label class="form-label">${t('apps.quickUpdatePickNew')}</label>
+            <div class="flex gap-sm">
+              <input class="form-input" id="qu-installer-path" value="${this.esc(state.newInstallerPath)}" placeholder="${t('apps.quickUpdatePickPlaceholder')}" readonly style="flex:1">
+              <button class="btn btn-secondary" id="qu-pick-btn">${t('apps.browse')}</button>
+            </div>
+          </div>
+
+          <!-- Comparison (only if new file picked) -->
+          ${state.newInstallerPath ? `
+            <div class="card" style="padding:12px 16px; margin:0;">
+              <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:8px;">${t('apps.quickUpdateComparison')}</div>
+              <div style="display:flex; align-items:center; justify-content:center; gap:16px; padding:10px; background:var(--bg-tertiary); border-radius:6px;">
+                <div style="text-align:center;">
+                  <div style="font-size:11px; color:var(--text-muted); margin-bottom:2px;">${t('apps.quickUpdateOldLabel')}</div>
+                  <div style="font-weight:700; color:var(--text-primary);">v${this.esc(app.version || '1.0.0')}</div>
+                </div>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                <div style="text-align:center;">
+                  <div style="font-size:11px; color:var(--text-muted); margin-bottom:2px;">${t('apps.quickUpdateNewLabel')}</div>
+                  <div style="font-weight:700; color:${state.isDowngrade ? 'var(--warning-color)' : 'var(--success-color, #10b981)'};">v${this.esc(state.newVersion || '?')}</div>
+                </div>
+              </div>
+              ${state.newHash ? `
+                <div style="display:flex; justify-content:space-between; padding:8px 0 0 0; font-size:11px; font-family:monospace; color:var(--text-muted);">
+                  <span>${this.esc((app.lastDeployHash || '').substring(0, 16))}...</span>
+                  <span>→</span>
+                  <span>${this.esc(state.newHash.substring(0, 16))}...</span>
+                </div>
+              ` : ''}
+            </div>
+
+            ${state.sameFile ? `
+              <div style="padding:12px; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); border-radius:8px;">
+                <p style="margin:0; color:var(--danger-color); font-size:13px; font-weight:500;">
+                  ⚠️ ${t('apps.quickUpdateSameFile')}
+                </p>
+              </div>
+            ` : ''}
+
+            ${state.isDowngrade && !state.sameFile ? `
+              <div style="padding:12px; background:rgba(251,191,36,0.08); border:1px solid rgba(251,191,36,0.3); border-radius:8px;">
+                <p style="margin:0; color:var(--warning-color); font-size:13px; font-weight:500;">
+                  ⚠️ ${t('apps.quickUpdateDowngradeWarn').replace('{old}', app.version || '1.0.0').replace('{new}', state.newVersion)}
+                </p>
+              </div>
+            ` : ''}
+          ` : ''}
+        </div>
+      `;
+
+      const canUpdate = state.newInstallerPath && !state.sameFile;
+      const footer = `
+        <button class="btn btn-secondary" onclick="App.closeModal()">${t('common.cancel')}</button>
+        <div style="flex:1"></div>
+        <button class="btn btn-success" id="qu-confirm-btn" ${canUpdate ? '' : 'disabled'}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          ${t('apps.quickUpdateConfirm')}
+        </button>
+      `;
+
+      App.openModal(t('apps.quickUpdateTitle'), body, footer);
+
+      document.getElementById('qu-pick-btn').addEventListener('click', async () => {
+        const file = await window.api.config.selectFile([{ name: 'Installers', extensions: ['exe', 'msi'] }]);
+        if (!file) return;
+
+        state.newInstallerPath = file;
+        state.newVersion = '';
+        state.newHash = '';
+        state.sameFile = false;
+        state.isDowngrade = false;
+
+        // Detect version
+        try {
+          const verResult = await window.api.apps.getInstallerVersion(file);
+          if (verResult && verResult.success && verResult.version) {
+            state.newVersion = verResult.version;
+            state.isDowngrade = this.compareVersions(verResult.version, app.version || '0') < 0;
+          }
+        } catch (e) {}
+
+        // Compute hash and compare
+        try {
+          const hashResult = await window.api.apps.computeHash(file);
+          if (hashResult && hashResult.hash) {
+            state.newHash = hashResult.hash;
+            if (app.lastDeployHash && app.lastDeployHash === hashResult.hash) {
+              state.sameFile = true;
+            }
+          }
+        } catch (e) {}
+
+        renderModal();
+      });
+
+      const confirmBtn = document.getElementById('qu-confirm-btn');
+      if (confirmBtn) {
+        confirmBtn.addEventListener('click', () => {
+          this.performQuickUpdate(app, state);
+        });
+      }
+    };
+
+    renderModal();
+  },
+
+  async performQuickUpdate(app, state) {
+    const confirmBtn = document.getElementById('qu-confirm-btn');
+    if (confirmBtn) {
+      confirmBtn.style.width = confirmBtn.offsetWidth + 'px';
+      confirmBtn.disabled = true;
+      confirmBtn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;margin-right:6px;"></span> ' + t('apps.deployingLoader');
+    }
+
+    try {
+      // 1. Push current version to history
+      const history = Array.isArray(app.versionHistory) ? [...app.versionHistory] : [];
+      history.push({
+        version: app.version || '1.0.0',
+        hash: app.lastDeployHash || '',
+        replacedAt: new Date().toISOString(),
+        replacedBy: 'quick-update'
+      });
+
+      // 2. Build updated app data
+      const newInstallerType = state.newInstallerPath.toLowerCase().endsWith('.msi') ? 'msi' : 'exe';
+      const updatedData = {
+        installerPath: state.newInstallerPath,
+        installerType: newInstallerType,
+        version: state.newVersion || app.version,
+        versionHistory: history
+      };
+
+      // 3. Update app record
+      await window.api.apps.update(app.id, updatedData);
+
+      // 4. Redeploy (copies new installer + regenerates install.ps1)
+      const fullAppData = { ...app, ...updatedData, id: app.id };
+      const deployResult = await window.api.scripts.deploy(fullAppData);
+
+      if (!deployResult.success) {
+        App.toast(`${t('apps.appSavedDeployError')} ${deployResult.error}`, 'error');
+        return;
+      }
+
+      // 5. Save new hash & deployedPath
+      await window.api.apps.update(app.id, {
+        deployed: true,
+        deployedPath: deployResult.path,
+        lastDeployHash: deployResult.hash || state.newHash
+      });
+
+      // 6. Activity log
+      await window.api.activity.add('app_quick_update', {
+        appName: app.name,
+        oldVersion: app.version,
+        newVersion: state.newVersion
+      });
+
+      App.toast(t('apps.quickUpdateSuccess').replace('{version}', state.newVersion || '?'), 'success');
+      App.closeModal();
+      App.navigate('apps');
+    } catch (err) {
+      App.toast('Error: ' + err.message, 'error');
+    }
   },
 
   // ─── Selection ─────────────────────────────────────
@@ -172,19 +562,28 @@ const AppsPage = {
     const templates = await window.api.scripts.getTemplates();
     const isEdit = !!existingApp;
 
+    // When editing, prefer the installer path on the share (where it actually
+    // lives now) instead of the original local path used at creation time.
+    let initialInstallerPath = existingApp?.installerPath || '';
+    if (existingApp) {
+      const sharedPath = await this.resolveSharedInstaller(existingApp.name);
+      if (sharedPath) initialInstallerPath = sharedPath;
+    }
+
     // State
     const state = {
       step: 1,
       template: existingApp?.template || '',
       name: existingApp?.name || '',
       silentArgs: existingApp?.silentArgs || '/S',
-      installerPath: existingApp?.installerPath || '',
+      installerPath: initialInstallerPath,
       configXmlPath: existingApp?.configXmlPath || '',
       customParams: existingApp?.customParams || {},
       ouDN: existingApp?.ouDN || (existingApp?.assignedOUs && existingApp.assignedOUs[0]) || '',
       gpoName: existingApp?.gpoName || '',
       createGPO: false,
       version: existingApp?.version || '1.0.0',
+      suggestedVersion: '',
       notifyUser: existingApp?.notifyUser || false
     };
 
@@ -289,9 +688,16 @@ const AppsPage = {
           ` : ''}
 
           <div style="display:flex;gap:12px">
-            <div class="form-group" style="flex:0 0 150px">
+            <div class="form-group" style="flex:0 0 220px">
               <label class="form-label">${t('apps.version')}</label>
               <input class="form-input" id="wiz-version" value="${state.version}" placeholder="1.0.0">
+              ${state.suggestedVersion && state.suggestedVersion !== state.version ? `
+                <div id="wiz-version-suggestion" style="margin-top:6px; display:inline-flex; align-items:center; gap:6px; padding:4px 10px; background:rgba(108,99,255,0.12); border:1px solid rgba(108,99,255,0.3); border-radius:20px; font-size:11px; cursor:pointer;" title="${t('apps.applySuggestedVersion')}">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" stroke-width="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                  <span style="color:var(--text-secondary);">${t('apps.suggestedVersion')}:</span>
+                  <strong style="color:var(--primary-color); font-family:monospace;">${this.esc(state.suggestedVersion)}</strong>
+                </div>
+              ` : ''}
             </div>
             <div class="form-group" style="flex:1;display:flex;align-items:end;padding-bottom:16px">
               <label class="checkbox-wrapper">
@@ -421,7 +827,7 @@ const AppsPage = {
     }
 
     if (deployBtn) {
-      deployBtn.addEventListener('click', () => this.finishWizard(state, isEdit, existingApp));
+      deployBtn.addEventListener('click', () => this.finishWizard(state, isEdit, existingApp, renderWizard));
     }
 
     // Step 2 events
@@ -432,18 +838,46 @@ const AppsPage = {
         const file = await window.api.config.selectFile([{ name: 'Instaladores', extensions: ['exe', 'msi', 'ps1'] }]);
         if (file) {
           state.installerPath = file;
-          
+
           if (file.toLowerCase().endsWith('.msi')) {
              if (!state.silentArgs || state.silentArgs === '/S') {
-                 state.silentArgs = '/qn /norestart'; 
+                 state.silentArgs = '/qn /norestart';
              }
           } else if (file.toLowerCase().endsWith('.exe')) {
              if (!state.silentArgs || state.silentArgs === '/qn /norestart' || state.silentArgs === '/qn') {
                  state.silentArgs = '/S';
              }
           }
+
+          // Try to auto-detect version from installer metadata
+          try {
+            const verResult = await window.api.apps.getInstallerVersion(file);
+            if (verResult && verResult.success && verResult.version) {
+              state.suggestedVersion = verResult.version;
+              // Auto-apply only if user hasn't set a meaningful version yet
+              if (!state.version || state.version === '1.0.0') {
+                state.version = verResult.version;
+              }
+            } else {
+              state.suggestedVersion = '';
+            }
+          } catch (e) {
+            state.suggestedVersion = '';
+          }
+
           renderWizard();
         }
+      });
+    }
+
+    // Suggested version bubble click → apply to input
+    const versionSuggestion = document.getElementById('wiz-version-suggestion');
+    if (versionSuggestion) {
+      versionSuggestion.addEventListener('click', () => {
+        state.version = state.suggestedVersion;
+        const versionInput = document.getElementById('wiz-version');
+        if (versionInput) versionInput.value = state.suggestedVersion;
+        versionSuggestion.style.display = 'none';
       });
     }
 
@@ -592,19 +1026,140 @@ const AppsPage = {
     }
   },
 
-  async finishWizard(state, isEdit, existingApp) {
+  async finishWizard(state, isEdit, existingApp, renderWizard) {
     if (!state.name.trim()) {
       App.toast(t('apps.nameRequired'), 'warning');
       return;
     }
 
+    // Check for duplicate name
+    const allApps = await window.api.apps.getAll();
+    const duplicate = allApps.find(a =>
+      a.name.toLowerCase() === state.name.trim().toLowerCase() &&
+      (!isEdit || a.id !== existingApp?.id)
+    );
+    if (duplicate) {
+      App.toast(t('apps.nameDuplicate').replace('{name}', state.name.trim()), 'error');
+      return;
+    }
+
+    // Show confirmation modal with all details before proceeding
+    await this.showWizardConfirmation(state, isEdit, existingApp, renderWizard);
+  },
+
+  async showWizardConfirmation(state, isEdit, existingApp, renderWizard) {
+    const templates = await window.api.scripts.getTemplates();
+    const templateInfo = templates.find(t => t.id === state.template) || { name: state.template };
+
+    const row = (label, value) => value ? `
+      <div style="display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border-color);">
+        <span style="color:var(--text-muted); font-size:13px;">${label}</span>
+        <span style="color:var(--text-primary); font-size:13px; font-weight:500; text-align:right; max-width:60%; word-break:break-all;">${value}</span>
+      </div>` : '';
+
+    const ouNameFromDN = (dn) => {
+      const match = (dn || '').match(/^OU=([^,]+)/i);
+      return match ? match[1] : dn;
+    };
+
+    const installerType = (state.installerPath && state.installerPath.toLowerCase().endsWith('.msi')) ? 'MSI' : 'EXE';
+    const gpoDisplay = state.createGPO
+      ? `<span style="color:var(--primary-color);">✨ ${t('apps.confirmAutoGpo')}: Deploy_${this.esc(state.name.trim().replace(/\s/g, '_'))}</span>`
+      : (state.gpoName ? this.esc(state.gpoName) : `<span style="color:var(--text-muted);">${t('apps.confirmNoGpo')}</span>`);
+
+    const paramsHtml = state.customParams && Object.keys(state.customParams).length > 0
+      ? Object.entries(state.customParams)
+          .filter(([, v]) => v !== '' && v !== undefined && v !== null)
+          .map(([k, v]) => row(this.esc(k), this.esc(String(v)))).join('')
+      : '';
+
+    const body = `
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div style="padding:12px; background:rgba(30,144,255,0.08); border:1px solid rgba(30,144,255,0.2); border-radius:8px;">
+          <p style="margin:0; color:var(--text-secondary); font-size:13px;">
+            ${t('apps.confirmIntro')}
+          </p>
+        </div>
+
+        <!-- Header -->
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div style="width:44px; height:44px; border-radius:10px; background:var(--accent-primary-dim); display:flex; align-items:center; justify-content:center; font-size:24px;">
+            ${this.templateIcon(state.template)}
+          </div>
+          <div>
+            <div style="font-size:17px; font-weight:700; color:var(--text-primary);">${this.esc(state.name.trim())}</div>
+            <div style="font-size:12px; color:var(--text-muted);">${this.esc(templateInfo.name)}</div>
+          </div>
+        </div>
+
+        <!-- General -->
+        <div class="card" style="padding:12px 16px; margin:0;">
+          <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionGeneral')}</div>
+          ${row(t('apps.detailTemplate'), this.esc(templateInfo.name))}
+          ${row(t('apps.detailInstallerType'), installerType)}
+          ${row(t('apps.detailSilentArgs'), state.silentArgs ? '<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">' + this.esc(state.silentArgs) + '</code>' : '-')}
+          ${row(t('apps.detailVersion'), this.esc(state.version || '1.0.0'))}
+          ${row(t('apps.detailNotifyUser'), state.notifyUser ? '&#10003;' : '&#10007;')}
+        </div>
+
+        <!-- Paths -->
+        <div class="card" style="padding:12px 16px; margin:0;">
+          <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionPaths')}</div>
+          ${row(t('apps.detailInstaller'), state.installerPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(state.installerPath) + '</span>' : '-')}
+          ${state.configXmlPath ? row(t('apps.detailConfigXml'), '<span style="font-family:monospace; font-size:12px;">' + this.esc(state.configXmlPath) + '</span>') : ''}
+        </div>
+
+        <!-- Targeting -->
+        <div class="card" style="padding:12px 16px; margin:0;">
+          <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionTargeting')}</div>
+          ${row(t('apps.detailGpo'), gpoDisplay)}
+          ${row(t('apps.detailAssignedOUs'), state.ouDN ? '<span title="' + this.esc(state.ouDN) + '">' + this.esc(ouNameFromDN(state.ouDN)) + '</span>' : '<span style="color:var(--text-muted);">' + t('apps.detailNoOUs') + '</span>')}
+        </div>
+
+        ${paramsHtml ? `
+        <div class="card" style="padding:12px 16px; margin:0;">
+          <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionParams')}</div>
+          ${paramsHtml}
+        </div>
+        ` : ''}
+      </div>
+    `;
+
+    const footer = `
+      <button class="btn btn-secondary" id="btn-confirm-back">${t('apps.back')}</button>
+      <div style="flex:1"></div>
+      <button class="btn btn-success" id="btn-confirm-create">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+        ${isEdit ? t('apps.saveAndDeploy') : t('apps.createAndDeploy')}
+      </button>
+    `;
+
+    App.openModal(t('apps.confirmTitle'), body, footer);
+
+    document.getElementById('btn-confirm-back').addEventListener('click', () => {
+      // Re-render the wizard at step 4 preserving state
+      if (typeof renderWizard === 'function') {
+        renderWizard();
+      } else {
+        App.closeModal();
+      }
+    });
+
+    document.getElementById('btn-confirm-create').addEventListener('click', () => {
+      this.performWizardCreate(state, isEdit, existingApp);
+    });
+  },
+
+  async performWizardCreate(state, isEdit, existingApp) {
     try {
-      const deployBtn = document.getElementById('wiz-deploy');
+      const deployBtn = document.getElementById('btn-confirm-create');
       if (deployBtn) {
         deployBtn.style.width = deployBtn.offsetWidth + 'px';
         deployBtn.disabled = true;
         deployBtn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;margin-right:6px;"></span> ' + t('apps.deployingLoader');
       }
+      const backBtn = document.getElementById('btn-confirm-back');
+      if (backBtn) backBtn.disabled = true;
 
       const appData = {
         name: state.name.trim(),

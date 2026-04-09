@@ -61,6 +61,14 @@ app.whenReady().then(() => {
   console.log('Initialize i18n...');
   i18nService.initialize();
 
+  // Sweep orphaned temp PS scripts from previous sessions
+  try {
+    const swept = appService.cleanupTempFiles();
+    if (swept && swept.removed) console.log(`Temp cleanup: removed ${swept.removed} orphan script(s)`);
+  } catch (e) {
+    console.warn('Temp cleanup failed:', e.message);
+  }
+
   console.log('Services loaded, creating window...');
   createWindow();
   console.log('Window created');
@@ -115,6 +123,8 @@ app.whenReady().then(() => {
   ipcMain.handle('apps:update', (_, id, data) => appService.update(id, data));
   ipcMain.handle('apps:delete', (_, id, deleteFiles) => appService.remove(id, deleteFiles));
   ipcMain.handle('apps:bulkAssignGPO', (_, ids, gpoName) => appService.bulkAssignGPO(ids, gpoName));
+  ipcMain.handle('apps:getInstallerVersion', (_, filePath) => appService.getInstallerVersion(filePath));
+  ipcMain.handle('apps:computeHash', (_, filePath) => ({ hash: appService.computeFileHash(filePath) }));
 
   // ─── IPC Handlers: Script Service ────────────────────────────────
   ipcMain.handle('scripts:generate', (_, appConfig) => scriptService.generateScript(appConfig));

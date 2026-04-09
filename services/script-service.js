@@ -69,6 +69,9 @@ const scriptService = {
 
   async deployScript(appConfig) {
     try {
+      // Sweep orphaned temp PS scripts before each deploy
+      try { require('./app-service').cleanupTempFiles(); } catch (e) {}
+
       const config = configService.getConfig();
       const appFolder = path.join(config.networkSharePath, appConfig.name);
 
@@ -79,18 +82,29 @@ const scriptService = {
       // Cleanup existing binaries if new one provided
       let installerHash = '';
       if (appConfig.installerPath && fs.existsSync(appConfig.installerPath)) {
-        const files = await fs.promises.readdir(appFolder);
-        for (const file of files) {
-          if (file.toLowerCase().endsWith('.exe') || file.toLowerCase().endsWith('.msi')) {
-            try { await fs.promises.unlink(path.join(appFolder, file)); } catch (e) {}
-          }
-        }
-        const fileName = path.basename(appConfig.installerPath);
-        await fs.promises.copyFile(appConfig.installerPath, path.join(appFolder, fileName));
+        // If the source is already inside this app's share folder, don't
+        // delete+copy (would delete the source first). Just rehash in place.
+        const sourceResolved = path.resolve(appConfig.installerPath).toLowerCase();
+        const folderResolved = path.resolve(appFolder).toLowerCase();
+        const isAlreadyInFolder = sourceResolved.startsWith(folderResolved + path.sep);
 
-        // Compute SHA256 hash of installer
-        const buffer = await fs.promises.readFile(path.join(appFolder, fileName));
-        installerHash = crypto.createHash('sha256').update(buffer).digest('hex');
+        if (isAlreadyInFolder) {
+          const buffer = await fs.promises.readFile(appConfig.installerPath);
+          installerHash = crypto.createHash('sha256').update(buffer).digest('hex');
+        } else {
+          const files = await fs.promises.readdir(appFolder);
+          for (const file of files) {
+            if (file.toLowerCase().endsWith('.exe') || file.toLowerCase().endsWith('.msi')) {
+              try { await fs.promises.unlink(path.join(appFolder, file)); } catch (e) {}
+            }
+          }
+          const fileName = path.basename(appConfig.installerPath);
+          await fs.promises.copyFile(appConfig.installerPath, path.join(appFolder, fileName));
+
+          // Compute SHA256 hash of installer
+          const buffer = await fs.promises.readFile(path.join(appFolder, fileName));
+          installerHash = crypto.createHash('sha256').update(buffer).digest('hex');
+        }
       } else {
         // Compute hash of existing installer if any
         const files = await fs.promises.readdir(appFolder);
