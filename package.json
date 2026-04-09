@@ -6,18 +6,41 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "build": "npx electron-packager . \"AD_Deploy_Manager\" --platform=win32 --arch=x64 --electron-version=33.0.0 --out=dist --overwrite",
-    "build:portable": "electron-builder --win portable"
+    "build": "electron-builder --win portable",
+    "build:dir": "electron-builder --win --dir",
+    "build:legacy": "npx electron-packager . \"AD_Deploy_Manager\" --platform=win32 --arch=x64 --electron-version=33.0.0 --out=dist --overwrite"
   },
   "build": {
     "appId": "com.omnisec.appdeploymanager",
     "productName": "AppDeploy Manager",
     "directories": {
-      "output": "dist_portable"
+      "output": "dist_portable",
+      "buildResources": "img"
     },
+    "compression": "maximum",
+    "asar": true,
+    "electronLanguages": ["es", "en-US"],
+    "files": [
+      "main.js",
+      "preload.js",
+      "services/**/*",
+      "renderer/**/*",
+      "img/**/*",
+      "LICENSE",
+      "!**/*.md",
+      "!**/*.map",
+      "!**/.DS_Store",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
+      "!**/node_modules/*.d.ts",
+      "!**/node_modules/.bin",
+      "!.editorconfig",
+      "!.git",
+      "!dist/${/*}",
+      "!dist_portable/${/*}"
+    ],
     "win": {
-      "target": "portable",
-      "icon": "null"
+      "target": "portable"
     },
     "portable": {
       "artifactName": "AppDeployManager-Portable.exe"
