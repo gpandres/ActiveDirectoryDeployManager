@@ -24,7 +24,6 @@ const TEMPLATES = {
   anydesk: { category: 'RMM', name: 'AnyDesk Custom Client', description: 'Instalación genérica AnyDesk MSI', fields: [] },
   veeam: { category: 'Backups', name: 'Veeam Agent', description: 'Despliegue con configuración XML de servidor', fields: [{key:'configXml', label:'XML de Configuración', default:'veeam_config.xml', hint:'Extraído de tu Veeam B&R server'}] },
   crashplan: { category: 'Backups', name: 'CrashPlan Enterprise', description: 'Despliegue de backup endpoint', fields: [{key:'url', label:'DEPLOYMENT_URL', default:'', hint:'URL del authority server'}, {key:'token', label:'DEPLOYMENT_TOKEN', default:'', hint:'Token de la organización'}] },
-  chrome: { category: 'Corporativo', name: 'Chrome Enterprise', description: 'Despliegue MSI genérico Chrome Enterprise', fields: [] },
   'sap-gui': { category: 'Corporativo', name: 'SAP GUI', description: 'Instala EXE + copia XML de configuración', fields: [ { key: 'sapTheme', label: 'Tema SAP', type: 'select', default: '256', hint: '', options: [ {value:'1', label:'SAP Signature (1)'}, {value:'128', label:'Blue Crystal (128)'}, {value:'256', label:'Belize (256)'}, {value:'2048', label:'Quartz (2048)'}, {value:'16384', label:'Quartz Dark (16384)'} ] } ] }
 };
 
@@ -61,7 +60,6 @@ const scriptService = {
       case 'anydesk': return generateAnyDesk(appConfig);
       case 'veeam': return generateVeeam(appConfig);
       case 'crashplan': return generateCrashPlan(appConfig);
-      case 'chrome': return generateChrome(appConfig);
       case 'sap-gui': return generateSapGui(appConfig);
       default: return generateGeneric(appConfig);
     }
@@ -665,20 +663,6 @@ try {
     if ("${url}") { $msiArgs += " DEPLOYMENT_URL=\`"${url}\`"" }
     if ("${token}") { $msiArgs += " DEPLOYMENT_TOKEN=\`"${token}\`"" }
     Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
-${getTrackerSaveLogic(notify)}
-} catch {}
-`;
-}
-
-function generateChrome(cfg) {
-  const notify = cfg.notifyUser || false;
-  return `# =========================================================================
-# CHROME ENTERPRISE - DROP & RUN
-# =========================================================================
-If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
-${getLocalCachingLogic("\\.msi$", notify, cfg.name)}
-try {
-    Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$($Instalador.FullName)\`" /qn /norestart" -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
 } catch {}
 `;
