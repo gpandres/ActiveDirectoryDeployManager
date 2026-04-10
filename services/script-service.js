@@ -6,8 +6,10 @@ const i18nService = require('./i18n');
 
 const TEMPLATES = {
   generic: { category: 'General', name: 'Genérica (MSI/EXE)', description: 'Plantilla universal Drop & Run para cualquier instalador', fields: [] },
-  office: { category: 'General', name: 'Microsoft Office', description: 'Ejecuta setup.exe con archivo XML', fields: [{ key: 'configXml', label: 'Nombre del XML de Config', default: 'config_office.xml', hint: 'Debe estar en la misma carpeta' }] },
+  office: { category: 'General', name: 'Microsoft Office (XML)', description: 'Ejecuta setup.exe con archivo XML existente', fields: [{ key: 'configXml', label: 'Nombre del XML de Config', default: 'config_office.xml', hint: 'Debe estar en la misma carpeta' }] },
   custom: { category: 'General', name: 'Script Custom', description: 'Escribe tu propio código PowerShell raw', fields: [{ key: 'customScript', label: 'Código PowerShell', type: 'textarea', default: '# Escribe tu código PowerShell aquí\\n', hint: 'Este código no será envuelto, utilízalo con precaución.' }] },
+  winget: { category: 'General', name: 'Winget Package', description: 'Instala desde Windows Package Manager (catálogo)', fields: [], noInstaller: true },
+  odt: { category: 'General', name: 'Microsoft Office (ODT)', description: 'Office 365/LTSC sin descarga manual — genera XML automáticamente', fields: [], noInstaller: true },
   wazuh: { category: 'Seguridad', name: 'Wazuh Agent', description: 'Despliegue del agente SIEM/XDR de Wazuh', fields: [{key:'manager', label:'WAZUH_MANAGER', default:'', hint:'IP o FQDN del servidor Wazuh'}, {key:'group', label:'WAZUH_AGENT_GROUP', default:'default', hint:'Grupo de asignación'}, {key:'password', label:'WAZUH_REGISTRATION_PASSWORD', default:'', hint:'Contraseña de registro (opcional)'}] },
   sentinelone: { category: 'Seguridad', name: 'SentinelOne', description: 'Despliegue con inyección de SITE_TOKEN', fields: [{key:'siteToken', label:'SITE_TOKEN', default:'', hint:'Cadena única del tenant SentinelOne'}] },
   cortexxdr: { category: 'Seguridad', name: 'Cortex XDR', description: 'Despliegue XDR (Palo Alto)', fields: [{key:'installDir', label:'Directorio (Opcional)', default:'', hint:'Dejar vacío para predeterminado'}] },
@@ -61,6 +63,8 @@ const scriptService = {
       case 'veeam': return generateVeeam(appConfig);
       case 'crashplan': return generateCrashPlan(appConfig);
       case 'sap-gui': return generateSapGui(appConfig);
+      case 'winget': return generateWinget(appConfig);
+      case 'odt': return generateODT(appConfig);
       default: return generateGeneric(appConfig);
     }
   },
@@ -77,9 +81,12 @@ const scriptService = {
         await fs.promises.mkdir(appFolder, { recursive: true });
       }
 
+      // winget and odt modes don't use local installer files — skip copy entirely
+      const isNoInstaller = appConfig.template === 'winget' || appConfig.template === 'odt';
+
       // Cleanup existing binaries if new one provided
       let installerHash = '';
-      if (appConfig.installerPath && fs.existsSync(appConfig.installerPath)) {
+      if (!isNoInstaller && appConfig.installerPath && fs.existsSync(appConfig.installerPath)) {
         // If the source is already inside this app's share folder, don't
         // delete+copy (would delete the source first). Just rehash in place.
         const sourceResolved = path.resolve(appConfig.installerPath).toLowerCase();
@@ -103,7 +110,7 @@ const scriptService = {
           const buffer = await fs.promises.readFile(path.join(appFolder, fileName));
           installerHash = crypto.createHash('sha256').update(buffer).digest('hex');
         }
-      } else {
+      } else if (!isNoInstaller) {
         // Compute hash of existing installer if any
         const files = await fs.promises.readdir(appFolder);
         for (const file of files) {
@@ -116,7 +123,7 @@ const scriptService = {
       }
 
       // Cleanup existing XML config if new one provided
-      if (appConfig.configXmlPath && fs.existsSync(appConfig.configXmlPath)) {
+      if (!isNoInstaller && appConfig.configXmlPath && fs.existsSync(appConfig.configXmlPath)) {
         const files = await fs.promises.readdir(appFolder);
         for (const file of files) {
           if (file.toLowerCase().endsWith('.xml')) {
@@ -665,6 +672,201 @@ try {
     Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
 } catch {}
+`;
+}
+
+function generateWinget(cfg) {
+  const wingetId = cfg.wingetId || '';
+  const version  = cfg.version || '1.0.0';
+  const notify   = cfg.notifyUser || false;
+  const notifyPrefix = notify ? getNotificationLogic(cfg.name) : '';
+  const config   = configService.getConfig();
+  const dict     = i18nService.getTranslations(config.language || 'en');
+  const ToastTitleProcess = dict.apps?.toastTitleProcess || 'Instalación en proceso';
+  const ToastMsgProcess   = dict.apps?.toastMsgProcess   || 'Se está instalando $NombreApp. No apague el equipo.';
+  const ToastTitleDone    = dict.apps?.toastTitleDone    || 'Instalación completada';
+  const ToastMsgDone      = dict.apps?.toastMsgDone      || '$NombreApp se ha instalado correctamente.';
+  const notifyBefore = notify ? `Send-UserToast -ToastTitle "${ToastTitleProcess}" -ToastMessage "${ToastMsgProcess}" -IconType "Warning"` : '';
+  const notifyAfter  = notify ? `    Send-UserToast -ToastTitle "${ToastTitleDone}" -ToastMessage "${ToastMsgDone}" -IconType "Information"` : '';
+
+  return `# =========================================================================
+# WINGET INSTALL - DROP & RUN
+# App: ${cfg.name} [${wingetId}]
+# Versión: ${version}
+# Generado: ${new Date().toISOString()}
+# =========================================================================
+If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
+    Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
+}
+
+$LogDir = "C:\\ProgramData\\AppDeploy_Logs"
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+$NombreApp = (Get-Item $PSScriptRoot).Name
+$TrackerFile = "$LogDir\\Tracker_$NombreApp.json"
+
+# Leer versión desde manifiesto de red
+$CurrentVersion = "${version}"
+$VersionFile = Join-Path $PSScriptRoot "version.json"
+if (Test-Path $VersionFile) {
+    try { $CurrentVersion = (Get-Content $VersionFile -Raw | ConvertFrom-Json).version } catch {}
+}
+
+# Salir si ya está instalado en esta versión
+if (Test-Path $TrackerFile) {
+    try {
+        $t = Get-Content $TrackerFile -Raw | ConvertFrom-Json
+        if ($t.version -eq $CurrentVersion) { exit 0 }
+    } catch {}
+}
+${notifyPrefix}
+${notifyBefore}
+
+# ── Localizar winget (funciona como SYSTEM) ──────────────
+$Winget = $null
+try {
+    $pkg = Get-AppxPackage -AllUsers "Microsoft.DesktopAppInstaller" -ErrorAction SilentlyContinue |
+           Sort-Object { [version]($_.Version -replace '[^0-9.]','') } -Descending |
+           Select-Object -First 1
+    if ($pkg) {
+        $candidate = Join-Path $pkg.InstallLocation "winget.exe"
+        if (Test-Path $candidate) { $Winget = $candidate }
+    }
+} catch {}
+
+if (-not $Winget) {
+    $pattern = "$env:ProgramFiles\\WindowsApps\\Microsoft.DesktopAppInstaller_*_x64__8wekyb3d8bbwe\\winget.exe"
+    $found = Get-Item $pattern -ErrorAction SilentlyContinue |
+             Sort-Object FullName -Descending | Select-Object -First 1
+    if ($found) { $Winget = $found.FullName }
+}
+
+if (-not $Winget) {
+    Write-Host "winget no encontrado. Instala App Installer desde Microsoft Store (requiere Windows 10 21H2+)."
+    exit 1
+}
+
+# ── Instalar ─────────────────────────────────────────────
+try {
+    & $Winget install --id "${wingetId}" --silent --accept-package-agreements --accept-source-agreements --scope machine
+    if ($LASTEXITCODE -notin @(0, 1618, -1978335212)) { throw "winget salió con código $LASTEXITCODE" }
+
+    $trackerData = @{ version = $CurrentVersion; installedAt = (Get-Date).ToString('o'); method = "winget"; wingetId = "${wingetId}" } | ConvertTo-Json
+    Set-Content -Path $TrackerFile -Value $trackerData
+${notifyAfter}
+} catch {
+    Write-Host "Error instalando ${cfg.name}: $_"
+    exit 1
+}
+`;
+}
+
+function generateODT(cfg) {
+  const odtConfig   = cfg.odtConfig || {};
+  const productId   = odtConfig.productId   || 'O365BusinessRetail';
+  const channel     = odtConfig.channel     || 'MonthlyEnterprise';
+  const language    = odtConfig.language    || 'es-es';
+  const arch        = odtConfig.arch        || '64';
+  const excludeApps = (odtConfig.excludeApps || []).map(a => `      <ExcludeApp ID="${a}" />`).join('\n');
+  const version     = cfg.version || '1.0.0';
+  const notify      = cfg.notifyUser || false;
+  const config      = configService.getConfig();
+  const dict        = i18nService.getTranslations(config.language || 'en');
+  const ToastTitleProcess = dict.apps?.toastTitleProcess || 'Instalación en proceso';
+  const ToastMsgProcess   = dict.apps?.toastMsgProcess   || 'Se está instalando $NombreApp. No apague el equipo.';
+  const ToastTitleDone    = dict.apps?.toastTitleDone    || 'Instalación completada';
+  const ToastMsgDone      = dict.apps?.toastMsgDone      || '$NombreApp se ha instalado correctamente.';
+  const notifyPrefix = notify ? getNotificationLogic(cfg.name) : '';
+  const notifyBefore = notify ? `Send-UserToast -ToastTitle "${ToastTitleProcess}" -ToastMessage "${ToastMsgProcess}" -IconType "Warning"` : '';
+  const notifyAfter  = notify ? `    Send-UserToast -ToastTitle "${ToastTitleDone}" -ToastMessage "${ToastMsgDone}" -IconType "Information"` : '';
+
+  // Always exclude Groove (OneDrive Music) and Lync (old Skype for Business)
+  const alwaysExclude = ['Groove', 'Lync'];
+  const allExcluded   = [...new Set([...alwaysExclude, ...(odtConfig.excludeApps || [])])];
+  const excludeLines  = allExcluded.map(a => `      <ExcludeApp ID="${a}" />`).join('\n');
+
+  return `# =========================================================================
+# MICROSOFT OFFICE ODT - DROP & RUN
+# Producto: ${productId}  Canal: ${channel}  Idioma: ${language}
+# Versión: ${version}
+# Generado: ${new Date().toISOString()}
+# =========================================================================
+If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
+    Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
+}
+
+$LogDir = "C:\\ProgramData\\AppDeploy_Logs"
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+$NombreApp = (Get-Item $PSScriptRoot).Name
+$TrackerFile = "$LogDir\\Tracker_$NombreApp.json"
+
+$CurrentVersion = "${version}"
+$VersionFile = Join-Path $PSScriptRoot "version.json"
+if (Test-Path $VersionFile) {
+    try { $CurrentVersion = (Get-Content $VersionFile -Raw | ConvertFrom-Json).version } catch {}
+}
+
+if (Test-Path $TrackerFile) {
+    try {
+        $t = Get-Content $TrackerFile -Raw | ConvertFrom-Json
+        if ($t.version -eq $CurrentVersion) { exit 0 }
+    } catch {}
+}
+${notifyPrefix}
+${notifyBefore}
+
+# ── Localizar o descargar ODT setup.exe ──────────────────
+$OdtSetup = Join-Path $PSScriptRoot "setup.exe"
+
+if (-not (Test-Path $OdtSetup)) {
+    Write-Host "Descargando Office Deployment Tool desde Microsoft..."
+    $OdtInstaller = "$env:TEMP\\odt_installer.exe"
+    $OdtExtract   = "$env:TEMP\\odt_extracted_${productId}"
+    try {
+        $wc = New-Object System.Net.WebClient
+        # Stable redirect to latest ODT — Microsoft CDN
+        $wc.DownloadFile("https://download.microsoft.com/download/2/7/A/27AF1BE6-DD20-4CB4-B154-EBAB8A7D4A7E/officedeploymenttool_17531-20046.exe", $OdtInstaller)
+        New-Item -ItemType Directory -Path $OdtExtract -Force | Out-Null
+        Start-Process $OdtInstaller -ArgumentList "/quiet /extract:\`"$OdtExtract\`"" -Wait -NoNewWindow
+        $OdtSetup = Join-Path $OdtExtract "setup.exe"
+    } catch {
+        Write-Host "Error descargando ODT: $_"; exit 1
+    }
+}
+
+if (-not (Test-Path $OdtSetup)) { Write-Host "setup.exe no encontrado"; exit 1 }
+
+# ── Generar XML de configuración ─────────────────────────
+$XmlContent = @"
+<Configuration>
+  <Add OfficeClientEdition="${arch}" Channel="${channel}">
+    <Product ID="${productId}">
+      <Language ID="${language}" />
+${excludeLines}
+    </Product>
+  </Add>
+  <Display Level="None" AcceptEULA="TRUE" />
+  <Property Name="FORCEAPPSHUTDOWN" Value="TRUE" />
+  <Property Name="SharedComputerLicensing" Value="0" />
+  <Updates Enabled="TRUE" />
+  <Logging Level="Standard" Path="C:\\ProgramData\\AppDeploy_Logs" />
+</Configuration>
+"@
+
+$XmlPath = "$env:TEMP\\office_config_${productId}.xml"
+$XmlContent | Set-Content -Path $XmlPath -Encoding UTF8
+
+# ── Instalar ─────────────────────────────────────────────
+try {
+    Start-Process -FilePath $OdtSetup -ArgumentList "/configure \`"$XmlPath\`"" -Wait -NoNewWindow
+    if ($LASTEXITCODE -ne 0) { throw "ODT setup.exe salió con código $LASTEXITCODE" }
+
+    $trackerData = @{ version = $CurrentVersion; installedAt = (Get-Date).ToString('o'); method = "odt"; product = "${productId}" } | ConvertTo-Json
+    Set-Content -Path $TrackerFile -Value $trackerData
+${notifyAfter}
+} catch {
+    Write-Host "Error instalando Office: $_"
+    exit 1
+}
 `;
 }
 

@@ -57,6 +57,7 @@ app.whenReady().then(() => {
   const bundleService = require('./services/bundle-service');
   const activityLog = require('./services/activity-log');
   const i18nService = require('./services/i18n');
+  const wingetService = require('./services/winget-service');
 
   console.log('Initialize i18n...');
   i18nService.initialize();
@@ -131,6 +132,10 @@ app.whenReady().then(() => {
   ipcMain.handle('scripts:generate', (_, appConfig) => scriptService.generateScript(appConfig));
   ipcMain.handle('scripts:deploy', (_, appConfig) => scriptService.deployScript(appConfig));
   ipcMain.handle('scripts:getTemplates', () => scriptService.getTemplateList());
+
+  // ─── IPC Handlers: Winget Service ─────────────────────────────────
+  ipcMain.handle('winget:getCatalog', () => wingetService.getCatalog());
+  ipcMain.handle('winget:checkVersions', (_, catalogIds) => wingetService.checkVersions(catalogIds));
 
   // ─── IPC Handlers: File Service ──────────────────────────────────
   ipcMain.handle('files:listDeployed', () => fileService.listDeployedApps());

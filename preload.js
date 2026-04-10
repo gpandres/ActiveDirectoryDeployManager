@@ -84,5 +84,11 @@ contextBridge.exposeInMainWorld('api', {
   i18n: {
     getAvailable: () => ipcRenderer.invoke('i18n:getAvailable'),
     getTranslations: (langCode) => ipcRenderer.invoke('i18n:getTranslations', langCode)
+  },
+
+  // Winget catalog + version checking
+  winget: {
+    getCatalog: () => ipcRenderer.invoke('winget:getCatalog'),
+    checkVersions: (ids) => ipcRenderer.invoke('winget:checkVersions', ids)
   }
 });

@@ -7,6 +7,7 @@ const AppsPage = {
   gposCache: null,
   ousCache: null,
   ousTreeCache: null,
+  wingetCatalogCache: null,
   _wizardOpening: false,
 
   async render(container) {
@@ -610,7 +611,11 @@ const AppsPage = {
     );
 
     try {
-      const templates = await window.api.scripts.getTemplates();
+      const [templates, catalogData] = await Promise.all([
+        window.api.scripts.getTemplates(),
+        window.api.winget.getCatalog().catch(() => ({ catalog: [], odtProducts: [], odtApps: [], odtLanguages: [], odtChannels: [] }))
+      ]);
+      this.wingetCatalogCache = catalogData;
       const isEdit = !!existingApp;
 
       // Pre-fetch OUs so they are ready before the wizard renders step 3
@@ -633,9 +638,24 @@ const AppsPage = {
       }
 
     // State
+    const agentTemplateIds = templates.filter(tmpl => tmpl.category !== 'General').map(tmpl => tmpl.id);
     const state = {
       step: 1,
+      catalogTab: existingApp?.wingetId ? 'catalog' :
+                  existingApp?.template === 'odt' ? 'catalog' :
+                  (existingApp && agentTemplateIds.includes(existingApp.template)) ? 'agentes' :
+                  (existingApp ? 'manual' : 'catalog'),
+      catalogSearch: '',
+      catalogCat: 'Todo',
       template: existingApp?.template || '',
+      wingetId: existingApp?.wingetId || '',
+      odtConfig: existingApp?.odtConfig || {
+        product: 'O365BusinessRetail',
+        apps: ['Word', 'Excel', 'PowerPoint', 'Outlook', 'OneNote', 'OneDrive'],
+        language: 'es-es',
+        channel: 'MonthlyEnterprise',
+        arch: '64'
+      },
       name: existingApp?.name || '',
       silentArgs: existingApp?.silentArgs || '/S',
       installerPath: initialInstallerPath,
@@ -668,51 +688,204 @@ const AppsPage = {
         <div class="wizard-content" style="min-height: 480px; display: flex; flex-direction: column;">`;
 
       if (state.step === 1) {
-        body += `
-          <h4 style="font-size: var(--font-md); margin-bottom: var(--space-md); color: var(--text-secondary);">📦 ${t('apps.catalogTitle')}</h4>
-          <div class="template-categories" style="display: flex; flex-direction: column; gap: var(--space-lg); margin-bottom: var(--space-xl)">
-        `;
-        
-        // Group templates by category
-        const grouped = {};
-        templates.forEach(t => {
-          const cat = t.category || 'Otros';
-          if (!grouped[cat]) grouped[cat] = [];
-          grouped[cat].push(t);
-        });
+        const catalog = catalogData?.catalog || [];
 
-        // Specific render order
-        const catOrder = ['General', 'Seguridad', 'Conectividad', 'RMM', 'Backups', 'Corporativo'];
-        
-        catOrder.forEach(cat => {
-          if (grouped[cat]) {
-            body += `
-              <div class="template-category-group">
-                <h5 style="margin-bottom: var(--space-sm); color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 4px;">${cat}</h5>
-                <div class="template-grid">
-                  ${grouped[cat].map(t => `
-                    <div class="template-card ${state.template === t.id ? 'selected' : ''}" data-template="${t.id}">
-                      <div class="template-card-icon">${this.templateIcon(t.id)}</div>
-                      <div class="template-card-name">${this.esc(t.name)}</div>
-                      <div class="template-card-desc">${this.esc(t.description)}</div>
-                    </div>
-                  `).join('')}
+        // ── Tab bar ──────────────────────────────────────────────────
+        const tabStyle = (active) => `padding:8px 18px;background:none;border:none;border-bottom:2px solid ${active ? 'var(--primary-color)' : 'transparent'};cursor:pointer;font-size:13px;font-weight:600;color:${active ? 'var(--primary-color)' : 'var(--text-secondary)'};margin-bottom:-1px;transition:color .15s,border-color .15s;`;
+        body += `
+          <div style="display:flex;gap:0;border-bottom:1px solid var(--border-color);margin-bottom:var(--space-md);">
+            <button class="wiz-tab" data-tab="catalog" style="${tabStyle(state.catalogTab==='catalog')}">🛒 Catálogo</button>
+            <button class="wiz-tab" data-tab="agentes" style="${tabStyle(state.catalogTab==='agentes')}">🛡️ Agentes</button>
+            <button class="wiz-tab" data-tab="manual" style="${tabStyle(state.catalogTab==='manual')}">📦 Manual</button>
+          </div>
+        `;
+
+        if (state.catalogTab === 'catalog') {
+          // ── Search + category filter ─────────────────────────────
+          const cats = ['Todo', ...new Set(catalog.map(c => c.category))];
+          const catBtnStyle = (active) => `padding:4px 10px;border-radius:20px;border:1px solid var(--border-color);background:${active ? 'var(--primary-color)' : 'transparent'};color:${active ? '#fff' : 'var(--text-secondary)'};cursor:pointer;font-size:11px;white-space:nowrap;`;
+          const activeCat = state.catalogCat || 'Todo';
+          body += `
+            <div style="display:flex;gap:8px;margin-bottom:var(--space-sm);align-items:center;flex-wrap:wrap;">
+              <div style="position:relative;flex:1;min-width:160px;">
+                <svg style="position:absolute;left:8px;top:50%;transform:translateY(-50%);opacity:.4;pointer-events:none;" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" class="form-input" id="catalog-search" value="${this.esc(state.catalogSearch||'')}" placeholder="Buscar app..." style="padding-left:28px;padding-top:5px;padding-bottom:5px;font-size:13px;" autocomplete="off">
+              </div>
+              <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                ${cats.map(cat => `<button class="catalog-cat-btn" data-cat="${this.esc(cat)}" style="${catBtnStyle(activeCat===cat)}">${this.esc(cat)}</button>`).join('')}
+              </div>
+            </div>
+            <div style="max-height:330px;overflow-y:auto;padding-right:2px;">
+          `;
+
+          // ODT special card at top
+          const odtSel = state.template === 'odt';
+          body += `
+            <div style="margin-bottom:var(--space-sm);">
+              <h5 style="font-size:10px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;letter-spacing:.05em;">Microsoft Office</h5>
+              <div class="template-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));">
+                <div class="template-card catalog-item ${odtSel ? 'selected' : ''}" data-catalog-type="odt" style="cursor:pointer;">
+                  <div class="template-card-icon" style="font-size:22px;">🏢</div>
+                  <div class="template-card-name" style="font-size:11px;">Microsoft Office</div>
+                  <div class="template-card-desc" style="font-size:10px;">365 / LTSC 2021 / 2019</div>
                 </div>
               </div>
-            `;
+            </div>
+          `;
+
+          // Winget catalog by category
+          const q = (state.catalogSearch || '').toLowerCase();
+          const filteredCatalog = catalog.filter(item => {
+            const matchCat = activeCat === 'Todo' || item.category === activeCat;
+            const matchQ = !q || item.name.toLowerCase().includes(q) || item.category.toLowerCase().includes(q) || item.wingetId.toLowerCase().includes(q);
+            return matchCat && matchQ;
+          });
+          const grouped2 = {};
+          filteredCatalog.forEach(item => {
+            if (!grouped2[item.category]) grouped2[item.category] = [];
+            grouped2[item.category].push(item);
+          });
+          const catOrder2 = ['Navegadores', 'Herramientas', 'Conectividad', 'Comunicación', 'Multimedia', 'Desarrollo'];
+          catOrder2.forEach(cat => {
+            if (!grouped2[cat]) return;
+            body += `
+              <div style="margin-bottom:var(--space-sm);">
+                <h5 style="font-size:10px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;letter-spacing:.05em;">${this.esc(cat)}</h5>
+                <div class="template-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));">
+                  ${grouped2[cat].map(item => {
+                    const isSel = state.template === 'winget' && state.wingetId === item.wingetId;
+                    return `
+                      <div class="template-card catalog-item ${isSel ? 'selected' : ''}"
+                           data-catalog-type="winget" data-winget-id="${this.esc(item.wingetId)}"
+                           data-app-name="${this.esc(item.name)}" data-app-version="${this.esc(item.defaultVersion)}"
+                           style="cursor:pointer;">
+                        <div class="template-card-icon" style="font-size:22px;">${item.icon}</div>
+                        <div class="template-card-name" style="font-size:11px;">${this.esc(item.name)}</div>
+                        <div class="template-card-desc" style="font-size:10px;">v${this.esc(item.defaultVersion)}</div>
+                      </div>`;
+                  }).join('')}
+                </div>
+              </div>`;
+          });
+
+          if (!filteredCatalog.length && state.template !== 'odt') {
+            body += `<p style="text-align:center;color:var(--text-muted);padding:20px 0;font-size:13px;">No se encontraron apps</p>`;
           }
-        });
-        
-        body += `</div>`;
+          body += `</div>`; // close scrollable
+
+        } else if (state.catalogTab === 'agentes') {
+          // ── Non-General templates ─────────────────────────────────
+          const agentCats = ['Seguridad', 'Conectividad', 'RMM', 'Backups', 'Corporativo'];
+          body += `<div style="max-height:360px;overflow-y:auto;padding-right:2px;">`;
+          agentCats.forEach(cat => {
+            const catTmpls = templates.filter(tmpl => tmpl.category === cat);
+            if (!catTmpls.length) return;
+            body += `
+              <div class="template-category-group" style="margin-bottom:var(--space-md);">
+                <h5 style="margin-bottom:var(--space-sm);color:var(--text-primary);border-bottom:1px solid var(--border-color);padding-bottom:4px;">${cat}</h5>
+                <div class="template-grid">
+                  ${catTmpls.map(tmpl => `
+                    <div class="template-card ${state.template === tmpl.id ? 'selected' : ''}" data-template="${tmpl.id}">
+                      <div class="template-card-icon">${this.templateIcon(tmpl.id)}</div>
+                      <div class="template-card-name">${this.esc(tmpl.name)}</div>
+                      <div class="template-card-desc">${this.esc(tmpl.description)}</div>
+                    </div>`).join('')}
+                </div>
+              </div>`;
+          });
+          body += `</div>`;
+
+        } else {
+          // ── Manual tab: General templates (excl. winget/odt which live in Catálogo) ──
+          const manualTmpls = templates.filter(tmpl => tmpl.category === 'General' && tmpl.id !== 'winget' && tmpl.id !== 'odt');
+          body += `
+            <div style="max-height:360px;overflow-y:auto;padding-right:2px;">
+              <div class="template-grid">
+                ${manualTmpls.map(tmpl => `
+                  <div class="template-card ${state.template === tmpl.id ? 'selected' : ''}" data-template="${tmpl.id}">
+                    <div class="template-card-icon">${this.templateIcon(tmpl.id)}</div>
+                    <div class="template-card-name">${this.esc(tmpl.name)}</div>
+                    <div class="template-card-desc">${this.esc(tmpl.description)}</div>
+                  </div>`).join('')}
+              </div>
+            </div>`;
+        }
+
       } else if (state.step === 2) {
         const tmpl = templates.find(t => t.id === state.template);
+        const isWinget = state.template === 'winget';
+        const isODT = state.template === 'odt';
+
         body += `
           <div class="form-group">
             <label class="form-label">${t('apps.appName')}</label>
             <input class="form-input" id="wiz-name" value="${this.esc(state.name)}" placeholder="Ej: Google Chrome">
             <p class="form-hint">${t('apps.nameHint')}</p>
+          </div>`;
+
+        if (isWinget) {
+          // ── Winget mode: info panel + wingetId display ──────────
+          body += `
+          <div style="padding:12px 14px;background:rgba(108,99,255,0.07);border:1px solid rgba(108,99,255,0.25);border-radius:8px;margin-bottom:12px;">
+            <div style="font-weight:600;font-size:13px;margin-bottom:4px;color:var(--primary-color);">📦 Windows Package Manager</div>
+            <p style="margin:0 0 8px 0;font-size:12px;color:var(--text-secondary);">Se instalará automáticamente usando winget. No es necesario descargar ningún instalador.</p>
+            <code style="font-size:11px;color:var(--text-muted);background:var(--bg-tertiary);padding:4px 8px;border-radius:4px;display:block;">winget install --id ${this.esc(state.wingetId)} --scope machine --silent</code>
+          </div>`;
+
+        } else if (isODT) {
+          // ── ODT mode: product + apps + language/channel/arch ────
+          const odtProds = catalogData?.odtProducts || [];
+          const odtApps2 = catalogData?.odtApps || [];
+          const odtLangs = catalogData?.odtLanguages || [];
+          const odtChans = catalogData?.odtChannels || [];
+          const cfg = state.odtConfig;
+
+          body += `
+          <div style="padding:12px 14px;background:rgba(30,144,255,0.07);border:1px solid rgba(30,144,255,0.2);border-radius:8px;margin-bottom:12px;">
+            <div style="font-weight:600;font-size:13px;color:var(--primary-color);margin-bottom:2px;">🏢 Office Deployment Tool (ODT)</div>
+            <p style="margin:0;font-size:12px;color:var(--text-secondary);">El script descargará la ODT de Microsoft e instalará Office automáticamente. No es necesario ningún archivo.</p>
           </div>
-          
+          <div class="form-group">
+            <label class="form-label">Producto</label>
+            <select class="form-select" id="odt-product">
+              ${odtProds.map(p => `<option value="${this.esc(p.id)}" ${cfg.product === p.id ? 'selected' : ''}>${this.esc(p.label)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Aplicaciones a incluir</label>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px 12px;">
+              ${odtApps2.map(a => `
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">
+                  <input type="checkbox" name="odt-app" value="${this.esc(a.id)}" ${cfg.apps.includes(a.id) ? 'checked' : ''} style="width:auto;">
+                  ${this.esc(a.label)}
+                </label>`).join('')}
+            </div>
+          </div>
+          <div style="display:flex;gap:12px;">
+            <div class="form-group" style="flex:1;">
+              <label class="form-label">Idioma</label>
+              <select class="form-select" id="odt-language">
+                ${odtLangs.map(l => `<option value="${this.esc(l.id)}" ${cfg.language === l.id ? 'selected' : ''}>${this.esc(l.label)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group" style="flex:1;">
+              <label class="form-label">Canal de actualización</label>
+              <select class="form-select" id="odt-channel">
+                ${odtChans.map(c => `<option value="${this.esc(c.id)}" ${cfg.channel === c.id ? 'selected' : ''}>${this.esc(c.label)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group" style="flex:0 0 120px;">
+              <label class="form-label">Arquitectura</label>
+              <select class="form-select" id="odt-arch">
+                <option value="64" ${cfg.arch === '64' ? 'selected' : ''}>64 bits</option>
+                <option value="32" ${cfg.arch === '32' ? 'selected' : ''}>32 bits</option>
+              </select>
+            </div>
+          </div>`;
+
+        } else {
+          // ── Standard installer mode ─────────────────────────────
+          body += `
           ${state.template !== 'custom' ? `
             <div class="form-group">
               <label class="form-label">${t('apps.installer')}</label>
@@ -747,8 +920,10 @@ const AppsPage = {
                 </div>
               </div>
             </div>
-          ` : ''}
+          ` : ''}`;
+        }
 
+        body += `
           <div style="display:flex;gap:12px">
             <div class="form-group" style="flex:0 0 220px">
               <label class="form-label">${t('apps.version')}</label>
@@ -769,12 +944,12 @@ const AppsPage = {
             </div>
           </div>
 
-          ${(tmpl?.fields || []).map(f => {
+          ${(!isWinget && !isODT) ? (tmpl?.fields || []).map(f => {
             let inputHtml = '';
             if (f.type === 'select') {
-              inputHtml = '<select class="form-select" id="wiz-param-' + f.key + '">\\n' +
+              inputHtml = '<select class="form-select" id="wiz-param-' + f.key + '">\n' +
                 (f.options || []).map(opt => '<option value="' + opt.value + '" ' + (state.customParams[f.key] === opt.value || (!state.customParams[f.key] && f.default === opt.value) ? 'selected' : '') + '>' + opt.label + '</option>').join('') +
-              '\\n</select>';
+              '\n</select>';
             } else if (f.type === 'textarea') {
               inputHtml = '<textarea class="form-input" id="wiz-param-' + f.key + '" rows="8" style="font-family: monospace;">' + this.esc(state.customParams[f.key] || f.default) + '</textarea>';
             } else if (f.type === 'checkbox') {
@@ -799,7 +974,7 @@ const AppsPage = {
                 ${f.hint ? '<p class="form-hint">' + this.esc(f.hint) + '</p>' : ''}
               </div>
             `;
-          }).join('')}
+          }).join('') : ''}
         `;
       } else if (state.step === 3) {
         const selectedOUName = state.ouDN && this.ousCache
