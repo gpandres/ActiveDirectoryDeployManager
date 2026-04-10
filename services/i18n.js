@@ -102,8 +102,8 @@ const FALLBACK_EN = {
     next: "Next",
     back: "Back",
     cancel: "Cancel",
-    saveAndDeploy: "Save and Deploy",
-    createAndDeploy: "Create and Deploy",
+    saveAndDeploy: "Review and Save",
+    createAndDeploy: "Review and Create",
     appName: "Application Name",
     installer: "Installer (EXE/MSI)",
     browse: "Browse...",
@@ -161,6 +161,7 @@ const FALLBACK_EN = {
     selectGpoFirst: "Select a GPO first",
     gpoAssignedBulk: "GPO \"{gpo}\" assigned to {count} app(s)",
     nameRequired: "App name is required",
+    installerRequired: "Select an installer file to continue",
     nameDuplicate: "An app named \"{name}\" already exists",
     errorGeneratingScript: "Error generating script:",
     appSavedDeployError: "App saved but error deploying:",
@@ -290,7 +291,14 @@ const FALLBACK_EN = {
     startupScriptCleaned: "Startup script cleaned",
     gpoDeletedSuccess: "GPO \"{gpo}\" deleted",
     bundleDisabled: "Bundle \"{bundle}\" disabled",
-    bundleScriptTitle: "Bundle Script"
+    bundleScriptTitle: "Bundle Script",
+    loadingWizard: "Loading...",
+    loadingOUs: "Fetching AD organizational units...",
+    alreadyDeploying: "This bundle is already being deployed, please wait",
+    deployingStep: "Deploying bundle...",
+    creatingGpoStep: "Creating GPO in AD...",
+    search: "Search bundles...",
+    noBundlesMatch: "No bundles match your search"
   },
   gpos: {
     title: "GPOs",
@@ -326,7 +334,9 @@ const FALLBACK_EN = {
     actions: "Actions",
     name: "GPO Name",
     gpoCreated: "GPO {gpo} created",
-    gpoDeleted: "GPO {gpo} deleted"
+    gpoDeleted: "GPO {gpo} deleted",
+    search: "Search GPOs...",
+    noGposMatch: "No GPOs match your search"
   },
   ous: {
     title: "Organizational Units",
@@ -360,7 +370,17 @@ const FALLBACK_EN = {
     gpoUnlinkFailed: "Failed to unlink GPO from OU",
     // Assignment-centric redesign
     treeView: "Tree",
-    matrixView: "Matrix",
+    assignmentsView: "Assignments",
+    pickerTitle: "Select OUs to display",
+    pickerSubtitle: "Choose only the OUs relevant to software deployment (e.g. user or computer OUs).",
+    pickerSearch: "Filter OUs...",
+    pickerSelectAll: "Select all",
+    pickerClear: "Clear",
+    pickerConfirm: "Show assignments ({n} OUs)",
+    pickerSelected: "{n} OUs selected",
+    pickerSelectAtLeastOne: "Select at least one OU",
+    changeOUs: "Change OUs",
+    assignmentsOUCount: "OUs selected",
     searchOUs: "Search OUs...",
     searchApps: "Search apps...",
     ctrlClickHint: "Ctrl+Click to select multiple OUs",
@@ -439,7 +459,9 @@ const FALLBACK_EN = {
     folders: "folder(s)",
     lastModified: "Last Modified",
     deployDate: "Deployment Date",
-    close: "Close"
+    close: "Close",
+    search: "Search deployments...",
+    noDeploymentsMatch: "No deployments match your search"
   },
   settings: {
     title: "Settings",
@@ -576,8 +598,8 @@ const DEFAULT_ES = {
     next: "Siguiente",
     back: "Atrás",
     cancel: "Cancelar",
-    saveAndDeploy: "Guardar y Desplegar",
-    createAndDeploy: "Crear y Desplegar",
+    saveAndDeploy: "Revisar y Guardar",
+    createAndDeploy: "Revisar y Crear",
     appName: "Nombre de la Aplicación",
     installer: "Instalador (EXE/MSI)",
     browse: "Examinar...",
@@ -635,6 +657,7 @@ const DEFAULT_ES = {
     selectGpoFirst: "Selecciona una GPO primero",
     gpoAssignedBulk: "GPO \"{gpo}\" asignada a {count} app(s)",
     nameRequired: "El nombre de la app es obligatorio",
+    installerRequired: "Selecciona un archivo instalador para continuar",
     nameDuplicate: "Ya existe una app con el nombre \"{name}\"",
     errorGeneratingScript: "Error generando script:",
     appSavedDeployError: "App guardada pero error al desplegar:",
@@ -763,7 +786,14 @@ const DEFAULT_ES = {
     startupScriptCleaned: "Script de arranque limpiado",
     gpoDeletedSuccess: "GPO \"{gpo}\" eliminada",
     bundleDisabled: "Bundle \"{bundle}\" deshabilitado",
-    bundleScriptTitle: "Script del Bundle"
+    bundleScriptTitle: "Script del Bundle",
+    loadingWizard: "Cargando...",
+    loadingOUs: "Obteniendo unidades organizativas del AD...",
+    alreadyDeploying: "Este bundle ya se está desplegando, por favor espera",
+    deployingStep: "Desplegando bundle...",
+    creatingGpoStep: "Creando GPO en el AD...",
+    search: "Buscar bundles...",
+    noBundlesMatch: "Ningún bundle coincide con la búsqueda"
   },
   gpos: {
     title: "GPOs",
@@ -799,7 +829,9 @@ const DEFAULT_ES = {
     actions: "Acciones",
     name: "Nombre GPO",
     gpoCreated: "GPO {gpo} creada",
-    gpoDeleted: "GPO {gpo} eliminada"
+    gpoDeleted: "GPO {gpo} eliminada",
+    search: "Buscar GPOs...",
+    noGposMatch: "Ninguna GPO coincide con la búsqueda"
   },
   ous: {
     title: "Unidades Organizativas",
@@ -833,7 +865,17 @@ const DEFAULT_ES = {
     gpoUnlinkFailed: "Error al desvincular la GPO de la UO",
     // Assignment-centric redesign
     treeView: "Árbol",
-    matrixView: "Matriz",
+    assignmentsView: "Asignaciones",
+    pickerTitle: "Seleccionar UOs a mostrar",
+    pickerSubtitle: "Elige solo las UOs relevantes para el despliegue de software (ej. UOs de usuarios o equipos).",
+    pickerSearch: "Filtrar UOs...",
+    pickerSelectAll: "Seleccionar todas",
+    pickerClear: "Limpiar",
+    pickerConfirm: "Ver asignaciones ({n} UOs)",
+    pickerSelected: "{n} UOs seleccionadas",
+    pickerSelectAtLeastOne: "Selecciona al menos una UO",
+    changeOUs: "Cambiar UOs",
+    assignmentsOUCount: "UOs seleccionadas",
     searchOUs: "Buscar UOs...",
     searchApps: "Buscar apps...",
     ctrlClickHint: "Ctrl+Click para seleccionar varias UOs",
@@ -912,7 +954,9 @@ const DEFAULT_ES = {
     folders: "carpeta(s)",
     lastModified: "Última Modificación",
     deployDate: "Fecha de Despliegue",
-    close: "Cerrar"
+    close: "Cerrar",
+    search: "Buscar despliegues...",
+    noDeploymentsMatch: "Ningún despliegue coincide con la búsqueda"
   },
   settings: {
     title: "Configuración",

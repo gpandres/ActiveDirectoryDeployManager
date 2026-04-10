@@ -5,6 +5,9 @@
 const AppsPage = {
   selectedIds: new Set(),
   gposCache: null,
+  ousCache: null,
+  ousTreeCache: null,
+  _wizardOpening: false,
 
   async render(container) {
     const apps = await window.api.apps.getAll();
@@ -25,6 +28,14 @@ const AppsPage = {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           ${t('apps.newApp')}
         </button>
+      </div>
+
+      <!-- Search Bar -->
+      <div style="margin-bottom: var(--space-md);">
+        <div style="position:relative; max-width:320px;">
+          <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.4" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" class="form-input" id="apps-search" placeholder="${t('ous.searchApps')}" autocomplete="off" style="padding-left:34px;">
+        </div>
       </div>
 
       <!-- Bulk Action Bar -->
@@ -59,6 +70,31 @@ const AppsPage = {
     document.getElementById('btn-new-app').addEventListener('click', () => this.openWizard());
     document.getElementById('btn-bulk-gpo').addEventListener('click', () => this.bulkAssignGPO());
     document.getElementById('btn-clear-selection').addEventListener('click', () => this.clearSelection());
+
+    document.getElementById('apps-search').addEventListener('input', (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      const grid = document.getElementById('apps-grid');
+      let anyVisible = false;
+      grid.querySelectorAll('.app-card').forEach(card => {
+        const name = card.querySelector('.app-card-name')?.textContent.toLowerCase() || '';
+        const tmpl = card.querySelector('.app-card-template')?.textContent.toLowerCase() || '';
+        const matches = !q || name.includes(q) || tmpl.includes(q);
+        card.style.display = matches ? '' : 'none';
+        if (matches) anyVisible = true;
+      });
+      let noMatch = grid.querySelector('.search-no-match');
+      if (!anyVisible && q) {
+        if (!noMatch) {
+          noMatch = document.createElement('p');
+          noMatch.className = 'search-no-match';
+          noMatch.style.cssText = 'grid-column:1/-1;text-align:center;color:var(--text-muted);padding:40px 0;';
+          noMatch.textContent = t('ous.noAppsMatch');
+          grid.appendChild(noMatch);
+        }
+      } else if (noMatch) {
+        noMatch.remove();
+      }
+    });
 
     // Load GPOs for bulk select
     this.loadGPOsForBulk();
@@ -445,8 +481,9 @@ const AppsPage = {
     const confirmBtn = document.getElementById('qu-confirm-btn');
     if (confirmBtn) {
       confirmBtn.style.width = confirmBtn.offsetWidth + 'px';
+      confirmBtn.style.height = confirmBtn.offsetHeight + 'px';
       confirmBtn.disabled = true;
-      confirmBtn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;margin-right:6px;"></span> ' + t('apps.deployingLoader');
+      confirmBtn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;"></span>';
     }
 
     try {
@@ -559,16 +596,41 @@ const AppsPage = {
 
   // ─── Wizard ────────────────────────────────────────
   async openWizard(existingApp = null) {
-    const templates = await window.api.scripts.getTemplates();
-    const isEdit = !!existingApp;
+    if (this._wizardOpening) return;
+    this._wizardOpening = true;
 
-    // When editing, prefer the installer path on the share (where it actually
-    // lives now) instead of the original local path used at creation time.
-    let initialInstallerPath = existingApp?.installerPath || '';
-    if (existingApp) {
-      const sharedPath = await this.resolveSharedInstaller(existingApp.name);
-      if (sharedPath) initialInstallerPath = sharedPath;
-    }
+    // Show locked loading modal immediately so user gets feedback and can't double-open
+    App.openModalLocked(
+      existingApp ? t('apps.edit') : t('apps.newApp'),
+      `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:120px;">
+        <span class="spinner" style="width:24px;height:24px;border-width:3px;flex-shrink:0;"></span>
+        <span style="color:var(--text-secondary);font-size:14px;">${t('bundles.loadingOUs')}</span>
+      </div>`,
+      ''
+    );
+
+    try {
+      const templates = await window.api.scripts.getTemplates();
+      const isEdit = !!existingApp;
+
+      // Pre-fetch OUs so they are ready before the wizard renders step 3
+      if (App.rsatAvailable && !App.rsatMissingGPMC && !this.ousTreeCache) {
+        try {
+          const ouResult = await window.api.ad.getOUs();
+          if (ouResult.success && ouResult.data) {
+            this.ousTreeCache = ouResult.data;
+            this.ousCache = this.flattenOUs(ouResult.data);
+          }
+        } catch (e) { /* AD unavailable – OU list will be empty */ }
+      }
+
+      // When editing, prefer the installer path on the share (where it actually
+      // lives now) instead of the original local path used at creation time.
+      let initialInstallerPath = existingApp?.installerPath || '';
+      if (existingApp) {
+        const sharedPath = await this.resolveSharedInstaller(existingApp.name);
+        if (sharedPath) initialInstallerPath = sharedPath;
+      }
 
     // State
     const state = {
@@ -740,12 +802,25 @@ const AppsPage = {
           }).join('')}
         `;
       } else if (state.step === 3) {
+        const selectedOUName = state.ouDN && this.ousCache
+          ? (this.ousCache.find(o => o.dn === state.ouDN) || {}).name || state.ouDN
+          : '';
         body += `
           <div class="form-group mb-md">
             <label class="form-label">${t('apps.selectOus')}</label>
-            <select class="form-select" id="wiz-ou">
-              <option value="">${t('apps.selectOuRecommended')}</option>
-            </select>
+            <div style="position:relative;margin-bottom:8px;">
+              <svg style="position:absolute;left:9px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.4" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" class="form-input" id="wiz-ou-search" placeholder="${t('ous.searchOUs')}" autocomplete="off" style="padding-left:32px;">
+            </div>
+            <div id="wiz-ou-tree" style="max-height:190px;overflow-y:auto;border:1px solid var(--border-color);border-radius:6px;padding:4px 6px;background:var(--bg-secondary);">
+              ${this.ousTreeCache ? this.ouPickerTreeHTML(this.ousTreeCache, '', state.ouDN) : `<p style="padding:8px;font-size:13px;color:var(--text-muted);">${t('ous.noOusFound')}</p>`}
+            </div>
+            <div id="wiz-ou-selected" style="margin-top:6px;min-height:22px;">
+              ${state.ouDN
+                ? `<span style="background:rgba(30,144,255,0.15);color:var(--primary-color);padding:2px 10px;border-radius:4px;font-size:12px;">📁 ${this.esc(selectedOUName)}</span>`
+                : `<span style="font-size:12px;color:var(--text-muted);">${t('apps.selectOuRecommended')}</span>`}
+            </div>
+            <input type="hidden" id="wiz-ou-dn" value="${this.esc(state.ouDN)}">
           </div>
 
           <div class="form-group mb-md">
@@ -794,7 +869,14 @@ const AppsPage = {
       this.bindWizardEvents(state, templates, renderWizard, isEdit, existingApp);
     };
 
+    App._modalLocked = false;  // unlock before rendering the interactive wizard
+    this._wizardOpening = false;
     renderWizard();
+    } catch (err) {
+      this._wizardOpening = false;
+      App.toast(t('common.error') + ': ' + err.message, 'error');
+      App.closeModal();
+    }
   },
 
   bindWizardEvents(state, templates, renderWizard, isEdit, existingApp) {
@@ -814,6 +896,22 @@ const AppsPage = {
     if (nextBtn) {
       nextBtn.addEventListener('click', () => {
         this.saveStepData(state, templates);
+
+        // Validate step 2 before advancing
+        if (state.step === 2) {
+          if (!state.name.trim()) {
+            App.toast(t('apps.nameRequired'), 'warning');
+            document.getElementById('wiz-name')?.focus();
+            return;
+          }
+          const tmpl = templates.find(t => t.id === state.template);
+          const needsInstaller = state.template !== 'custom' && !(tmpl?.noInstaller);
+          if (needsInstaller && !state.installerPath) {
+            App.toast(t('apps.installerRequired'), 'warning');
+            return;
+          }
+        }
+
         state.step++;
         renderWizard();
       });
@@ -915,7 +1013,13 @@ const AppsPage = {
     // Load GPOs and OUs for step 3
     if (state.step === 3 && App.rsatAvailable) {
       this.loadGPOsForWizard(state);
-      this.loadOUsForWizard(state);
+      // OUs are pre-fetched in openWizard; bind tree events.
+      // loadOUsForWizard handles the edge case where cache is still empty.
+      if (this.ousTreeCache) {
+        this.bindOUPickerEvents(state);
+      } else {
+        this.loadOUsForWizard(state);
+      }
     }
 
     // Generate preview for step 4
@@ -948,8 +1052,8 @@ const AppsPage = {
 
     const gpoSelect = document.getElementById('wiz-gpo');
     if (gpoSelect) state.gpoName = gpoSelect.value;
-    const ouSelect = document.getElementById('wiz-ou');
-    if (ouSelect) state.ouDN = ouSelect.value;
+    const ouDnInput = document.getElementById('wiz-ou-dn');
+    if (ouDnInput) state.ouDN = ouDnInput.value;
 
     const versionInput = document.getElementById('wiz-version');
     if (versionInput) state.version = versionInput.value;
@@ -980,25 +1084,115 @@ const AppsPage = {
   },
 
   async loadOUsForWizard(state) {
+    // Fallback: fetches OUs if not already cached, then renders and binds the tree picker.
+    // Under normal flow ousTreeCache is pre-populated in openWizard before step 3 is shown.
     if (!App.rsatAvailable || App.rsatMissingGPMC) return;
     try {
-      if (!this.ousCache) {
+      if (!this.ousTreeCache) {
         const result = await window.api.ad.getOUs();
-        if (result.success) this.ousCache = this.flattenOUs(result.data);
-      }
-      if (this.ousCache) {
-        const select = document.getElementById('wiz-ou');
-        if (select) {
-          this.ousCache.forEach(ou => {
-            const opt = document.createElement('option');
-            opt.value = ou.dn;
-            opt.textContent = '  '.repeat(ou.depth) + (ou.depth > 0 ? '↳ ' : '') + ou.name;
-            if (ou.dn === state.ouDN) opt.selected = true;
-            select.appendChild(opt);
-          });
+        if (result.success && result.data) {
+          this.ousTreeCache = result.data;
+          this.ousCache = this.flattenOUs(result.data);
         }
       }
+      const treeContainer = document.getElementById('wiz-ou-tree');
+      if (treeContainer && this.ousTreeCache) {
+        treeContainer.innerHTML = this.ouPickerTreeHTML(this.ousTreeCache, '', state.ouDN);
+      }
+      this.bindOUPickerEvents(state);
     } catch (e) {}
+  },
+
+  // ─── OU Picker Tree (wizard step 3) ───────────────────
+  ouPickerTreeHTML(nodes, query, selectedDN) {
+    if (!nodes || !nodes.length) return '';
+    const q = query.trim().toLowerCase();
+    let html = '<ul class="tree" style="margin:0;padding-left:0;">';
+    for (const node of nodes) {
+      if (q && !this.ouNodeMatchesSearch(node, q)) continue;
+      const hasChildren = node.children && node.children.length > 0;
+      const isSelected = node.dn === selectedDN;
+      // Auto-expand: when searching, when selected, or when selected is a descendant
+      const selectedIsDescendant = selectedDN && selectedDN !== node.dn && selectedDN.includes(node.dn);
+      const shouldExpand = q ? true : (isSelected || !!selectedIsDescendant);
+      html += `
+        <li class="tree-item">
+          <div class="tree-node ${isSelected ? 'selected' : ''}" data-dn="${this.esc(node.dn)}" data-name="${this.esc(node.name)}">
+            <button class="tree-toggle ${hasChildren ? (shouldExpand ? 'expanded' : '') : 'empty'}" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+            <span class="tree-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            </span>
+            <span class="tree-label">${this.esc(node.name)}</span>
+          </div>
+          ${hasChildren ? `<div class="tree-children ${shouldExpand ? '' : 'collapsed'}">${this.ouPickerTreeHTML(node.children, query, selectedDN)}</div>` : ''}
+        </li>`;
+    }
+    html += '</ul>';
+    return html;
+  },
+
+  ouNodeMatchesSearch(node, q) {
+    if (node.name.toLowerCase().includes(q)) return true;
+    if (node.children) {
+      for (const child of node.children) {
+        if (this.ouNodeMatchesSearch(child, q)) return true;
+      }
+    }
+    return false;
+  },
+
+  bindOUPickerEvents(state) {
+    const searchInput = document.getElementById('wiz-ou-search');
+    const treeContainer = document.getElementById('wiz-ou-tree');
+    const dnInput = document.getElementById('wiz-ou-dn');
+    const selectedDisplay = document.getElementById('wiz-ou-selected');
+    if (!treeContainer) return;
+
+    const bindNodes = () => {
+      // Toggle expand/collapse
+      treeContainer.querySelectorAll('.tree-toggle:not(.empty)').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const li = btn.closest('.tree-item');
+          const children = li.querySelector('.tree-children');
+          if (children) {
+            children.classList.toggle('collapsed');
+            btn.classList.toggle('expanded');
+          }
+        });
+      });
+
+      // Click to select
+      treeContainer.querySelectorAll('.tree-node').forEach(node => {
+        node.addEventListener('click', (e) => {
+          if (e.target.closest('.tree-toggle')) return;
+          const dn = node.dataset.dn;
+          const name = node.dataset.name;
+          if (dnInput) dnInput.value = dn;
+          state.ouDN = dn;
+          if (selectedDisplay) {
+            selectedDisplay.innerHTML = dn
+              ? `<span style="background:rgba(30,144,255,0.15);color:var(--primary-color);padding:2px 10px;border-radius:4px;font-size:12px;">📁 ${this.esc(name)}</span>`
+              : `<span style="font-size:12px;color:var(--text-muted);">${t('apps.selectOuRecommended')}</span>`;
+          }
+          treeContainer.querySelectorAll('.tree-node.selected').forEach(n => n.classList.remove('selected'));
+          node.classList.add('selected');
+        });
+      });
+    };
+
+    bindNodes();
+
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        treeContainer.innerHTML = this.ouPickerTreeHTML(
+          this.ousTreeCache, searchInput.value, dnInput?.value || state.ouDN
+        );
+        bindNodes();
+      });
+    }
   },
 
   flattenOUs(roots, depth = 0, flat = []) {
@@ -1155,8 +1349,9 @@ const AppsPage = {
       const deployBtn = document.getElementById('btn-confirm-create');
       if (deployBtn) {
         deployBtn.style.width = deployBtn.offsetWidth + 'px';
+        deployBtn.style.height = deployBtn.offsetHeight + 'px';
         deployBtn.disabled = true;
-        deployBtn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;margin-right:6px;"></span> ' + t('apps.deployingLoader');
+        deployBtn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;"></span>';
       }
       const backBtn = document.getElementById('btn-confirm-back');
       if (backBtn) backBtn.disabled = true;
@@ -1298,6 +1493,10 @@ const AppsPage = {
           </div>
         </div>
       ` : ''}
+      <div class="form-group mt-md" style="display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" id="chk-delete-deploy-files" style="width:auto; cursor:pointer;" checked>
+        <label for="chk-delete-deploy-files" style="margin:0; cursor:pointer; font-size:14px; color:var(--text-muted);">${t('apps.keepFilesOption')}</label>
+      </div>
     `, `
       <button class="btn btn-secondary" onclick="App.closeModal()">${t('common.cancel')}</button>
       <button class="btn btn-warning" id="btn-confirm-disable">${t('apps.disable')}</button>
@@ -1306,11 +1505,13 @@ const AppsPage = {
     document.getElementById('btn-confirm-disable').addEventListener('click', async () => {
       const btn = document.getElementById('btn-confirm-disable');
       btn.style.width = btn.offsetWidth + 'px';
+      btn.style.height = btn.offsetHeight + 'px';
       btn.disabled = true;
-      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;margin-right:6px;"></span> ' + t('apps.processingLoader');
+      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;"></span>';
 
       try {
-        const deleteFiles = document.getElementById('chk-delete-deploy-files').checked;
+        // Checkbox = "keep files" (checked by default), so invert to get deleteFiles
+        const deleteFiles = !document.getElementById('chk-delete-deploy-files').checked;
         const unlinkGPO = document.getElementById('chk-unlink-gpo')?.checked ?? false;
         const cleanScript = document.getElementById('chk-clean-script')?.checked ?? false;
         const deleteGPO = document.getElementById('chk-delete-gpo')?.checked ?? false;
@@ -1423,11 +1624,14 @@ const AppsPage = {
 
     document.getElementById('btn-confirm-delete').addEventListener('click', async () => {
       const btn = document.getElementById('btn-confirm-delete');
+      btn.style.width = btn.offsetWidth + 'px';
+      btn.style.height = btn.offsetHeight + 'px';
       btn.disabled = true;
-      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;margin-right:6px;"></span> ' + t('apps.deletingLoader');
+      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;"></span>';
 
       try {
-        const deleteFiles = document.getElementById('chk-delete-files').checked;
+        // Checkbox = "keep files" (checked by default), so invert to get deleteFiles
+        const deleteFiles = !document.getElementById('chk-delete-files').checked;
         const unlinkGPO = document.getElementById('chk-del-unlink-gpo')?.checked ?? false;
         const cleanScript = document.getElementById('chk-del-clean-script')?.checked ?? false;
         const deleteGPO = document.getElementById('chk-del-delete-gpo')?.checked ?? false;

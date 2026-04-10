@@ -1,6 +1,7 @@
 const GposPage = {
   gposCache: null,
   filterAppOnly: true,
+  searchQuery: '',
 
   async render(container) {
     container.innerHTML = `
@@ -9,9 +10,13 @@ const GposPage = {
           <h1 class="page-title">${t('gpos.title')}</h1>
           <p class="page-subtitle">${t('gpos.subtitle')}</p>
         </div>
-        <div style="display: flex; align-items: center; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="position:relative;">
+            <svg style="position:absolute;left:9px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.4" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" class="form-input" id="gpo-search" placeholder="${t('gpos.search')}" autocomplete="off" style="padding-left:32px;width:200px;">
+          </div>
           <label class="gpo-filter-toggle" style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;">
-            <span style="font-size: 13px; color: var(--text-muted);" id="gpo-filter-label">${t('gpos.filterAll')}</span>
+            <span style="font-size: 13px; color: var(--text-muted);" id="gpo-filter-label">${this.filterAppOnly ? t('gpos.filterAppOnly') : t('gpos.filterAll')}</span>
             <div class="gpo-switch" id="gpo-filter-switch">
               <input type="checkbox" id="gpo-filter-checkbox" ${this.filterAppOnly ? 'checked' : ''}>
               <span class="gpo-switch-slider"></span>
@@ -62,6 +67,11 @@ const GposPage = {
       this.loadGPOs();
     });
 
+    document.getElementById('gpo-search').addEventListener('input', (e) => {
+      this.searchQuery = e.target.value;
+      this.loadGPOs();
+    });
+
     if (App.rsatAvailable && !App.rsatMissingGPMC) {
       await this.loadGPOs();
     } else {
@@ -84,12 +94,16 @@ const GposPage = {
         this.gposCache = result.data.sort((a, b) => a.DisplayName.localeCompare(b.DisplayName));
       }
 
-      const displayList = this.filterAppOnly
+      let displayList = this.filterAppOnly
         ? this.gposCache.filter(g => g.DisplayName.startsWith('Deploy_'))
         : this.gposCache;
 
+      const q = this.searchQuery.trim().toLowerCase();
+      if (q) displayList = displayList.filter(g => g.DisplayName.toLowerCase().includes(q));
+
       if (displayList.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 40px;">${this.filterAppOnly ? t('gpos.emptyFiltered') : t('gpos.empty')}</td></tr>`;
+        const msg = q ? t('gpos.noGposMatch') : (this.filterAppOnly ? t('gpos.emptyFiltered') : t('gpos.empty'));
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 40px;">${msg}</td></tr>`;
         return;
       }
 

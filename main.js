@@ -143,17 +143,28 @@ app.whenReady().then(() => {
   ipcMain.handle('bundles:create', (_, data) => bundleService.create(data));
   ipcMain.handle('bundles:update', (_, id, data) => bundleService.update(id, data));
   ipcMain.handle('bundles:delete', (_, id) => bundleService.remove(id));
+
+  // Backend guard: reject duplicate deploy requests for the same bundle
+  const _deployingBundles = new Set();
   ipcMain.handle('bundles:deploy', async (_, bundleId) => {
-    const bundle = bundleService.get(bundleId);
-    if (!bundle) return { success: false, error: 'Bundle not found' };
-    const apps = appService.getAll();
-    const config = configService.getConfig();
-    const result = await bundleService.deployBundle(bundle, apps, config);
-    if (result.success) {
-      bundleService.update(bundleId, { deployed: true, deployedPath: result.path });
-      activityLog.add('bundle_deploy', { bundleName: bundle.name, version: bundle.version });
+    if (_deployingBundles.has(bundleId)) {
+      return { success: false, error: 'already_deploying' };
     }
-    return result;
+    _deployingBundles.add(bundleId);
+    try {
+      const bundle = bundleService.get(bundleId);
+      if (!bundle) return { success: false, error: 'Bundle not found' };
+      const apps = appService.getAll();
+      const config = configService.getConfig();
+      const result = await bundleService.deployBundle(bundle, apps, config);
+      if (result.success) {
+        bundleService.update(bundleId, { deployed: true, deployedPath: result.path });
+        activityLog.add('bundle_deploy', { bundleName: bundle.name, version: bundle.version });
+      }
+      return result;
+    } finally {
+      _deployingBundles.delete(bundleId);
+    }
   });
   ipcMain.handle('bundles:generateScript', (_, bundleId) => {
     const bundle = bundleService.get(bundleId);

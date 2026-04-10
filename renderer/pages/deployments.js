@@ -15,10 +15,16 @@ const DeploymentsPage = {
           </h1>
           <p class="page-subtitle">${t('deployments.subtitle')}</p>
         </div>
-        <button class="btn btn-secondary" onclick="DeploymentsPage.refresh()">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-          ${t('deployments.refresh')}
-        </button>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="position:relative;">
+            <svg style="position:absolute;left:9px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.4" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" class="form-input" id="deployments-search" placeholder="${t('deployments.search')}" autocomplete="off" style="padding-left:32px;width:220px;">
+          </div>
+          <button class="btn btn-secondary" onclick="DeploymentsPage.refresh()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            ${t('deployments.refresh')}
+          </button>
+        </div>
       </div>
 
       <div id="deployments-container">
@@ -137,6 +143,8 @@ const DeploymentsPage = {
             </tbody>
           </table>
         </div>`;
+
+      this.bindSearch();
     } catch (err) {
       container.innerHTML = `
         <div class="rsat-warning">
@@ -144,6 +152,37 @@ const DeploymentsPage = {
           <div><strong>Error</strong><p class="mt-sm">${err.message}</p></div>
         </div>`;
     }
+  },
+
+  bindSearch() {
+    const input = document.getElementById('deployments-search');
+    if (!input) return;
+    // Preserve query across refreshes
+    if (this._searchQuery) input.value = this._searchQuery;
+    input.addEventListener('input', (e) => {
+      this._searchQuery = e.target.value;
+      const q = this._searchQuery.trim().toLowerCase();
+      const tbody = document.querySelector('#deployments-container tbody');
+      if (!tbody) return;
+      let anyVisible = false;
+      tbody.querySelectorAll('tr').forEach(row => {
+        const text = row.textContent.toLowerCase();
+        const matches = !q || text.includes(q);
+        row.style.display = matches ? '' : 'none';
+        if (matches) anyVisible = true;
+      });
+      let noMatch = document.getElementById('deployments-no-match');
+      if (!anyVisible && q) {
+        if (!noMatch) {
+          noMatch = document.createElement('tr');
+          noMatch.id = 'deployments-no-match';
+          noMatch.innerHTML = `<td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">${t('deployments.noDeploymentsMatch')}</td>`;
+          tbody.appendChild(noMatch);
+        }
+      } else if (noMatch) {
+        noMatch.remove();
+      }
+    });
   },
 
   showDetails(appName, version, hash, deployedAt) {

@@ -128,21 +128,32 @@ const App = {
   },
 
   // ─── Modal ─────────────────────────────────────────
+  _modalLocked: false,
+
   bindModal() {
     const overlay = document.getElementById('modal-overlay');
     const closeBtn = document.getElementById('modal-close');
 
-    closeBtn.addEventListener('click', () => this.closeModal());
+    closeBtn.addEventListener('click', () => { if (!this._modalLocked) this.closeModal(); });
     overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) this.closeModal();
+      if (e.target === overlay && !this._modalLocked) this.closeModal();
     });
 
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') this.closeModal();
+      if (e.key === 'Escape' && !this._modalLocked) this.closeModal();
     });
   },
 
   openModal(title, bodyHTML, footerHTML = '') {
+    this._modalLocked = false;
+    document.getElementById('modal-title').textContent = title;
+    document.getElementById('modal-body').innerHTML = bodyHTML;
+    document.getElementById('modal-footer').innerHTML = footerHTML;
+    document.getElementById('modal-overlay').classList.add('visible');
+  },
+
+  openModalLocked(title, bodyHTML, footerHTML = '') {
+    this._modalLocked = true;
     document.getElementById('modal-title').textContent = title;
     document.getElementById('modal-body').innerHTML = bodyHTML;
     document.getElementById('modal-footer').innerHTML = footerHTML;
@@ -150,6 +161,7 @@ const App = {
   },
 
   closeModal() {
+    this._modalLocked = false;
     document.getElementById('modal-overlay').classList.remove('visible');
   },
 

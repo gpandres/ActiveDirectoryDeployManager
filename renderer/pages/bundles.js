@@ -5,6 +5,8 @@
 const BundlesPage = {
   bundles: [],
   apps: [],
+  _wizardOpening: false,       // prevents double-click opening multiple wizards
+  _deployingIds: new Set(),    // prevents concurrent deploy of the same bundle
 
   async render(container) {
     this.apps = await window.api.apps.getAll();
@@ -29,6 +31,15 @@ const BundlesPage = {
 
       ${App.rsatWarningHTML()}
 
+      ${this.bundles.length > 0 ? `
+        <div style="margin-bottom:var(--space-md);">
+          <div style="position:relative;max-width:320px;">
+            <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.4" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" class="form-input" id="bundles-search" placeholder="${t('bundles.search')}" autocomplete="off" style="padding-left:34px;">
+          </div>
+        </div>
+      ` : ''}
+
       <div id="bundles-list">
         ${this.bundles.length === 0 ? `
           <div class="empty-state">
@@ -37,12 +48,37 @@ const BundlesPage = {
             <p style="font-size:var(--font-sm);margin-top:8px">${t('bundles.createBundleHint')}</p>
           </div>
         ` : `
-          <div class="cards-grid">
+          <div class="cards-grid" id="bundles-grid">
             ${this.bundles.map(b => this.renderBundleCard(b)).join('')}
           </div>
         `}
       </div>
     `;
+
+    document.getElementById('bundles-search')?.addEventListener('input', (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      const grid = document.getElementById('bundles-grid');
+      if (!grid) return;
+      let anyVisible = false;
+      grid.querySelectorAll('.bundle-card').forEach(card => {
+        const text = card.textContent.toLowerCase();
+        const matches = !q || text.includes(q);
+        card.style.display = matches ? '' : 'none';
+        if (matches) anyVisible = true;
+      });
+      let noMatch = grid.querySelector('.search-no-match');
+      if (!anyVisible && q) {
+        if (!noMatch) {
+          noMatch = document.createElement('p');
+          noMatch.className = 'search-no-match';
+          noMatch.style.cssText = 'grid-column:1/-1;text-align:center;color:var(--text-muted);padding:40px 0;';
+          noMatch.textContent = t('bundles.noBundlesMatch');
+          grid.appendChild(noMatch);
+        }
+      } else if (noMatch) {
+        noMatch.remove();
+      }
+    });
   },
 
   renderBundleCard(bundle) {
@@ -104,14 +140,34 @@ const BundlesPage = {
 
   // ─── Wizard ────────────────────────────────────────
   async openWizard(existingBundle = null) {
+    // Guard: only one wizard can open at a time
+    if (this._wizardOpening) return;
+    this._wizardOpening = true;
+
     const isEdit = !!existingBundle;
+
+    // Show immediate feedback while AD loads (prevents impatient double-clicks)
+    App.openModalLocked(
+      t('bundles.loadingWizard'),
+      `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:120px;">
+        <span class="spinner" style="width:24px;height:24px;border-width:3px;flex-shrink:0;"></span>
+        <span style="color:var(--text-secondary);font-size:14px;">${t('bundles.loadingOUs')}</span>
+      </div>`,
+      ''
+    );
+
     let flatOUs = [];
     try {
       const ouResult = await window.api.ad.getOUs();
       if (ouResult.success && ouResult.data) {
         flatOUs = this._flattenOUs(ouResult.data);
       }
-    } catch (e) {}
+    } catch (e) {
+      // If AD fails we still open the wizard (OUs will just be empty)
+    }
+
+    // If something catastrophic happens before renderWizard(), release the guard
+    try {
 
     const state = {
       step: 1,
@@ -231,7 +287,16 @@ const BundlesPage = {
     this._wizState = state;
     this._wizRender = renderWizard;
     this._wizOus = flatOUs;
+    App._modalLocked = false;  // unlock before rendering the interactive wizard
     renderWizard();
+    // Release guard — wizard modal is now open and controls itself
+    this._wizardOpening = false;
+
+    } catch (err) {
+      this._wizardOpening = false;
+      App.toast(t('common.error') + ': ' + err.message, 'error');
+      App.closeModal();
+    }
   },
 
   _saveStepData() {
@@ -367,8 +432,10 @@ const BundlesPage = {
 
     document.getElementById('btn-bundle-confirm-delete').addEventListener('click', async () => {
       const btn = document.getElementById('btn-bundle-confirm-delete');
+      btn.style.width = btn.offsetWidth + 'px';
+      btn.style.height = btn.offsetHeight + 'px';
       btn.disabled = true;
-      btn.innerHTML = `<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;margin-right:6px;"></span> ${t('bundles.deleteBtn')}`;
+      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;"></span>';
 
       try {
         if (hasGPO) {
@@ -401,9 +468,27 @@ const BundlesPage = {
   },
 
   async deployBundle(id) {
+    // Guard: prevent concurrent deploy of the same bundle
+    if (this._deployingIds.has(id)) {
+      App.toast(t('bundles.alreadyDeploying'), 'warning');
+      return;
+    }
+    this._deployingIds.add(id);
+
+    // Disable the deploy button for this bundle while running
+    const deployBtn = document.querySelector(`button[onclick*="deployBundle('${id}')"]`);
+    if (deployBtn) {
+      deployBtn.disabled = true;
+      deployBtn.innerHTML = `<span class="spinner" style="width:12px;height:12px;display:inline-block;border-width:2px;"></span>`;
+    }
+
     // Re-read from DB to get the latest data (including createGPO flag)
     const bundle = await window.api.bundles.get(id);
-    if (!bundle) return;
+    if (!bundle) {
+      this._deployingIds.delete(id);
+      if (deployBtn) { deployBtn.disabled = false; deployBtn.textContent = t('apps.deploy'); }
+      return;
+    }
 
     App.toast(`${t('bundles.deploying')} "${bundle.name}"...`, 'info');
     try {
@@ -444,6 +529,11 @@ const BundlesPage = {
       }
     } catch (err) {
       App.toast(t('common.error') + ': ' + err.message, 'error');
+    } finally {
+      // Always release the guard and restore the button
+      this._deployingIds.delete(id);
+      const btn = document.querySelector(`button[onclick*="deployBundle('${id}')"]`);
+      if (btn) { btn.disabled = false; btn.textContent = t('apps.deploy'); }
     }
   },
 
@@ -481,8 +571,10 @@ const BundlesPage = {
 
     document.getElementById('btn-bundle-confirm-disable').addEventListener('click', async () => {
       const btn = document.getElementById('btn-bundle-confirm-disable');
+      btn.style.width = btn.offsetWidth + 'px';
+      btn.style.height = btn.offsetHeight + 'px';
       btn.disabled = true;
-      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;margin-right:6px;"></span> ' + t('apps.processingLoader');
+      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;"></span>';
 
       try {
         if (hasGPO) {

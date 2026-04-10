@@ -44,7 +44,7 @@ const DashboardPage = {
       ${App.rsatWarningHTML()}
 
       <div class="stats-grid">
-        <div class="stat-card">
+        <div class="stat-card" onclick="App.navigate('apps')" style="cursor:pointer;" title="${t('nav.apps')}">
           <div class="stat-icon purple">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
           </div>
@@ -52,7 +52,7 @@ const DashboardPage = {
           <div class="card-value">${appsCount}</div>
         </div>
 
-        <div class="stat-card">
+        <div class="stat-card" onclick="App.navigate('deployments')" style="cursor:pointer;" title="${t('nav.deployments')}">
           <div class="stat-icon green">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
           </div>
@@ -60,7 +60,7 @@ const DashboardPage = {
           <div class="card-value">${deployedCount}</div>
         </div>
 
-        <div class="stat-card">
+        <div class="stat-card" onclick="App.navigate('gpos')" style="cursor:pointer;" title="${t('nav.gpos')}">
           <div class="stat-icon yellow">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           </div>
@@ -68,7 +68,7 @@ const DashboardPage = {
           <div class="card-value">${withGPO}</div>
         </div>
 
-        <div class="stat-card">
+        <div class="stat-card" onclick="App.navigate('bundles')" style="cursor:pointer;" title="${t('nav.bundles')}">
           <div class="stat-icon blue">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16.5 9.4l-9-5.19M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
           </div>
