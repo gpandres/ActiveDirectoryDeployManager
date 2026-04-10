@@ -86,9 +86,17 @@ contextBridge.exposeInMainWorld('api', {
     getTranslations: (langCode) => ipcRenderer.invoke('i18n:getTranslations', langCode)
   },
 
-  // Winget catalog + version checking
+  // Winget catalog + version checking (legacy, used by apps.js wizard)
   winget: {
     getCatalog: () => ipcRenderer.invoke('winget:getCatalog'),
     checkVersions: (ids) => ipcRenderer.invoke('winget:checkVersions', ids)
+  },
+
+  // Catalog service (new, used by catalog page)
+  catalog: {
+    getCatalog: () => ipcRenderer.invoke('catalog:getCatalog'),
+    search: (query, category) => ipcRenderer.invoke('catalog:search', query, category),
+    checkVersions: (ids) => ipcRenderer.invoke('catalog:checkVersions', ids),
+    checkSingle: (wingetId) => ipcRenderer.invoke('catalog:checkSingle', wingetId)
   }
 });

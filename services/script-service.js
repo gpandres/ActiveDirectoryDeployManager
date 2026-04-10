@@ -36,7 +36,8 @@ const scriptService = {
       category: val.category || 'General',
       name: val.name,
       description: val.description,
-      fields: val.fields
+      fields: val.fields,
+      noInstaller: val.noInstaller || false
     }));
   },
 

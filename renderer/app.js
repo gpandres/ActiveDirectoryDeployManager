@@ -48,6 +48,7 @@ const App = {
     document.querySelector('.nav-item[data-page="ous"] span').textContent = t('nav.ous');
     document.querySelector('.nav-item[data-page="gpos"] span').textContent = t('nav.gpos');
     document.querySelector('.nav-item[data-page="apps"] span').textContent = t('nav.apps');
+    document.querySelector('.nav-item[data-page="catalog"] span').textContent = t('nav.catalog');
     document.querySelector('.nav-item[data-page="bundles"] span').textContent = t('nav.bundles');
     document.querySelector('.nav-item[data-page="deployments"] span').textContent = t('nav.deployments');
     document.querySelector('.nav-item[data-page="settings"] span').textContent = t('nav.settings');
@@ -93,6 +94,7 @@ const App = {
         case 'ous': await OUsPage.render(container); break;
         case 'gpos': await GposPage.render(container); break;
         case 'apps': await AppsPage.render(container); break;
+        case 'catalog': await CatalogPage.render(container); break;
         case 'bundles': await BundlesPage.render(container); break;
         case 'deployments': await DeploymentsPage.render(container); break;
         case 'settings': await SettingsPage.render(container); break;

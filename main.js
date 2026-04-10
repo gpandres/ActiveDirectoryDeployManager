@@ -57,7 +57,7 @@ app.whenReady().then(() => {
   const bundleService = require('./services/bundle-service');
   const activityLog = require('./services/activity-log');
   const i18nService = require('./services/i18n');
-  const wingetService = require('./services/winget-service');
+  const catalogService = require('./services/catalog-service');
 
   console.log('Initialize i18n...');
   i18nService.initialize();
@@ -133,9 +133,15 @@ app.whenReady().then(() => {
   ipcMain.handle('scripts:deploy', (_, appConfig) => scriptService.deployScript(appConfig));
   ipcMain.handle('scripts:getTemplates', () => scriptService.getTemplateList());
 
-  // ─── IPC Handlers: Winget Service ─────────────────────────────────
-  ipcMain.handle('winget:getCatalog', () => wingetService.getCatalog());
-  ipcMain.handle('winget:checkVersions', (_, catalogIds) => wingetService.checkVersions(catalogIds));
+  // ─── IPC Handlers: Catalog Service (replaces old winget handlers) ──
+  // Backward-compatible aliases (used by apps.js wizard)
+  ipcMain.handle('winget:getCatalog', () => catalogService.getCatalog());
+  ipcMain.handle('winget:checkVersions', (_, catalogIds) => catalogService.checkVersions(catalogIds));
+  // New catalog endpoints (used by catalog page)
+  ipcMain.handle('catalog:getCatalog', () => catalogService.getCatalog());
+  ipcMain.handle('catalog:search', (_, query, category) => catalogService.search(query, category));
+  ipcMain.handle('catalog:checkVersions', (_, catalogIds) => catalogService.checkVersions(catalogIds));
+  ipcMain.handle('catalog:checkSingle', (_, wingetId) => catalogService.checkSingle(wingetId));
 
   // ─── IPC Handlers: File Service ──────────────────────────────────
   ipcMain.handle('files:listDeployed', () => fileService.listDeployedApps());

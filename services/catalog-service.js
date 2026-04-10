@@ -1,13 +1,15 @@
 // ═══════════════════════════════════════════════════════
-// Winget App Catalog — curated list for the wizard
+// Catalog Service — unified catalog, search & version checking
+// Replaces: winget-catalog.js + winget-service.js
 // ═══════════════════════════════════════════════════════
 
-// versionCheck.method:
-//   'github'  → uses GitHub releases/latest API (free, no auth, 60 req/hr)
-//   'winget'  → runs `winget show --id X` via PowerShell and parses Version:
-//   'none'    → no automatic version check available
+const https = require('https');
+const { exec } = require('child_process');
 
-const WINGET_CATALOG = [
+// ─── Curated Catalog ────────────────────────────────────────
+// versionCheck.method: 'github' | 'winget' | 'none'
+
+const CURATED_CATALOG = [
   // ─── Navegadores ──────────────────────────────────────────
   {
     id: 'google-chrome', name: 'Google Chrome', wingetId: 'Google.Chrome',
@@ -37,7 +39,7 @@ const WINGET_CATALOG = [
     versionCheck: { method: 'winget' }
   },
   {
-    id: 'notepadplusplus', name: 'Notepad++', wingetId: 'Notepad.Notepad',
+    id: 'notepadplusplus', name: 'Notepad++', wingetId: 'Notepad++.Notepad++',
     category: 'Herramientas', icon: '📝', defaultVersion: '8.6',
     versionCheck: { method: 'github', repo: 'notepad-plus-plus/notepad-plus-plus' }
   },
@@ -166,7 +168,7 @@ const WINGET_CATALOG = [
   },
 ];
 
-// Office ODT entries — handled specially (not winget, uses ODT download)
+// ─── Office (ODT) Data ──────────────────────────────────────
 const ODT_PRODUCTS = [
   { id: 'O365BusinessRetail',   label: 'Microsoft 365 Business',    channel: 'MonthlyEnterprise', type: '365' },
   { id: 'O365ProPlusRetail',    label: 'Microsoft 365 Apps',        channel: 'MonthlyEnterprise', type: '365' },
@@ -203,4 +205,211 @@ const ODT_CHANNELS = [
   { id: 'SemiAnnual',        label: 'Semi-Annual Enterprise' },
 ];
 
-module.exports = { WINGET_CATALOG, ODT_PRODUCTS, ODT_APPS, ODT_LANGUAGES, ODT_CHANNELS };
+// ─── Version Checking Helpers ───────────────────────────────
+
+function checkVersionGitHub(repo) {
+  return new Promise((resolve) => {
+    const options = {
+      hostname: 'api.github.com',
+      path: `/repos/${repo}/releases/latest`,
+      headers: {
+        'User-Agent': 'AppDeployManager/1.0',
+        'Accept': 'application/vnd.github.v3+json'
+      },
+      timeout: 8000
+    };
+    const req = https.get(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          const raw = json.tag_name || json.name || '';
+          const ver = raw.replace(/^[vV]/, '').split('-')[0].trim();
+          resolve(ver || null);
+        } catch { resolve(null); }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+  });
+}
+
+function checkVersionWinget(wingetId) {
+  return new Promise((resolve) => {
+    const cmd = `winget show --id "${wingetId}" --source winget --accept-source-agreements 2>nul`;
+    exec(cmd, { timeout: 15000, shell: 'cmd.exe' }, (err, stdout) => {
+      if (err || !stdout) { resolve(null); return; }
+      const match = stdout.match(/Version\s*:\s*([^\r\n]+)/i);
+      if (match) {
+        resolve(match[1].trim() || null);
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
+
+// ─── Dynamic Winget API Search ──────────────────────────────
+
+function searchWingetAPI(query) {
+  return new Promise((resolve) => {
+    if (!query || query.length < 2) { resolve([]); return; }
+
+    // Use the community winget REST API to search
+    const searchUrl = `/api/packages?query=${encodeURIComponent(query)}&count=30`;
+    const options = {
+      hostname: 'api.winget.run',
+      path: searchUrl,
+      headers: {
+        'User-Agent': 'AppDeployManager/1.0',
+        'Accept': 'application/json'
+      },
+      timeout: 10000
+    };
+
+    const req = https.get(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          const packages = json.Packages || json.packages || json || [];
+          const results = (Array.isArray(packages) ? packages : []).slice(0, 30).map(pkg => ({
+            id: (pkg.Id || pkg.PackageIdentifier || '').toLowerCase().replace(/\./g, '-'),
+            name: pkg.Name || pkg.PackageName || pkg.Id || 'Unknown',
+            wingetId: pkg.Id || pkg.PackageIdentifier || '',
+            publisher: pkg.Publisher || '',
+            version: pkg.Version || pkg.Latest?.Version || '',
+            description: pkg.Description || pkg.ShortDescription || '',
+            category: 'Winget',
+            icon: '📦',
+            source: 'winget-api'
+          }));
+          resolve(results);
+        } catch {
+          resolve([]);
+        }
+      });
+    });
+    req.on('error', () => resolve([]));
+    req.on('timeout', () => { req.destroy(); resolve([]); });
+  });
+}
+
+// ─── Main Service ───────────────────────────────────────────
+
+const catalogService = {
+  /**
+   * Returns the curated catalog + ODT data (for the app wizard and catalog page).
+   * Backward-compatible with the old wingetService.getCatalog() shape.
+   */
+  getCatalog() {
+    return {
+      catalog: CURATED_CATALOG,
+      odtProducts: ODT_PRODUCTS,
+      odtApps: ODT_APPS,
+      odtLanguages: ODT_LANGUAGES,
+      odtChannels: ODT_CHANNELS
+    };
+  },
+
+  /**
+   * Search the catalog: first checks curated list, then queries the Winget API.
+   * @param {string} query — search term
+   * @param {string} category — 'Todo'|specific category name
+   * @returns {Promise<Array>} results
+   */
+  async search(query, category) {
+    const q = (query || '').toLowerCase().trim();
+    const cat = category || 'Todo';
+
+    // 1. Filter curated catalog
+    let curated = CURATED_CATALOG.filter(item => {
+      const matchCat = cat === 'Todo' || item.category === cat;
+      const matchQ = !q
+        || item.name.toLowerCase().includes(q)
+        || item.wingetId.toLowerCase().includes(q)
+        || item.category.toLowerCase().includes(q);
+      return matchCat && matchQ;
+    }).map(item => ({ ...item, source: 'curated' }));
+
+    // 2. If query is provided and not filtering by specific non-winget category,
+    //    also search Winget API for more results
+    let apiResults = [];
+    if (q.length >= 2 && (cat === 'Todo' || cat === 'Winget')) {
+      try {
+        apiResults = await searchWingetAPI(q);
+        // Remove duplicates (already in curated)
+        const curatedIds = new Set(curated.map(c => c.wingetId.toLowerCase()));
+        apiResults = apiResults.filter(r => !curatedIds.has(r.wingetId.toLowerCase()));
+      } catch { /* ignore API failures */ }
+    }
+
+    return [...curated, ...apiResults];
+  },
+
+  /**
+   * Check latest versions for an array of catalog item ids.
+   * @param {string[]} catalogIds — array of catalog item .id values
+   * @returns {Promise<Array<{id, wingetId, latestVersion}>>}
+   */
+  async checkVersions(catalogIds) {
+    const items = (catalogIds || [])
+      .map(id => CURATED_CATALOG.find(a => a.id === id))
+      .filter(Boolean);
+
+    const results = await Promise.allSettled(
+      items.map(async (item) => {
+        let latestVersion = null;
+        try {
+          if (item.versionCheck.method === 'github') {
+            latestVersion = await checkVersionGitHub(item.versionCheck.repo);
+          } else if (item.versionCheck.method === 'winget') {
+            latestVersion = await checkVersionWinget(item.wingetId);
+          }
+        } catch { /* ignore individual failures */ }
+        return {
+          id: item.id,
+          wingetId: item.wingetId,
+          name: item.name,
+          icon: item.icon,
+          catalogVersion: item.defaultVersion,
+          latestVersion: latestVersion || item.defaultVersion
+        };
+      })
+    );
+
+    return results
+      .filter(r => r.status === 'fulfilled')
+      .map(r => r.value);
+  },
+
+  /**
+   * Check a single winget package version.
+   * @param {string} wingetId
+   * @returns {Promise<{wingetId, latestVersion}>}
+   */
+  async checkSingle(wingetId) {
+    const item = CURATED_CATALOG.find(a => a.wingetId === wingetId);
+    let latestVersion = null;
+    
+    if (item) {
+      if (item.versionCheck.method === 'github') {
+        latestVersion = await checkVersionGitHub(item.versionCheck.repo);
+      } else {
+        latestVersion = await checkVersionWinget(wingetId);
+      }
+    } else {
+      // Not in curated list — use winget CLI directly
+      latestVersion = await checkVersionWinget(wingetId);
+    }
+
+    return {
+      wingetId,
+      latestVersion: latestVersion || (item ? item.defaultVersion : null)
+    };
+  }
+};
+
+module.exports = catalogService;

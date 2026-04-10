@@ -107,6 +107,8 @@ const appService = {
       silentArgs: data.silentArgs || '/S',
       installerPath: data.installerPath || '',
       configXmlPath: data.configXmlPath || '',
+      wingetId: data.wingetId || '',
+      odtConfig: data.odtConfig || null,
       customParams: data.customParams || {},
       assignedOUs: data.assignedOUs || [],
       gpoName: data.gpoName || '',

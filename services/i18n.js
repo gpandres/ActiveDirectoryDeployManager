@@ -20,6 +20,7 @@ const FALLBACK_EN = {
     ous: "Organizational Units",
     gpos: "GPO Management",
     apps: "Applications",
+    catalog: "Catalog",
     bundles: "Bundles",
     deployments: "Deployments",
     settings: "Settings"
@@ -507,6 +508,22 @@ const FALLBACK_EN = {
     rsatWarningMsg: "Although AD is active, GPOs are disabled without this module. Run as Administrator in PowerShell:",
     rsatNotInstalledTitle: "RSAT is not installed",
     rsatNotInstalledMsg: "Active Directory features are disabled. Run as Administrator in PowerShell:"
+  },
+  catalog: {
+    title: "App Catalog",
+    subtitle: "Search, discover and deploy software packages",
+    searchPlaceholder: "Search apps (e.g. Chrome, 7-Zip, VLC...)",
+    searching: "Searching...",
+    noResults: "No apps found matching your search.",
+    selected: "selected",
+    checkUpdates: "Check Updates",
+    checkingVersions: "Checking latest versions for all catalog apps...",
+    noUpdatesNeeded: "All catalog versions are up to date.",
+    updateResults: "Available Updates",
+    backToResults: "Back to catalog",
+    addToNewApp: "Add to Apps",
+    addToBundle: "Add to Bundle",
+    filterAll: "All"
   }
 };
 
@@ -516,6 +533,7 @@ const DEFAULT_ES = {
     ous: "Unidades Organizativas",
     gpos: "Gestión de GPOs",
     apps: "Aplicaciones",
+    catalog: "Catálogo",
     bundles: "Bundles",
     deployments: "Despliegues",
     settings: "Configuración"
@@ -1002,6 +1020,22 @@ const DEFAULT_ES = {
     rsatWarningMsg: "Aunque AD está activo, las GPOs están deshabilitadas sin este módulo. Ejecuta como Administrador en PowerShell:",
     rsatNotInstalledTitle: "RSAT no está instalado",
     rsatNotInstalledMsg: "Las funciones de Active Directory están deshabilitadas. Ejecuta como Administrador en PowerShell:"
+  },
+  catalog: {
+    title: "Catálogo de Apps",
+    subtitle: "Busca, descubre y despliega paquetes de software",
+    searchPlaceholder: "Buscar apps (ej. Chrome, 7-Zip, VLC...)",
+    searching: "Buscando...",
+    noResults: "No se encontraron apps con tu búsqueda.",
+    selected: "seleccionados",
+    checkUpdates: "Comprobar Actualizaciones",
+    checkingVersions: "Comprobando últimas versiones del catálogo...",
+    noUpdatesNeeded: "Todas las versiones del catálogo están actualizadas.",
+    updateResults: "Actualizaciones Disponibles",
+    backToResults: "Volver al catálogo",
+    addToNewApp: "Añadir a Apps",
+    addToBundle: "Añadir a Bundle",
+    filterAll: "Todos"
   }
 };
 

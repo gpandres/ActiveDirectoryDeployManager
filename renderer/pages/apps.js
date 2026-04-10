@@ -638,12 +638,12 @@ const AppsPage = {
       }
 
     // State
-    const agentTemplateIds = templates.filter(tmpl => tmpl.category !== 'General').map(tmpl => tmpl.id);
+    const plantillaTemplateIds = templates.filter(tmpl => tmpl.category !== 'General' || tmpl.id === 'office').map(tmpl => tmpl.id);
     const state = {
       step: 1,
       catalogTab: existingApp?.wingetId ? 'catalog' :
                   existingApp?.template === 'odt' ? 'catalog' :
-                  (existingApp && agentTemplateIds.includes(existingApp.template)) ? 'agentes' :
+                  (existingApp && plantillaTemplateIds.includes(existingApp.template)) ? 'plantilla' :
                   (existingApp ? 'manual' : 'catalog'),
       catalogSearch: '',
       catalogCat: 'Todo',
@@ -695,7 +695,7 @@ const AppsPage = {
         body += `
           <div style="display:flex;gap:0;border-bottom:1px solid var(--border-color);margin-bottom:var(--space-md);">
             <button class="wiz-tab" data-tab="catalog" style="${tabStyle(state.catalogTab==='catalog')}">🛒 Catálogo</button>
-            <button class="wiz-tab" data-tab="agentes" style="${tabStyle(state.catalogTab==='agentes')}">🛡️ Agentes</button>
+            <button class="wiz-tab" data-tab="plantilla" style="${tabStyle(state.catalogTab==='plantilla')}">📋 Plantilla</button>
             <button class="wiz-tab" data-tab="manual" style="${tabStyle(state.catalogTab==='manual')}">📦 Manual</button>
           </div>
         `;
@@ -718,23 +718,27 @@ const AppsPage = {
             <div style="max-height:330px;overflow-y:auto;padding-right:2px;">
           `;
 
-          // ODT special card at top
-          const odtSel = state.template === 'odt';
-          body += `
-            <div style="margin-bottom:var(--space-sm);">
-              <h5 style="font-size:10px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;letter-spacing:.05em;">Microsoft Office</h5>
-              <div class="template-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));">
-                <div class="template-card catalog-item ${odtSel ? 'selected' : ''}" data-catalog-type="odt" style="cursor:pointer;">
-                  <div class="template-card-icon" style="font-size:22px;">🏢</div>
-                  <div class="template-card-name" style="font-size:11px;">Microsoft Office</div>
-                  <div class="template-card-desc" style="font-size:10px;">365 / LTSC 2021 / 2019</div>
-                </div>
-              </div>
-            </div>
-          `;
-
           // Winget catalog by category
           const q = (state.catalogSearch || '').toLowerCase();
+
+          // ODT special card at top (only show if matches search)
+          const odtSel = state.template === 'odt';
+          const odtMatchesSearch = !q || 'microsoft office'.includes(q) || 'odt'.includes(q) || '365'.includes(q) || 'ltsc'.includes(q);
+          if (odtMatchesSearch) {
+            body += `
+              <div style="margin-bottom:var(--space-sm);">
+                <h5 style="font-size:10px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;letter-spacing:.05em;">Microsoft Office</h5>
+                <div class="template-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));">
+                  <div class="template-card catalog-item ${odtSel ? 'selected' : ''}" data-catalog-type="odt" style="cursor:pointer;">
+                    <div class="template-card-icon" style="font-size:22px;">🏢</div>
+                    <div class="template-card-name" style="font-size:11px;">Microsoft Office</div>
+                    <div class="template-card-desc" style="font-size:10px;">365 / LTSC 2021 / 2019</div>
+                  </div>
+                </div>
+              </div>
+            `;
+          }
+
           const filteredCatalog = catalog.filter(item => {
             const matchCat = activeCat === 'Todo' || item.category === activeCat;
             const matchQ = !q || item.name.toLowerCase().includes(q) || item.category.toLowerCase().includes(q) || item.wingetId.toLowerCase().includes(q);
@@ -768,17 +772,51 @@ const AppsPage = {
               </div>`;
           });
 
-          if (!filteredCatalog.length && state.template !== 'odt') {
+          if (!filteredCatalog.length && !odtMatchesSearch) {
             body += `<p style="text-align:center;color:var(--text-muted);padding:20px 0;font-size:13px;">No se encontraron apps</p>`;
           }
           body += `</div>`; // close scrollable
 
-        } else if (state.catalogTab === 'agentes') {
-          // ── Non-General templates ─────────────────────────────────
-          const agentCats = ['Seguridad', 'Conectividad', 'RMM', 'Backups', 'Corporativo'];
-          body += `<div style="max-height:360px;overflow-y:auto;padding-right:2px;">`;
-          agentCats.forEach(cat => {
-            const catTmpls = templates.filter(tmpl => tmpl.category === cat);
+        } else if (state.catalogTab === 'plantilla') {
+          // ── Plantilla tab: Non-General templates + Office XML ─────
+          const plantillaCats = ['Seguridad', 'Conectividad', 'RMM', 'Backups', 'Corporativo'];
+
+          // Search bar for Plantilla tab
+          body += `
+            <div style="position:relative;margin-bottom:var(--space-sm);max-width:320px;">
+              <svg style="position:absolute;left:8px;top:50%;transform:translateY(-50%);opacity:.4;pointer-events:none;" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" class="form-input" id="plantilla-search" value="${this.esc(state.plantillaSearch||'')}" placeholder="Buscar plantilla..." style="padding-left:28px;padding-top:5px;padding-bottom:5px;font-size:13px;" autocomplete="off">
+            </div>
+          `;
+
+          const pq = (state.plantillaSearch || '').toLowerCase();
+          body += `<div style="max-height:330px;overflow-y:auto;padding-right:2px;">`;
+
+          // Office XML template at the top of Plantilla tab
+          const officeTmpl = templates.find(tmpl => tmpl.id === 'office');
+          if (officeTmpl) {
+            const officeMatches = !pq || 'microsoft office'.includes(pq) || 'office xml'.includes(pq) || officeTmpl.name.toLowerCase().includes(pq) || officeTmpl.description.toLowerCase().includes(pq);
+            if (officeMatches) {
+              body += `
+                <div class="template-category-group" style="margin-bottom:var(--space-md);">
+                  <h5 style="margin-bottom:var(--space-sm);color:var(--text-primary);border-bottom:1px solid var(--border-color);padding-bottom:4px;">Microsoft Office</h5>
+                  <div class="template-grid">
+                    <div class="template-card ${state.template === 'office' ? 'selected' : ''}" data-template="office">
+                      <div class="template-card-icon">${this.templateIcon('office')}</div>
+                      <div class="template-card-name">${this.esc(officeTmpl.name)}</div>
+                      <div class="template-card-desc">${this.esc(officeTmpl.description)}</div>
+                    </div>
+                  </div>
+                </div>`;
+            }
+          }
+
+          plantillaCats.forEach(cat => {
+            const catTmpls = templates.filter(tmpl => {
+              if (tmpl.category !== cat) return false;
+              if (!pq) return true;
+              return tmpl.name.toLowerCase().includes(pq) || tmpl.description.toLowerCase().includes(pq) || tmpl.id.toLowerCase().includes(pq) || cat.toLowerCase().includes(pq);
+            });
             if (!catTmpls.length) return;
             body += `
               <div class="template-category-group" style="margin-bottom:var(--space-md);">
@@ -796,8 +834,8 @@ const AppsPage = {
           body += `</div>`;
 
         } else {
-          // ── Manual tab: General templates (excl. winget/odt which live in Catálogo) ──
-          const manualTmpls = templates.filter(tmpl => tmpl.category === 'General' && tmpl.id !== 'winget' && tmpl.id !== 'odt');
+          // ── Manual tab: only Genérica and Script Custom ──
+          const manualTmpls = templates.filter(tmpl => tmpl.id === 'generic' || tmpl.id === 'custom');
           body += `
             <div style="max-height:360px;overflow-y:auto;padding-right:2px;">
               <div class="template-grid">
@@ -1055,10 +1093,79 @@ const AppsPage = {
   },
 
   bindWizardEvents(state, templates, renderWizard, isEdit, existingApp) {
-    // Template selection
-    document.querySelectorAll('.template-card').forEach(card => {
+    // ── Tab switching (catalog / agentes / manual) ──────────────
+    document.querySelectorAll('.wiz-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        state.catalogTab = tab.dataset.tab;
+        // Clear template selection when switching tabs so user picks fresh
+        state.template = '';
+        state.wingetId = '';
+        renderWizard();
+      });
+    });
+
+    // ── Catalog item selection (winget / ODT cards in catalog tab) ──
+    document.querySelectorAll('.catalog-item').forEach(card => {
+      card.addEventListener('click', (e) => {
+        e.stopPropagation(); // prevent the generic .template-card handler below
+        const catalogType = card.dataset.catalogType;
+        if (catalogType === 'odt') {
+          state.template = 'odt';
+          state.wingetId = '';
+          if (!state.name) state.name = 'Microsoft Office';
+        } else if (catalogType === 'winget') {
+          state.template = 'winget';
+          state.wingetId = card.dataset.wingetId || '';
+          if (!state.name || state.name === 'Microsoft Office') state.name = card.dataset.appName || '';
+          if (card.dataset.appVersion) state.version = card.dataset.appVersion;
+        }
+        renderWizard();
+      });
+    });
+
+    // ── Template selection (agents / manual tabs) ──────────────
+    document.querySelectorAll('.template-card:not(.catalog-item)').forEach(card => {
       card.addEventListener('click', () => {
         state.template = card.dataset.template;
+        state.wingetId = '';
+        renderWizard();
+      });
+    });
+
+    // ── Catalog search input ──────────────────────────────────
+    const catalogSearchInput = document.getElementById('catalog-search');
+    if (catalogSearchInput) {
+      catalogSearchInput.addEventListener('input', () => {
+        state.catalogSearch = catalogSearchInput.value;
+        renderWizard();
+        // Re-focus and restore cursor position after re-render
+        const newInput = document.getElementById('catalog-search');
+        if (newInput) {
+          newInput.focus();
+          newInput.setSelectionRange(newInput.value.length, newInput.value.length);
+        }
+      });
+    }
+
+    // ── Plantilla search input ────────────────────────────────
+    const plantillaSearchInput = document.getElementById('plantilla-search');
+    if (plantillaSearchInput) {
+      plantillaSearchInput.addEventListener('input', () => {
+        state.plantillaSearch = plantillaSearchInput.value;
+        renderWizard();
+        // Re-focus and restore cursor position after re-render
+        const newInput = document.getElementById('plantilla-search');
+        if (newInput) {
+          newInput.focus();
+          newInput.setSelectionRange(newInput.value.length, newInput.value.length);
+        }
+      });
+    }
+
+    // ── Catalog category filter buttons ────────────────────────
+    document.querySelectorAll('.catalog-cat-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.catalogCat = btn.dataset.cat;
         renderWizard();
       });
     });
@@ -1223,6 +1330,23 @@ const AppsPage = {
           }
         }
       });
+
+      // Save ODT config fields
+      if (state.template === 'odt') {
+        const odtProd = document.getElementById('odt-product');
+        if (odtProd) state.odtConfig.product = odtProd.value;
+        const odtLang = document.getElementById('odt-language');
+        if (odtLang) state.odtConfig.language = odtLang.value;
+        const odtChan = document.getElementById('odt-channel');
+        if (odtChan) state.odtConfig.channel = odtChan.value;
+        const odtArch = document.getElementById('odt-arch');
+        if (odtArch) state.odtConfig.arch = odtArch.value;
+        const odtAppChecks = document.querySelectorAll('input[name="odt-app"]');
+        if (odtAppChecks.length > 0) {
+          state.odtConfig.apps = [];
+          odtAppChecks.forEach(cb => { if (cb.checked) state.odtConfig.apps.push(cb.value); });
+        }
+      }
     }
 
     const gpoSelect = document.getElementById('wiz-gpo');
@@ -1546,11 +1670,25 @@ const AppsPage = {
         notifyUser: state.notifyUser || false
       };
 
+      // Include wingetId for winget templates
+      if (state.template === 'winget' && state.wingetId) {
+        appData.wingetId = state.wingetId;
+      }
+      // Include odtConfig for ODT templates
+      if (state.template === 'odt' && state.odtConfig) {
+        appData.odtConfig = state.odtConfig;
+      }
+
       let app;
       if (isEdit && existingApp) {
         app = await window.api.apps.update(existingApp.id, appData);
       } else {
         app = await window.api.apps.create(appData);
+      }
+
+      if (!app || !app.id) {
+        App.toast(t('common.error') + ': Failed to save app', 'error');
+        return;
       }
 
       // Deploy script (Copies files to network share too)
