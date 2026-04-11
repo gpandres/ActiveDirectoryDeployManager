@@ -9,10 +9,15 @@ const AppsPage = {
   ousTreeCache: null,
   wingetCatalogCache: null,
   _wizardOpening: false,
+  _viewMode: 'grid', // 'grid' | 'list'
+  _groupBy: 'none',  // 'none' | 'template'
 
   async render(container) {
     const apps = await window.api.apps.getAll();
     const templates = await window.api.scripts.getTemplates();
+
+    const deployedCount = apps.filter(a => a.deployed !== false && a.deployedPath).length;
+    const pendingCount = apps.length - deployedCount;
 
     container.innerHTML = `
       <div class="page-header">
@@ -31,28 +36,66 @@ const AppsPage = {
         </button>
       </div>
 
-      <!-- Search Bar -->
-      <div style="margin-bottom: var(--space-md);">
-        <div style="position:relative; max-width:320px;">
-          <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.4" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" class="form-input" id="apps-search" placeholder="${t('ous.searchApps')}" autocomplete="off" style="padding-left:34px;">
+      <!-- Status Counters + Search + View Toggle -->
+      <div class="apps-toolbar">
+        <div class="apps-counters">
+          <div class="apps-counter" data-filter="all">
+            <span class="apps-counter-value">${apps.length}</span>
+            <span class="apps-counter-label">Total</span>
+          </div>
+          <div class="apps-counter" data-filter="deployed">
+            <span class="apps-counter-dot deployed"></span>
+            <span class="apps-counter-value">${deployedCount}</span>
+            <span class="apps-counter-label">${t('apps.deployedBadge')}</span>
+          </div>
+          <div class="apps-counter" data-filter="pending">
+            <span class="apps-counter-dot pending"></span>
+            <span class="apps-counter-value">${pendingCount}</span>
+            <span class="apps-counter-label">${t('apps.detailNotDeployed')}</span>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:var(--space-sm); flex:1; justify-content:flex-end;">
+          <div style="position:relative; min-width:180px; max-width:280px; flex:1;">
+            <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.4" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" class="form-input" id="apps-search" placeholder="${t('ous.searchApps')}" autocomplete="off" style="padding-left:34px;">
+          </div>
+          <select class="form-select" id="apps-group-by" style="width:auto; padding:6px 30px 6px 10px; min-width:120px;">
+            <option value="none" ${this._groupBy === 'none' ? 'selected' : ''}>${t('apps.noGroup') || 'Sin agrupar'}</option>
+            <option value="template" ${this._groupBy === 'template' ? 'selected' : ''}>${t('apps.groupByTemplate') || 'Por plantilla'}</option>
+          </select>
+          <div class="view-toggle">
+            <button class="view-toggle-btn ${this._viewMode === 'grid' ? 'active' : ''}" data-view="grid" title="Cuadrícula">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            </button>
+            <button class="view-toggle-btn ${this._viewMode === 'list' ? 'active' : ''}" data-view="list" title="Lista">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            </button>
+          </div>
         </div>
       </div>
 
       <!-- Bulk Action Bar -->
       <div class="action-bar" id="bulk-action-bar">
         <span class="action-bar-text"><span id="selected-count">0</span> ${t('apps.selected')}</span>
-        <div class="action-bar-buttons">
+        <div class="action-bar-buttons" style="display:flex; gap:10px; align-items:center;">
           <select class="form-select" id="bulk-gpo-select" style="width:200px; padding:6px 10px;">
             <option value="">${t('apps.selectGpo')}</option>
           </select>
           <button class="btn btn-primary btn-sm" id="btn-bulk-gpo">${t('apps.deploy')}</button>
+          <button class="btn btn-warning btn-sm" id="btn-bulk-disable">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+            ${t('apps.disable') || 'Deshabilitar'}
+          </button>
+          <button class="btn btn-danger btn-sm" id="btn-bulk-delete">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            ${t('common.delete') || 'Borrar'}
+          </button>
           <button class="btn btn-ghost btn-sm" id="btn-clear-selection">${t('apps.cancel')}</button>
         </div>
       </div>
 
       <!-- Apps Grid -->
-      <div class="app-grid" id="apps-grid">
+      <div class="app-grid ${this._viewMode === 'list' ? 'list-view' : ''}" id="apps-grid">
         ${apps.length === 0 ? `
           <div class="empty-state" style="grid-column: 1/-1;">
             <div class="empty-state-icon">
@@ -62,15 +105,53 @@ const AppsPage = {
             <p class="empty-state-text">${t('apps.clickNewApp')}</p>
             <button class="btn btn-primary" onclick="AppsPage.openWizard()">${t('apps.newApp')}</button>
           </div>
-        ` : apps.map(app => this.renderAppCard(app, templates)).join('')}
+        ` : this._renderGroupedApps(apps, templates)}
       </div>
     `;
 
     this.selectedIds.clear();
+    this._currentFilter = 'all';
 
     document.getElementById('btn-new-app').addEventListener('click', () => this.openWizard());
     document.getElementById('btn-bulk-gpo').addEventListener('click', () => this.bulkAssignGPO());
+    document.getElementById('btn-bulk-delete')?.addEventListener('click', () => this.bulkDelete());
+    document.getElementById('btn-bulk-disable')?.addEventListener('click', () => this.bulkDisable());
     document.getElementById('btn-clear-selection').addEventListener('click', () => this.clearSelection());
+
+    // View toggle buttons
+    document.querySelectorAll('.view-toggle-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this._viewMode = btn.dataset.view;
+        document.querySelectorAll('.view-toggle-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const grid = document.getElementById('apps-grid');
+        grid.classList.toggle('list-view', this._viewMode === 'list');
+      });
+    });
+
+    // Group by selector
+    document.getElementById('apps-group-by')?.addEventListener('change', (e) => {
+      this._groupBy = e.target.value;
+      App.navigate('apps');
+    });
+
+    // Counter filters
+    document.querySelectorAll('.apps-counter').forEach(ctr => {
+      ctr.addEventListener('click', () => {
+        const filter = ctr.dataset.filter;
+        this._currentFilter = filter;
+        document.querySelectorAll('.apps-counter').forEach(c => c.classList.remove('active'));
+        ctr.classList.add('active');
+        const grid = document.getElementById('apps-grid');
+        grid.querySelectorAll('.app-card').forEach(card => {
+          const isDeployed = card.dataset.deployed === 'true';
+          if (filter === 'all') card.style.display = '';
+          else if (filter === 'deployed') card.style.display = isDeployed ? '' : 'none';
+          else if (filter === 'pending') card.style.display = !isDeployed ? '' : 'none';
+        });
+      });
+    });
+    document.querySelector('.apps-counter[data-filter="all"]')?.classList.add('active');
 
     document.getElementById('apps-search').addEventListener('input', (e) => {
       const q = e.target.value.trim().toLowerCase();
@@ -97,63 +178,161 @@ const AppsPage = {
       }
     });
 
+    // Close dropdown menus on outside click
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.app-card-menu')) {
+        document.querySelectorAll('.app-card-dropdown.visible').forEach(d => d.classList.remove('visible'));
+      }
+    });
+
     // Load GPOs for bulk select
     this.loadGPOsForBulk();
   },
 
   renderAppCard(app, templates) {
-    const templateInfo = templates.find(t => t.id === app.template) || { name: app.template };
+    const templateInfo = templates.find(tmpl => tmpl.id === app.template) || { name: app.template };
     const isDeployed = app.deployed !== false && app.deployedPath;
+    const statusClass = isDeployed ? 'deployed' : 'pending';
+    const statusText = isDeployed ? t('apps.deployedBadge') : t('apps.detailNotDeployed');
+    const icon = this.templateIcon(app.template);
     return `
-      <div class="app-card" data-id="${app.id}" onclick="AppsPage.showAppDetail('${app.id}')" style="cursor:pointer;">
-        <input type="checkbox" class="checkbox-select" data-id="${app.id}" onchange="AppsPage.toggleSelect('${app.id}', this.checked)" onclick="event.stopPropagation()">
-        <div class="app-card-header">
-          <div>
+      <div class="app-card app-card--${statusClass}" data-id="${app.id}" data-deployed="${!!isDeployed}" onclick="AppsPage.showAppDetail('${app.id}')">
+        <input type="checkbox" class="checkbox-select app-card-cb" data-id="${app.id}" onchange="AppsPage.toggleSelect('${app.id}', this.checked)" onclick="event.stopPropagation()">
+        <div class="app-card-top">
+          <div class="app-card-icon">${icon}</div>
+          <div class="app-card-info">
             <div class="app-card-name">${this.esc(app.name)}</div>
             <div class="app-card-template">${this.esc(templateInfo.name)}</div>
+          </div>
+          <div class="app-card-status">
+            <span class="app-status-dot ${statusClass}" title="${statusText}"></span>
           </div>
         </div>
         <div class="app-card-badges">
           <span class="badge badge-primary">${this.esc(app.installerType?.toUpperCase() || 'EXE')}</span>
-          ${app.gpoName ? `<span class="badge badge-info">${this.esc(app.gpoName)}</span>` : `<span class="badge badge-neutral">${t('apps.noGpoBadge')}</span>`}
-          ${app.assignedOUs && app.assignedOUs.length > 0 ? `<span class="badge badge-success">${app.assignedOUs.length} UO(s)</span>` : ''}
-          ${isDeployed ? `<span class="badge badge-success">${t('apps.deployedBadge')}</span>` : ''}
           <span class="badge badge-info">v${this.esc(app.version || '1.0.0')}</span>
+          ${app.gpoName ? `<span class="badge badge-info" title="GPO">${this.esc(app.gpoName)}</span>` : ''}
+          ${app.assignedOUs && app.assignedOUs.length > 0 ? `<span class="badge badge-success">${app.assignedOUs.length} OU(s)</span>` : ''}
           ${app.notifyUser ? '<span class="badge badge-warning">🔔</span>' : ''}
         </div>
-        <div class="app-card-actions" onclick="event.stopPropagation()">
-          <button class="btn btn-sm btn-secondary" onclick="AppsPage.previewScript('${app.id}')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            ${t('apps.script')}
-          </button>
-          ${isDeployed ? `
-            <button class="btn btn-sm btn-primary" onclick="AppsPage.quickUpdate('${app.id}')" title="${t('apps.quickUpdateTitle')}">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg>
-              ${t('apps.quickUpdate')}
+        <div class="app-card-footer" onclick="event.stopPropagation()">
+          <div class="app-card-deploy-info">
+            <span class="app-status-label ${statusClass}">${statusText}</span>
+          </div>
+          <div class="app-card-menu">
+            <button class="app-card-menu-btn" onclick="event.stopPropagation(); AppsPage.toggleMenu(this)" title="${t('apps.edit')}">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
             </button>
-            <button class="btn btn-sm btn-warning" onclick="AppsPage.disableDeploy('${app.id}')">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
-              ${t('apps.disable')}
-            </button>
-          ` : `
-            <button class="btn btn-sm btn-success" onclick="AppsPage.deployApp('${app.id}')">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-              ${t('apps.deploy')}
-            </button>
-          `}
-          <button class="btn btn-sm btn-secondary" onclick="AppsPage.editApp('${app.id}')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-            ${t('apps.edit')}
-          </button>
-          <button class="btn btn-sm btn-danger" style="padding: 4px 6px;" onclick="AppsPage.deleteApp('${app.id}')" title="${t('common.delete')}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-          </button>
+            <div class="app-card-dropdown">
+              <button class="dropdown-item" onclick="AppsPage.showAppDetail('${app.id}')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                ${t('common.details') || 'Ver detalles'}
+              </button>
+              <button class="dropdown-item" onclick="AppsPage.previewScript('${app.id}')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                ${t('apps.script')}
+              </button>
+              ${isDeployed ? `
+                <button class="dropdown-item" onclick="AppsPage.quickUpdate('${app.id}')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg>
+                  ${t('apps.quickUpdate')}
+                </button>
+                <button class="dropdown-item dropdown-item--warning" onclick="AppsPage.disableDeploy('${app.id}')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                  ${t('apps.disable')}
+                </button>
+              ` : `
+                <button class="dropdown-item dropdown-item--success" onclick="AppsPage.deployApp('${app.id}')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                  ${t('apps.deploy')}
+                </button>
+              `}
+              <button class="dropdown-item" onclick="AppsPage.editApp('${app.id}')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                ${t('apps.edit')}
+              </button>
+              <div class="dropdown-divider"></div>
+              <button class="dropdown-item dropdown-item--danger" onclick="AppsPage.deleteApp('${app.id}')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                ${t('common.delete')}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     `;
   },
 
+  toggleMenu(btn) {
+    const dropdown = btn.nextElementSibling;
+    const wasVisible = dropdown.classList.contains('visible');
+    // Close all other dropdowns first
+    document.querySelectorAll('.app-card-dropdown.visible').forEach(d => d.classList.remove('visible'));
+    if (!wasVisible) dropdown.classList.add('visible');
+  },
+
+  _renderGroupedApps(apps, templates) {
+    if (this._groupBy === 'none') {
+      return apps.map(app => this.renderAppCard(app, templates)).join('');
+    }
+    // Group by template category
+    const groups = {};
+    const tmplMap = {};
+    templates.forEach(tmpl => { tmplMap[tmpl.id] = tmpl; });
+    apps.forEach(app => {
+      const tmpl = tmplMap[app.template] || {};
+      const cat = tmpl.category || tmpl.name || app.template || 'General';
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(app);
+    });
+    const sortedKeys = Object.keys(groups).sort();
+    return sortedKeys.map(cat => {
+      const catApps = groups[cat];
+      return `
+        <div class="app-folder-header" onclick="AppsPage.toggleFolder(this)">
+          <div class="app-folder-toggle">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          <span class="app-folder-name">${this.esc(cat)}</span>
+          <span class="app-folder-count">${catApps.length}</span>
+        </div>
+        ${catApps.map(app => this.renderAppCard(app, templates)).join('')}
+      `;
+    }).join('');
+  },
+
+  toggleFolder(header) {
+    const toggle = header.querySelector('.app-folder-toggle');
+    const isCollapsing = !toggle.classList.contains('collapsed');
+    toggle.classList.toggle('collapsed');
+    // Hide/show sibling cards until next folder header
+    let sibling = header.nextElementSibling;
+    while (sibling && !sibling.classList.contains('app-folder-header')) {
+      sibling.style.display = isCollapsing ? 'none' : '';
+      sibling = sibling.nextElementSibling;
+    }
+  },
+
   // ─── Helpers ───────────────────────────────────────
+  templateIcon(template) {
+    const icons = {
+      generic: '📦', office: '📎', custom: '⚙️', winget: '🪟', odt: '📎',
+      wazuh: '🛡️', sentinelone: '🔰', cortexxdr: '🔷', bitdefender: '🔴',
+      crowdstrike: '🦅', zscaler: '☁️', globalprotect: '🌍', ciscosecureclient: '🔐',
+      forticlient: '🏰', lansweeper: '📡', ninjaone: '🥷', freshservice: '🍀',
+      teamviewer: '📺', anydesk: '🖥️', veeam: '💾', crashplan: '☁️', 'sap-gui': '🔷'
+    };
+    return icons[template] || '📦';
+  },
+
+  esc(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  },
+
   // Returns the .exe/.msi path inside the app's share folder, or null if
   // the app isn't deployed / no installer is present on the share.
   async resolveSharedInstaller(appName) {
@@ -180,7 +359,7 @@ const AppsPage = {
     if (!app) return;
 
     const templates = await window.api.scripts.getTemplates();
-    const templateInfo = templates.find(t => t.id === app.template) || { name: app.template };
+    const templateInfo = templates.find(tmpl => tmpl.id === app.template) || { name: app.template };
     const isDeployed = app.deployed !== false && app.deployedPath;
 
     // Prefer the share location for the installer (where it actually lives now)
@@ -319,7 +498,7 @@ const AppsPage = {
     if (!app) return;
 
     const templates = await window.api.scripts.getTemplates();
-    const templateInfo = templates.find(t => t.id === app.template) || { name: app.template };
+    const templateInfo = templates.find(tmpl => tmpl.id === app.template) || { name: app.template };
 
     // Local state for the quick update flow
     const state = {
@@ -549,6 +728,26 @@ const AppsPage = {
   clearSelection() {
     this.selectedIds.clear();
     document.querySelectorAll('.checkbox-select').forEach(cb => cb.checked = false);
+    const selectAll = document.getElementById('select-all-apps');
+    if (selectAll) selectAll.checked = false;
+    this.updateBulkBar();
+  },
+
+  toggleSelectAll(checked) {
+    const cards = document.querySelectorAll('#apps-grid .app-card');
+    cards.forEach(card => {
+      if (card.style.display !== 'none') {
+        const id = card.dataset.id;
+        const checkbox = card.querySelector('.checkbox-select.app-card-cb');
+        if (checked) {
+          this.selectedIds.add(id);
+          if (checkbox) checkbox.checked = true;
+        } else {
+          this.selectedIds.delete(id);
+          if (checkbox) checkbox.checked = false;
+        }
+      }
+    });
     this.updateBulkBar();
   },
 
@@ -557,6 +756,14 @@ const AppsPage = {
     const count = this.selectedIds.size;
     document.getElementById('selected-count').textContent = count;
     bar.classList.toggle('visible', count > 0);
+
+    const selectAll = document.getElementById('select-all-apps');
+    if (selectAll) {
+      const visibleCards = Array.from(document.querySelectorAll('#apps-grid .app-card')).filter(c => c.style.display !== 'none');
+      const allSelected = visibleCards.length > 0 && visibleCards.every(c => this.selectedIds.has(c.dataset.id));
+      selectAll.checked = count > 0 && allSelected;
+      selectAll.indeterminate = count > 0 && !allSelected;
+    }
   },
 
   async loadGPOsForBulk() {
@@ -588,6 +795,54 @@ const AppsPage = {
       const ids = Array.from(this.selectedIds);
       await window.api.apps.bulkAssignGPO(ids, gpoName);
       App.toast(t('apps.gpoAssignedBulk').replace('{gpo}', gpoName).replace('{count}', ids.length), 'success');
+      this.clearSelection();
+      App.navigate('apps');
+    } catch (err) {
+      App.toast('Error: ' + err.message, 'error');
+    }
+  },
+
+  async bulkDisable() {
+    if (this.selectedIds.size === 0) return;
+    try {
+      const ids = Array.from(this.selectedIds);
+      for (const id of ids) {
+        const app = await window.api.apps.get(id);
+        if (app && app.deployed) {
+          app.deployed = false;
+          await window.api.apps.update(id, app);
+        }
+      }
+      App.toast(t('apps.bulkDisableSuccess') || `Deshabilitadas ${ids.length} apps correctamente`, 'success');
+      this.clearSelection();
+      App.navigate('apps');
+    } catch (err) {
+      App.toast('Error: ' + err.message, 'error');
+    }
+  },
+
+  async bulkDelete() {
+    if (this.selectedIds.size === 0) return;
+    const ids = Array.from(this.selectedIds);
+    
+    // Single prompt for AD cleanup
+    const adCleanup = confirm(t('apps.bulkDeletePrompt') || `¿Eliminar ${ids.length} apps?\n\n¿Quieres intentar limpiar también las GPOs y scripts de las apps seleccionadas en Active Directory si existen?`);
+    
+    App.toast(t('apps.bulkDeleting') || `Eliminando ${ids.length} apps...`, 'info');
+    
+    try {
+      let successCount = 0;
+      for (const id of ids) {
+        const app = await window.api.apps.get(id);
+        if (!app) continue;
+        
+        if (adCleanup && app.gpoName) {
+          try { await window.api.ad.deleteGPO(app.gpoName); } catch (e) { console.warn('GPO cleanup failed for', app.gpoName); }
+        }
+        await window.api.apps.delete(id);
+        successCount++;
+      }
+      App.toast(t('apps.bulkDeleteSuccess') || `Se eliminaron ${successCount} apps.`, 'success');
       this.clearSelection();
       App.navigate('apps');
     } catch (err) {
@@ -721,15 +976,17 @@ const AppsPage = {
           // Winget catalog by category
           const q = (state.catalogSearch || '').toLowerCase();
 
-          // ODT special card at top (only show if matches search)
+          // ODT special card at top (only show if matches search and category)
           const odtSel = state.template === 'odt';
-          const odtMatchesSearch = !q || 'microsoft office'.includes(q) || 'odt'.includes(q) || '365'.includes(q) || 'ltsc'.includes(q);
-          if (odtMatchesSearch) {
+          const odtKeywords = ['office', 'microsoft', '365', 'odt', 'ltsc', 'word', 'excel'];
+          const odtMatchesQ = !q || odtKeywords.some(k => k.includes(q));
+          const odtMatchesCat = activeCat === 'Todo' || activeCat === 'Productividad' || activeCat === 'Ofimática';
+          if (odtMatchesQ && odtMatchesCat) {
             body += `
               <div style="margin-bottom:var(--space-sm);">
                 <h5 style="font-size:10px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;letter-spacing:.05em;">Microsoft Office</h5>
                 <div class="template-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));">
-                  <div class="template-card catalog-item ${odtSel ? 'selected' : ''}" data-catalog-type="odt" style="cursor:pointer;">
+                  <div class="template-card catalog-item ${odtSel ? 'selected' : ''}" data-catalog-type="odt" style="cursor:pointer;" tabindex="0">
                     <div class="template-card-icon" style="font-size:22px;">🏢</div>
                     <div class="template-card-name" style="font-size:11px;">Microsoft Office</div>
                     <div class="template-card-desc" style="font-size:10px;">365 / LTSC 2021 / 2019</div>
@@ -850,7 +1107,7 @@ const AppsPage = {
         }
 
       } else if (state.step === 2) {
-        const tmpl = templates.find(t => t.id === state.template);
+        const tmpl = templates.find(tmp => tmp.id === state.template);
         const isWinget = state.template === 'winget';
         const isODT = state.template === 'odt';
 
@@ -1026,7 +1283,7 @@ const AppsPage = {
               <input type="text" class="form-input" id="wiz-ou-search" placeholder="${t('ous.searchOUs')}" autocomplete="off" style="padding-left:32px;">
             </div>
             <div id="wiz-ou-tree" style="max-height:190px;overflow-y:auto;border:1px solid var(--border-color);border-radius:6px;padding:4px 6px;background:var(--bg-secondary);">
-              ${this.ousTreeCache ? this.ouPickerTreeHTML(this.ousTreeCache, '', state.ouDN) : `<p style="padding:8px;font-size:13px;color:var(--text-muted);">${t('ous.noOusFound')}</p>`}
+              ${this.ousTreeCache ? App.ouPickerTreeHTML(this.ousTreeCache, '', state.ouDN) : `<p style="padding:8px;font-size:13px;color:var(--text-muted);">${t('ous.noOusFound')}</p>`}
             </div>
             <div id="wiz-ou-selected" style="margin-top:6px;min-height:22px;">
               ${state.ouDN
@@ -1186,7 +1443,7 @@ const AppsPage = {
             document.getElementById('wiz-name')?.focus();
             return;
           }
-          const tmpl = templates.find(t => t.id === state.template);
+          const tmpl = templates.find(tmp => tmp.id === state.template);
           const needsInstaller = state.template !== 'custom' && !(tmpl?.noInstaller);
           if (needsInstaller && !state.installerPath) {
             App.toast(t('apps.installerRequired'), 'warning');
@@ -1319,7 +1576,7 @@ const AppsPage = {
     if (silentInput) state.silentArgs = silentInput.value;
 
     if (state.step === 2) {
-      const tmpl = templates.find(t => t.id === state.template);
+      const tmpl = templates.find(tmp => tmp.id === state.template);
       (tmpl?.fields || []).forEach(f => {
         const input = document.getElementById(`wiz-param-${f.key}`);
         if (input) {
@@ -1396,51 +1653,13 @@ const AppsPage = {
       }
       const treeContainer = document.getElementById('wiz-ou-tree');
       if (treeContainer && this.ousTreeCache) {
-        treeContainer.innerHTML = this.ouPickerTreeHTML(this.ousTreeCache, '', state.ouDN);
+        treeContainer.innerHTML = App.ouPickerTreeHTML(this.ousTreeCache, '', state.ouDN);
       }
       this.bindOUPickerEvents(state);
     } catch (e) {}
   },
 
-  // ─── OU Picker Tree (wizard step 3) ───────────────────
-  ouPickerTreeHTML(nodes, query, selectedDN) {
-    if (!nodes || !nodes.length) return '';
-    const q = query.trim().toLowerCase();
-    let html = '<ul class="tree" style="margin:0;padding-left:0;">';
-    for (const node of nodes) {
-      if (q && !this.ouNodeMatchesSearch(node, q)) continue;
-      const hasChildren = node.children && node.children.length > 0;
-      const isSelected = node.dn === selectedDN;
-      // Auto-expand: when searching, when selected, or when selected is a descendant
-      const selectedIsDescendant = selectedDN && selectedDN !== node.dn && selectedDN.includes(node.dn);
-      const shouldExpand = q ? true : (isSelected || !!selectedIsDescendant);
-      html += `
-        <li class="tree-item">
-          <div class="tree-node ${isSelected ? 'selected' : ''}" data-dn="${this.esc(node.dn)}" data-name="${this.esc(node.name)}">
-            <button class="tree-toggle ${hasChildren ? (shouldExpand ? 'expanded' : '') : 'empty'}" type="button">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-            </button>
-            <span class="tree-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-            </span>
-            <span class="tree-label">${this.esc(node.name)}</span>
-          </div>
-          ${hasChildren ? `<div class="tree-children ${shouldExpand ? '' : 'collapsed'}">${this.ouPickerTreeHTML(node.children, query, selectedDN)}</div>` : ''}
-        </li>`;
-    }
-    html += '</ul>';
-    return html;
-  },
-
-  ouNodeMatchesSearch(node, q) {
-    if (node.name.toLowerCase().includes(q)) return true;
-    if (node.children) {
-      for (const child of node.children) {
-        if (this.ouNodeMatchesSearch(child, q)) return true;
-      }
-    }
-    return false;
-  },
+  // Removed ouPickerTreeHTML & ouNodeMatchesSearch to use App globals
 
   bindOUPickerEvents(state) {
     const searchInput = document.getElementById('wiz-ou-search');
@@ -1486,7 +1705,7 @@ const AppsPage = {
 
     if (searchInput) {
       searchInput.addEventListener('input', () => {
-        treeContainer.innerHTML = this.ouPickerTreeHTML(
+        treeContainer.innerHTML = App.ouPickerTreeHTML(
           this.ousTreeCache, searchInput.value, dnInput?.value || state.ouDN
         );
         bindNodes();
@@ -1542,7 +1761,7 @@ const AppsPage = {
 
   async showWizardConfirmation(state, isEdit, existingApp, renderWizard) {
     const templates = await window.api.scripts.getTemplates();
-    const templateInfo = templates.find(t => t.id === state.template) || { name: state.template };
+    const templateInfo = templates.find(tmpl => tmpl.id === state.template) || { name: state.template };
 
     const row = (label, value) => value ? `
       <div style="display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border-color);">
@@ -1713,7 +1932,7 @@ const AppsPage = {
 
         // Create GPO automatically if chosen
         if (state.createGPO) {
-          const newGpoName = `Deploy_${state.name.replace(/\\s/g, "_")}`;
+          const newGpoName = `Deploy_${state.name.replace(/\s/g, "_")}`;
           App.toast(`${t('apps.generatingGpo')} ${newGpoName}...`, 'info');
           const gpoResult = await window.api.ad.createGPO(newGpoName, deployResult.path, state.ouDN);
           

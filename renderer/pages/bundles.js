@@ -5,12 +5,17 @@
 const BundlesPage = {
   bundles: [],
   apps: [],
+  selectedIds: new Set(),
   _wizardOpening: false,       // prevents double-click opening multiple wizards
   _deployingIds: new Set(),    // prevents concurrent deploy of the same bundle
+  _viewMode: 'grid',
 
   async render(container) {
     this.apps = await window.api.apps.getAll();
     this.bundles = await window.api.bundles.getAll();
+
+    const deployedCount = this.bundles.filter(b => b.deployed && b.deployedPath).length;
+    const pendingCount = this.bundles.length - deployedCount;
 
     container.innerHTML = `
       <div class="page-header">
@@ -32,13 +37,63 @@ const BundlesPage = {
       ${App.rsatWarningHTML()}
 
       ${this.bundles.length > 0 ? `
-        <div style="margin-bottom:var(--space-md);">
-          <div style="position:relative;max-width:320px;">
-            <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.4" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" class="form-input" id="bundles-search" placeholder="${t('bundles.search')}" autocomplete="off" style="padding-left:34px;">
+        <div class="apps-toolbar">
+          <div class="apps-counters">
+            <div class="apps-counter active" data-filter="all">
+              <span class="apps-counter-value">${this.bundles.length}</span>
+              <span class="apps-counter-label">Total</span>
+            </div>
+            <div class="apps-counter" data-filter="deployed">
+              <span class="apps-counter-dot deployed"></span>
+              <span class="apps-counter-value">${deployedCount}</span>
+              <span class="apps-counter-label">${t('apps.deployedBadge')}</span>
+            </div>
+            <div class="apps-counter" data-filter="pending">
+              <span class="apps-counter-dot pending"></span>
+              <span class="apps-counter-value">${pendingCount}</span>
+              <span class="apps-counter-label">${t('apps.detailNotDeployed')}</span>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:var(--space-sm); flex:1; justify-content:flex-end;">
+            <label class="checkbox-wrapper" style="margin-right: 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+              <input type="checkbox" class="checkbox-select" id="select-all-bundles" style="position:static" onchange="BundlesPage.toggleSelectAll(this.checked)">
+              <span style="font-size:var(--font-sm); color:var(--text-secondary);">${t('apps.selectAll') || 'Seleccionar Todo'}</span>
+            </label>
+            <div style="position:relative; min-width:180px; max-width:280px; flex:1;">
+              <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.4" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" class="form-input" id="bundles-search" placeholder="${t('bundles.search')}" autocomplete="off" style="padding-left:34px;">
+            </div>
+            <div class="view-toggle">
+              <button class="view-toggle-btn ${this._viewMode === 'grid' ? 'active' : ''}" data-view="grid" title="Cuadrícula">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+              </button>
+              <button class="view-toggle-btn ${this._viewMode === 'list' ? 'active' : ''}" data-view="list" title="Lista">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+              </button>
+            </div>
           </div>
         </div>
       ` : ''}
+
+      <!-- Bulk Action Bar -->
+      <div class="action-bar" id="bulk-action-bar">
+        <span class="action-bar-text"><span id="selected-count">0</span> ${t('apps.selected')}</span>
+        <div class="action-bar-buttons" style="display:flex; gap:10px; align-items:center;">
+          <button class="btn btn-primary btn-sm" id="btn-bulk-deploy">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+            ${t('apps.deploy') || 'Desplegar'}
+          </button>
+          <button class="btn btn-warning btn-sm" id="btn-bulk-disable">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+            ${t('apps.disable') || 'Deshabilitar'}
+          </button>
+          <button class="btn btn-danger btn-sm" id="btn-bulk-delete">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            ${t('common.delete') || 'Borrar'}
+          </button>
+          <button class="btn btn-ghost btn-sm" id="btn-clear-selection">${t('apps.cancel')}</button>
+        </div>
+      </div>
 
       <div id="bundles-list">
         ${this.bundles.length === 0 ? `
@@ -48,13 +103,32 @@ const BundlesPage = {
             <p style="font-size:var(--font-sm);margin-top:8px">${t('bundles.createBundleHint')}</p>
           </div>
         ` : `
-          <div class="cards-grid" id="bundles-grid">
+          <div class="cards-grid ${this._viewMode === 'list' ? 'list-view' : ''}" id="bundles-grid">
             ${this.bundles.map(b => this.renderBundleCard(b)).join('')}
           </div>
         `}
       </div>
     `;
 
+    this.selectedIds.clear();
+
+    document.getElementById('btn-clear-selection')?.addEventListener('click', () => this.clearSelection());
+    document.getElementById('btn-bulk-delete')?.addEventListener('click', () => this.bulkDelete());
+    document.getElementById('btn-bulk-disable')?.addEventListener('click', () => this.bulkDisable());
+    document.getElementById('btn-bulk-deploy')?.addEventListener('click', () => this.bulkDeploy());
+
+    // View toggle
+    document.querySelectorAll('.view-toggle-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this._viewMode = btn.dataset.view;
+        document.querySelectorAll('.view-toggle-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const grid = document.getElementById('bundles-grid');
+        if (grid) grid.classList.toggle('list-view', this._viewMode === 'list');
+      });
+    });
+
+    // Search
     document.getElementById('bundles-search')?.addEventListener('input', (e) => {
       const q = e.target.value.trim().toLowerCase();
       const grid = document.getElementById('bundles-grid');
@@ -79,53 +153,281 @@ const BundlesPage = {
         noMatch.remove();
       }
     });
+
+    // Close dropdown menus on outside click
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.app-card-menu')) {
+        document.querySelectorAll('.app-card-dropdown.visible').forEach(d => d.classList.remove('visible'));
+      }
+    });
   },
 
   renderBundleCard(bundle) {
     const isDeployed = bundle.deployed && bundle.deployedPath;
+    const statusClass = isDeployed ? 'deployed' : 'pending';
+    const statusText = isDeployed ? t('apps.deployedBadge') : t('apps.detailNotDeployed');
     return `
-      <div class="card bundle-card" style="position:relative">
-        <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:12px">
-          <div>
-            <div class="card-title" style="margin-bottom:4px">${this.esc(bundle.name)}</div>
-            <div style="font-size:var(--font-sm);color:var(--text-muted)">${this.esc(bundle.description || '')}</div>
+      <div class="bundle-card bundle-card--${statusClass}" data-deployed="${!!isDeployed}" data-id="${bundle.id}" onclick="BundlesPage.showBundleDetail('${bundle.id}')">
+        <input type="checkbox" class="checkbox-select bundle-card-cb" data-id="${bundle.id}" onchange="BundlesPage.toggleSelect('${bundle.id}', this.checked)" onclick="event.stopPropagation()">
+        <div class="bundle-card-top">
+          <div class="bundle-card-icon">📦</div>
+          <div class="bundle-card-info">
+            <div class="bundle-card-name">${this.esc(bundle.name)}</div>
+            <div class="bundle-card-desc">${this.esc(bundle.description || '')}</div>
           </div>
-          <span class="badge ${isDeployed ? 'badge-success' : 'badge-neutral'}">
-            ${isDeployed ? t('deployments.ready') : ''}
-          </span>
+          <div class="app-card-status">
+            <span class="app-status-dot ${statusClass}" title="${statusText}"></span>
+          </div>
         </div>
-
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+        <div class="app-card-badges">
           <span class="badge badge-info">v${this.esc(bundle.version)}</span>
           <span class="badge badge-primary">${bundle.apps.length} ${t('bundles.appsIncluded')}</span>
           ${bundle.gpoName ? `<span class="badge badge-info">${this.esc(bundle.gpoName)}</span>` : ''}
           ${bundle.createGPO ? `<span class="badge badge-success">${t('bundles.autoGpo')}</span>` : ''}
+          ${bundle.notifyUser ? '<span class="badge badge-warning">🔔</span>' : ''}
         </div>
-
-        <div style="font-size:var(--font-sm);color:var(--text-secondary);margin-bottom:12px">
-          ${bundle.apps.map(a => `<span style="display:inline-block;background:var(--bg-input);padding:2px 8px;border-radius:4px;margin:2px 4px 2px 0">${this.esc(a.name)}</span>`).join('')}
+        <div class="bundle-card-apps">
+          ${bundle.apps.map(a => `<span class="app-chip">${this.esc(a.name)}</span>`).join('')}
         </div>
-
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-sm btn-secondary" onclick="BundlesPage.previewScript('${bundle.id}')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            ${t('apps.script')}
-          </button>
-          ${isDeployed ? `
-            <button class="btn btn-sm btn-warning" onclick="BundlesPage.disableDeploy('${bundle.id}')">${t('apps.disable')}</button>
-          ` : `
-            <button class="btn btn-sm btn-success" onclick="BundlesPage.deployBundle('${bundle.id}')">${t('apps.deploy')}</button>
-          `}
-          <button class="btn btn-sm btn-secondary" onclick="BundlesPage.editBundle('${bundle.id}')">${t('apps.edit')}</button>
-          <button class="btn btn-sm btn-danger" onclick="BundlesPage.deleteBundle('${bundle.id}')" title="${t('common.delete')}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-          </button>
+        <div class="bundle-card-footer">
+          <span class="app-status-label ${statusClass}">${statusText}</span>
+          <div class="app-card-menu">
+            <button class="app-card-menu-btn" onclick="event.stopPropagation(); BundlesPage.toggleMenu(this)" title="${t('apps.edit') || 'Acciones'}">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+            </button>
+            <div class="app-card-dropdown">
+              <button class="dropdown-item" onclick="BundlesPage.showBundleDetail('${bundle.id}')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                ${t('common.details') || 'Ver detalles'}
+              </button>
+              <button class="dropdown-item" onclick="BundlesPage.previewScript('${bundle.id}')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                ${t('apps.script')}
+              </button>
+              ${isDeployed ? `
+                <button class="dropdown-item dropdown-item--warning" onclick="BundlesPage.disableDeploy('${bundle.id}')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                  ${t('apps.disable')}
+                </button>
+              ` : `
+                <button class="dropdown-item dropdown-item--success" onclick="BundlesPage.deployBundle('${bundle.id}')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                  ${t('apps.deploy')}
+                </button>
+              `}
+              <button class="dropdown-item" onclick="BundlesPage.editBundle('${bundle.id}')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                ${t('apps.edit')}
+              </button>
+              <div class="dropdown-divider"></div>
+              <button class="dropdown-item dropdown-item--danger" onclick="BundlesPage.deleteBundle('${bundle.id}')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                ${t('common.delete')}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     `;
   },
 
+  toggleMenu(btn) {
+    const dropdown = btn.nextElementSibling;
+    const wasVisible = dropdown.classList.contains('visible');
+    document.querySelectorAll('.app-card-dropdown.visible').forEach(d => d.classList.remove('visible'));
+    if (!wasVisible) dropdown.classList.add('visible');
+  },
+
   esc(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; },
+
+  // ─── Bulk Logic ────────────────────────────────────
+  toggleSelect(id, checked) {
+    if (checked) this.selectedIds.add(id);
+    else this.selectedIds.delete(id);
+    this.updateBulkBar();
+  },
+
+  clearSelection() {
+    this.selectedIds.clear();
+    document.querySelectorAll('.checkbox-select').forEach(cb => cb.checked = false);
+    const selectAll = document.getElementById('select-all-bundles');
+    if (selectAll) selectAll.checked = false;
+    this.updateBulkBar();
+  },
+
+  toggleSelectAll(checked) {
+    const cards = document.querySelectorAll('#bundles-grid .bundle-card');
+    cards.forEach(card => {
+      if (card.style.display !== 'none') {
+        const id = card.dataset.id;
+        const checkbox = card.querySelector('.checkbox-select.bundle-card-cb');
+        if (checked) {
+          this.selectedIds.add(id);
+          if (checkbox) checkbox.checked = true;
+        } else {
+          this.selectedIds.delete(id);
+          if (checkbox) checkbox.checked = false;
+        }
+      }
+    });
+    this.updateBulkBar();
+  },
+
+  updateBulkBar() {
+    const bar = document.getElementById('bulk-action-bar');
+    const count = this.selectedIds.size;
+    const countEl = document.getElementById('selected-count');
+    if (countEl) countEl.textContent = count;
+    if (bar) bar.classList.toggle('visible', count > 0);
+
+    const selectAll = document.getElementById('select-all-bundles');
+    if (selectAll) {
+      const visibleCards = Array.from(document.querySelectorAll('#bundles-grid .bundle-card')).filter(c => c.style.display !== 'none');
+      const allSelected = visibleCards.length > 0 && visibleCards.every(c => this.selectedIds.has(c.dataset.id));
+      selectAll.checked = count > 0 && allSelected;
+      selectAll.indeterminate = count > 0 && !allSelected;
+    }
+  },
+
+  async bulkDisable() {
+    if (this.selectedIds.size === 0) return;
+    try {
+      const ids = Array.from(this.selectedIds);
+      for (const id of ids) {
+        const bundle = await window.api.bundles.get(id);
+        if (bundle && bundle.deployed) {
+          bundle.deployed = false;
+          await window.api.bundles.update(id, bundle);
+        }
+      }
+      App.toast(t('apps.bulkDisableSuccess') || `Deshabilitados ${ids.length} bundles correctamente`, 'success');
+      this.clearSelection();
+      App.navigate('bundles');
+    } catch (err) {
+      App.toast('Error: ' + err.message, 'error');
+    }
+  },
+
+  async bulkDelete() {
+    if (this.selectedIds.size === 0) return;
+    const ids = Array.from(this.selectedIds);
+    
+    // Single prompt for AD cleanup
+    const adCleanup = confirm(t('bundles.bulkDeletePrompt') || `¿Eliminar ${ids.length} bundles?\n\n¿Quieres intentar limpiar también las GPOs de los bundles seleccionados en Active Directory si existen?`);
+    
+    App.toast(t('bundles.bulkDeleting') || `Eliminando ${ids.length} bundles...`, 'info');
+    
+    try {
+      let successCount = 0;
+      for (const id of ids) {
+        const bundle = await window.api.bundles.get(id);
+        if (!bundle) continue;
+        
+        if (adCleanup && bundle.gpoName) {
+          try { await window.api.ad.deleteGPO(bundle.gpoName); } catch (e) { console.warn('GPO cleanup failed for', bundle.gpoName); }
+        }
+        await window.api.bundles.delete(id);
+        successCount++;
+      }
+      App.toast(t('bundles.bulkDeleteSuccess') || `Se eliminaron ${successCount} bundles.`, 'success');
+      this.clearSelection();
+      App.navigate('bundles');
+    } catch (err) {
+      App.toast('Error: ' + err.message, 'error');
+    }
+  },
+
+  async bulkDeploy() {
+    // Only bundles can be deployed from the UI normally by hitting "Deploy" because their target is inside the bundle.
+    // Apps bulk assign targets a custom GPO on the spot. Here we just trigger their individual deployments.
+    if (this.selectedIds.size === 0) return;
+    const ids = Array.from(this.selectedIds);
+    
+    App.toast(t('bundles.bulkDeploying') || `Encolando despliegue de ${ids.length} bundles...`, 'info');
+    
+    try {
+      let successCount = 0;
+      for (const id of ids) {
+        // Sequentially deploy to avoid conflicting script files if they share operations (best practice)
+        await this.deployBundle(id);
+        successCount++;
+      }
+      App.toast(t('bundles.bulkDeploySuccess') || `Se desplegaron ${successCount} bundles correctamente.`, 'success');
+      this.clearSelection();
+    } catch (err) {
+      App.toast('Error deploy: ' + err.message, 'error');
+    }
+  },
+
+  // ─── Detail Modal ──────────────────────────────────
+  async showBundleDetail(id) {
+    const bundle = await window.api.bundles.get(id);
+    if (!bundle) return;
+
+    const isDeployed = bundle.deployed && bundle.deployedPath;
+    
+    const row = (label, value) => value ? `
+      <div style="display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border-color);">
+        <span style="color:var(--text-muted); font-size:13px;">${label}</span>
+        <span style="color:var(--text-primary); font-size:13px; font-weight:500; text-align:right; max-width:60%; word-break:break-all;">${value}</span>
+      </div>` : '';
+
+    const appsHtml = bundle.apps && bundle.apps.length > 0
+      ? bundle.apps.map(a => `<span class="app-chip" style="display:inline-block; margin:2px;">${this.esc(a.name)}</span>`).join('')
+      : `<span style="color:var(--text-muted); font-size:13px;">${t('bundles.emptyApps') || 'Sin apps incluidas'}</span>`;
+
+    const body = `
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <!-- Header -->
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div style="width:48px; height:48px; border-radius:12px; background:var(--accent-info-dim); display:flex; align-items:center; justify-content:center; font-size:26px; border: 1px solid rgba(59, 130, 246, 0.15);">
+            📦
+          </div>
+          <div>
+            <div style="font-size:18px; font-weight:700; color:var(--text-primary);">${this.esc(bundle.name)}</div>
+            <div style="font-size:13px; color:var(--text-muted);">${this.esc(bundle.description || '')}</div>
+          </div>
+        </div>
+
+        <!-- Status badges -->
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          <span class="badge badge-info">v${this.esc(bundle.version || '1.0.0')}</span>
+          ${isDeployed ? `<span class="badge badge-success">${t('apps.deployedBadge')}</span>` : `<span class="badge badge-neutral">${t('apps.detailNotDeployed')}</span>`}
+          ${bundle.gpoName ? `<span class="badge badge-info">${this.esc(bundle.gpoName)}</span>` : `<span class="badge badge-neutral">${t('bundles.autoGpo') || 'GPO'}</span>`}
+          ${bundle.notifyUser ? `<span class="badge badge-warning">${t('apps.detailNotifyEnabled')}</span>` : ''}
+        </div>
+
+        <!-- Apps Included -->
+        <div class="card" style="padding:12px 16px; margin:0;">
+          <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:8px;">${t('bundles.appsIncluded') || 'Apps incluidas'} (${bundle.apps.length})</div>
+          <div>${appsHtml}</div>
+        </div>
+
+        <!-- General Info -->
+        <div class="card" style="padding:12px 16px; margin:0;">
+          <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionGeneral')}</div>
+          ${row(t('apps.detailVersion'), this.esc(bundle.version || '1.0.0'))}
+          ${row(t('apps.detailNotifyUser'), bundle.notifyUser ? '&#10003;' : '&#10007;')}
+          ${row(t('bundles.createGpo') || 'Crear GPO automáticamente', bundle.createGPO ? '&#10003;' : '&#10007;')}
+        </div>
+
+        <!-- Paths -->
+        <div class="card" style="padding:12px 16px; margin:0;">
+          <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionPaths') || 'Rutas de Archivo'}</div>
+          ${row(t('apps.detailDeployPath'), bundle.deployedPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(bundle.deployedPath) + '</span>' : '-')}
+        </div>
+
+        <!-- Targeting -->
+        <div class="card" style="padding:12px 16px; margin:0;">
+          <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionTargeting')}</div>
+          ${row(t('apps.detailGpo'), bundle.gpoName ? this.esc(bundle.gpoName) : '-')}
+          ${row(t('apps.detailAssignedOUs') || 'OU Asignada', bundle.ouDN ? '<span style="word-break:break-all;">' + this.esc(bundle.ouDN) + '</span>' : '-')}
+        </div>
+      </div>
+    `;
+
+    App.openModal(t('common.details') || 'Detalles del Bundle', body, `<button class="btn btn-primary" onclick="App.closeModal()">${t('common.close') || 'Cerrar'}</button>`);
+  },
 
   // ─── Flatten OU tree for select dropdowns ──────────
   _flattenOUs(roots, depth = 0, flat = []) {

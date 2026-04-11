@@ -84,7 +84,7 @@ function saveApps(apps) {
 }
 
 function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  return crypto.randomUUID();
 }
 
 const appService = {
@@ -252,6 +252,13 @@ const appService = {
           return resolve({ success: false, error: 'File not found' });
         }
         const ext = path.extname(filePath).toLowerCase();
+        // Security: only allow .exe and .msi, reject paths with dangerous characters
+        if (!['.exe', '.msi'].includes(ext)) {
+          return resolve({ success: false, error: 'Unsupported file type' });
+        }
+        if (/[;|`$&{}]/.test(filePath)) {
+          return resolve({ success: false, error: 'Invalid file path characters' });
+        }
         let psCommand;
 
         if (ext === '.exe') {

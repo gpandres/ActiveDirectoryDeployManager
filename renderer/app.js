@@ -179,7 +179,13 @@ const App = {
 
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    toast.innerHTML = `<span class="toast-icon">${icons[type] || icons.info}</span><span>${message}</span>`;
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'toast-icon';
+    iconSpan.innerHTML = icons[type] || icons.info;
+    const msgSpan = document.createElement('span');
+    msgSpan.textContent = message; // textContent prevents XSS
+    toast.appendChild(iconSpan);
+    toast.appendChild(msgSpan);
     container.appendChild(toast);
 
     setTimeout(() => {
@@ -239,6 +245,55 @@ const App = {
     const d = new Date(ts);
     if (isNaN(d.getTime())) return '—';
     return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' + d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+  },
+
+  // ─── Shared OU Picker Component HTML ──────────────────
+  ouPickerTreeHTML(nodes, query, selectedDN) {
+    if (!nodes || !nodes.length) return '';
+    const q = (query || '').trim().toLowerCase();
+    let html = '<ul class="tree" style="margin:0;padding-left:0;">';
+    for (const node of nodes) {
+      if (q && !this.ouNodeMatchesSearch(node, q)) continue;
+      const hasChildren = node.children && node.children.length > 0;
+      const isSelected = node.dn === selectedDN;
+      // Auto-expand: when searching, when selected, or when selected is a descendant
+      const selectedIsDescendant = selectedDN && selectedDN !== node.dn && selectedDN.includes(node.dn);
+      const shouldExpand = q ? true : (isSelected || !!selectedIsDescendant);
+      
+      const escName = this._esc(node.name);
+      
+      html += `
+        <li class="tree-item">
+          <div class="tree-node ${isSelected ? 'selected' : ''}" data-dn="${this._esc(node.dn)}" data-name="${escName}">
+            <button class="tree-toggle ${hasChildren ? (shouldExpand ? 'expanded' : '') : 'empty'}" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+            <span class="tree-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            </span>
+            <span class="tree-label">${escName}</span>
+          </div>
+          ${hasChildren ? `<div class="tree-children ${shouldExpand ? '' : 'collapsed'}">${this.ouPickerTreeHTML(node.children, query, selectedDN)}</div>` : ''}
+        </li>`;
+    }
+    html += '</ul>';
+    return html;
+  },
+
+  ouNodeMatchesSearch(node, q) {
+    if (node.name.toLowerCase().includes(q)) return true;
+    if (node.children) {
+      for (const child of node.children) {
+        if (this.ouNodeMatchesSearch(child, q)) return true;
+      }
+    }
+    return false;
+  },
+  
+  _esc(str) {
+    const div = document.createElement('div');
+    div.textContent = str || '';
+    return div.innerHTML;
   }
 };
 

@@ -15,6 +15,7 @@ const DEFAULT_CONFIG = {
   networkSharePath: '',
   logDirectory: 'C:\\ProgramData\\AppDeploy_Logs',
   defaultGPO: '',
+  baseOU: '',
   language: 'es',
   firstRun: true
 };

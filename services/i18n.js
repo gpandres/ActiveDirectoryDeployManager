@@ -37,6 +37,8 @@ const FALLBACK_EN = {
     logsDirHint: "Local path on target machines where installation logs will be saved.",
     defaultGpo: "Default GPO Name (Optional)",
     defaultGpoHint: "If specified, this GPO will be selected by default when creating new apps.",
+    baseOu: "Base OU (Optional)",
+    baseOuHint: "DN of the OU to limit AD searches (e.g. OU=Clients,DC=domain,DC=com).",
     saveAndContinue: "Save and Continue"
   },
   dashboard: {
@@ -475,6 +477,8 @@ const FALLBACK_EN = {
     logsHint: "Local path on target PCs to store installation logs.",
     defaultGpo: "Default GPO",
     defaultGpoHint: "Default GPO to pre-select when creating apps.",
+    baseOu: "Base Search OU",
+    baseOuHint: "Distinguished Name to restrict standard AD query scope.",
     language: "Interface Language",
     languageHint: "Choose the language for the application UI.",
     exportImport: "Configuration Backup",
@@ -550,6 +554,8 @@ const DEFAULT_ES = {
     logsDirHint: "Ruta local en los PCs de destino para guardar logs de instalación.",
     defaultGpo: "Nombre GPO por defecto (Opcional)",
     defaultGpoHint: "Si se especifica, se pre-seleccionará al crear apps.",
+    baseOu: "Unidad Organizativa (OU) Base",
+    baseOuHint: "DN de la OU para limitar la carga (ej. OU=Clientes,DC=empresa,DC=com). Opcional.",
     saveAndContinue: "Guardar y Continuar"
   },
   dashboard: {
@@ -986,7 +992,9 @@ const DEFAULT_ES = {
     logs: "Ruta local de Logs",
     logsHint: "Ruta en los PCs de destino para guardar logs.",
     defaultGpo: "GPO por defecto",
-    defaultGpoHint: "GPO pre-seleccionada al crear apps.",
+    defaultGpoHint: "GPO pre-seleccionada al crear nuevas aplicaciones.",
+    baseOu: "OU Base de Búsqueda",
+    baseOuHint: "Distinguished Name para acotar el inicio del árbol AD.",
     language: "Idioma de la Interfaz",
     languageHint: "Elige el idioma general de la aplicación.",
     exportImport: "Respaldo y Restauración",

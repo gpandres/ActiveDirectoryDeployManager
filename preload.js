@@ -19,7 +19,7 @@ contextBridge.exposeInMainWorld('api', {
   // Active Directory
   ad: {
     checkRSAT: () => ipcRenderer.invoke('ad:checkRSAT'),
-    getOUs: () => ipcRenderer.invoke('ad:getOUs'),
+    getOUs: (ignoreBaseOU = false) => ipcRenderer.invoke('ad:getOUs', ignoreBaseOU),
     getGPOs: () => ipcRenderer.invoke('ad:getGPOs'),
     createGPO: (name, path, ouDN) => ipcRenderer.invoke('ad:createGPO', name, path, ouDN),
     linkGPOtoOU: (gpoName, ouDN) => ipcRenderer.invoke('ad:linkGPOtoOU', gpoName, ouDN),

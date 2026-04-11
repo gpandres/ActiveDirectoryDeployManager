@@ -3,6 +3,16 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+// Sanitize user input before interpolating into PowerShell commands.
+// Allows alphanumerics, spaces, hyphens, underscores, dots, commas, equals,
+// and the characters required for AD Distinguished Names (OU=, DC=, etc.)
+function sanitizePSInput(str) {
+  if (typeof str !== 'string') return '';
+  // Remove backticks, semicolons, pipe, ampersand, dollar, curly braces,
+  // parentheses, and other PS meta-characters that enable injection
+  return str.replace(/[`$;|&{}()\[\]@#!%^<>"\\]/g, '').trim();
+}
+
 function runPowerShell(command) {
   return new Promise((resolve, reject) => {
     const tmpFile = path.join(os.tmpdir(), `ad_script_${Date.now()}_${Math.floor(Math.random()*1000)}.ps1`);
@@ -47,10 +57,16 @@ const adService = {
     }
   },
 
-  async getOUs() {
+  async getOUs(ignoreBaseOU = false) {
     try {
+      const config = require('./config').getConfig();
+      let searchBaseStr = '';
+      if (!ignoreBaseOU && config.baseOU) {
+        const sanitized = sanitizePSInput(config.baseOU).replace(/'/g, "''");
+        searchBaseStr = `-SearchBase '${sanitized}'`;
+      }
       const json = await runPowerShell(
-        "Import-Module ActiveDirectory; Get-ADOrganizationalUnit -Filter * -Properties Name,DistinguishedName,Description | Select-Object Name,DistinguishedName,Description | ConvertTo-Json -Depth 5"
+        `Import-Module ActiveDirectory; Get-ADOrganizationalUnit -Filter * ${searchBaseStr} -Properties Name,DistinguishedName,Description | Select-Object Name,DistinguishedName,Description | ConvertTo-Json -Depth 5`
       );
       const ous = JSON.parse(json || '[]');
       const ouArray = Array.isArray(ous) ? ous : [ous];
@@ -74,8 +90,10 @@ const adService = {
 
   async linkGPOtoOU(gpoName, ouDN) {
     try {
+      const safeGpo = sanitizePSInput(gpoName).replace(/'/g, "''");
+      const safeOU = sanitizePSInput(ouDN).replace(/'/g, "''");
       await runPowerShell(
-        `Import-Module GroupPolicy; New-GPLink -Name '${gpoName}' -Target '${ouDN}' -LinkEnabled Yes -ErrorAction Stop`
+        `Import-Module GroupPolicy; New-GPLink -Name '${safeGpo}' -Target '${safeOU}' -LinkEnabled Yes -ErrorAction Stop`
       );
       return { success: true };
     } catch (err) {
@@ -97,9 +115,9 @@ const adService = {
 
   async createGPO(gpoName, scriptPath, ouDN) {
     try {
-      const safeGpoName = gpoName.replace(/'/g, "''");
-      const safeScriptPath = scriptPath.replace(/'/g, "''");
-      const safeOuDN = ouDN ? ouDN.replace(/'/g, "''") : '';
+      const safeGpoName = sanitizePSInput(gpoName).replace(/'/g, "''");
+      const safeScriptPath = sanitizePSInput(scriptPath).replace(/'/g, "''");
+      const safeOuDN = ouDN ? sanitizePSInput(ouDN).replace(/'/g, "''") : '';
       
       const ps = `
         $ErrorActionPreference = 'Stop'
@@ -169,7 +187,7 @@ const adService = {
 
   async deleteGPO(gpoName) {
     try {
-      const ps = `Import-Module GroupPolicy; Remove-GPO -Name '${gpoName.replace(/'/g, "''")}' -ErrorAction Stop`;
+      const ps = `Import-Module GroupPolicy; Remove-GPO -Name '${sanitizePSInput(gpoName).replace(/'/g, "''")}' -ErrorAction Stop`;
       await runPowerShell(ps);
       return { success: true };
     } catch (err) {
@@ -182,8 +200,8 @@ const adService = {
 
   async unlinkGPOfromOU(gpoName, ouDN) {
     try {
-      const safeGpoName = gpoName.replace(/'/g, "''");
-      const safeOuDN = ouDN.replace(/'/g, "''");
+      const safeGpoName = sanitizePSInput(gpoName).replace(/'/g, "''");
+      const safeOuDN = sanitizePSInput(ouDN).replace(/'/g, "''");
       await runPowerShell(
         `Import-Module GroupPolicy; Remove-GPLink -Name '${safeGpoName}' -Target '${safeOuDN}' -ErrorAction Stop`
       );
@@ -199,7 +217,7 @@ const adService = {
 
   async removeGPOStartupScript(gpoName) {
     try {
-      const safeGpoName = gpoName.replace(/'/g, "''");
+      const safeGpoName = sanitizePSInput(gpoName).replace(/'/g, "''");
       const ps = `
         $ErrorActionPreference = 'Stop'
         Import-Module ActiveDirectory
@@ -260,7 +278,7 @@ const adService = {
 
   async checkGPOConflicts(ouDN) {
     try {
-      const safeOuDN = ouDN.replace(/'/g, "''");
+      const safeOuDN = sanitizePSInput(ouDN).replace(/'/g, "''");
       const json = await runPowerShell(
         `Import-Module GroupPolicy; (Get-GPInheritance -Target '${safeOuDN}').GpoLinks | Select-Object DisplayName,Enabled,Order | ConvertTo-Json -Depth 2`
       );

@@ -59,6 +59,19 @@ const SettingsPage = {
           </select>
           <p class="form-hint">${t('settings.defaultGpoHint')}</p>
         </div>
+
+        <div class="form-group mb-md">
+          <label class="form-label">${t('settings.baseOu')}</label>
+          <div style="position:relative;margin-bottom:8px;">
+            <svg style="position:absolute;left:9px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.4" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" class="form-input" id="cfg-baseou-search" placeholder="${t('ous.searchOUs')}" autocomplete="off" style="padding-left:32px;">
+          </div>
+          <div id="cfg-baseou-tree" style="max-height:190px;overflow-y:auto;border:1px solid var(--border-color);border-radius:6px;padding:4px 6px;background:var(--bg-secondary);">
+            <div class="spinner"></div>
+          </div>
+          <p class="form-hint" style="margin-top:6px;">${t('settings.baseOuHint')}</p>
+          <input type="hidden" id="cfg-base-ou" value="${this.esc(config.baseOU || '')}">
+        </div>
         <div id="gpo-list-container" class="mt-lg" style="display:none;">
           <div id="gpo-list" class="mt-sm"></div>
         </div>
@@ -142,7 +155,12 @@ const SettingsPage = {
     });
 
     this.bindEvents(config);
-    if (App.rsatAvailable) this.loadGPOs(config);
+    if (App.rsatAvailable) {
+      this.loadGPOs(config);
+      this.loadOUs(config.baseOU);
+    } else {
+      document.getElementById('cfg-baseou-tree').innerHTML = `<p style="padding:8px;font-size:13px;color:var(--text-muted);">RSAT requerido para listar OUs</p>`;
+    }
   },
 
   bindEvents(config) {
@@ -255,6 +273,7 @@ const SettingsPage = {
       networkSharePath: document.getElementById('cfg-share-path').value.trim(),
       logDirectory: document.getElementById('cfg-log-dir').value.trim(),
       defaultGPO: document.getElementById('cfg-default-gpo').value,
+      baseOU: document.getElementById('cfg-base-ou').value.trim(),
       language: document.getElementById('cfg-language').value
     };
 
@@ -285,5 +304,54 @@ const SettingsPage = {
     const div = document.createElement('div');
     div.textContent = str || '';
     return div.innerHTML;
+  },
+
+  async loadOUs(selectedDN) {
+    try {
+      const result = await window.api.ad.getOUs(true); // ignoreBaseOU = true!
+      if (result.success && result.data) {
+        this.ousTreeCache = result.data;
+        this.renderOUTree(selectedDN);
+        
+        const searchInput = document.getElementById('cfg-baseou-search');
+        if (searchInput) {
+          searchInput.addEventListener('input', () => {
+            this.renderOUTree(document.getElementById('cfg-base-ou')?.value || selectedDN, searchInput.value);
+          });
+        }
+      }
+    } catch(err) {}
+  },
+
+  renderOUTree(selectedDN, query = '') {
+    const treeContainer = document.getElementById('cfg-baseou-tree');
+    if (!treeContainer || !this.ousTreeCache) return;
+    
+    treeContainer.innerHTML = App.ouPickerTreeHTML(this.ousTreeCache, query, selectedDN);
+    
+    // Bind events
+    treeContainer.querySelectorAll('.tree-toggle:not(.empty)').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const li = btn.closest('.tree-item');
+        const children = li.querySelector('.tree-children');
+        if (children) {
+          children.classList.toggle('collapsed');
+          btn.classList.toggle('expanded');
+        }
+      });
+    });
+
+    const dnInput = document.getElementById('cfg-base-ou');
+    treeContainer.querySelectorAll('.tree-node').forEach(node => {
+      node.addEventListener('click', (e) => {
+        if (e.target.closest('.tree-toggle')) return;
+        const dn = node.dataset.dn;
+        if (dnInput) dnInput.value = dn;
+        
+        treeContainer.querySelectorAll('.tree-node.selected').forEach(n => n.classList.remove('selected'));
+        node.classList.add('selected');
+      });
+    });
   }
 };

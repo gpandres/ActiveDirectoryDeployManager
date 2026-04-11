@@ -47,6 +47,19 @@ const SetupPage = {
           <p class="form-hint">${t('setup.defaultGpoHint')}</p>
         </div>
 
+        <div class="form-group mb-md">
+          <label class="form-label">${t('setup.baseOu')}</label>
+          <div style="position:relative;margin-bottom:8px;">
+            <svg style="position:absolute;left:9px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.4" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" class="form-input" id="setup-baseou-search" placeholder="${t('ous.searchOUs')}" autocomplete="off" style="padding-left:32px;">
+          </div>
+          <div id="setup-baseou-tree" style="max-height:190px;overflow-y:auto;border:1px solid var(--border-color);border-radius:6px;padding:4px 6px;background:var(--bg-secondary);">
+            <div class="spinner"></div>
+          </div>
+          <p class="form-hint" style="margin-top:6px;">${t('setup.baseOuHint')}</p>
+          <input type="hidden" id="setup-baseou" value="${this.esc(config.baseOU || '')}">
+        </div>
+
         <div style="margin-top: var(--space-xl); display: flex; justify-content: flex-end;">
           <button class="btn btn-primary btn-lg" id="btn-save-setup">
             ${t('setup.saveAndContinue')}
@@ -68,12 +81,19 @@ const SetupPage = {
       if (folder) document.getElementById('setup-network').value = folder;
     });
 
+    if (App.rsatAvailable) {
+      this.loadOUs(config.baseOU);
+    } else {
+      document.getElementById('setup-baseou-tree').innerHTML = `<p style="padding:8px;font-size:13px;color:var(--text-muted);">RSAT requerido para listar OUs</p>`;
+    }
+
     document.getElementById('btn-save-setup').addEventListener('click', async () => {
       const newConfig = {
         language: document.getElementById('setup-lang').value,
         networkSharePath: document.getElementById('setup-network').value.trim(),
         logDirectory: document.getElementById('setup-logs').value.trim(),
         defaultGPO: document.getElementById('setup-gpo').value.trim(),
+        baseOU: document.getElementById('setup-baseou').value.trim(),
         // setting firstRun to false will let them enter the app
         firstRun: false
       };
@@ -100,5 +120,54 @@ const SetupPage = {
     const div = document.createElement('div');
     div.textContent = str || '';
     return div.innerHTML;
+  },
+
+  async loadOUs(selectedDN) {
+    try {
+      const result = await window.api.ad.getOUs(true); // ignoreBaseOU = true!
+      if (result.success && result.data) {
+        this.ousTreeCache = result.data;
+        this.renderOUTree(selectedDN);
+        
+        const searchInput = document.getElementById('setup-baseou-search');
+        if (searchInput) {
+          searchInput.addEventListener('input', () => {
+            this.renderOUTree(document.getElementById('setup-baseou')?.value || selectedDN, searchInput.value);
+          });
+        }
+      }
+    } catch(err) {}
+  },
+
+  renderOUTree(selectedDN, query = '') {
+    const treeContainer = document.getElementById('setup-baseou-tree');
+    if (!treeContainer || !this.ousTreeCache) return;
+    
+    treeContainer.innerHTML = App.ouPickerTreeHTML(this.ousTreeCache, query, selectedDN);
+    
+    // Bind events
+    treeContainer.querySelectorAll('.tree-toggle:not(.empty)').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const li = btn.closest('.tree-item');
+        const children = li.querySelector('.tree-children');
+        if (children) {
+          children.classList.toggle('collapsed');
+          btn.classList.toggle('expanded');
+        }
+      });
+    });
+
+    const dnInput = document.getElementById('setup-baseou');
+    treeContainer.querySelectorAll('.tree-node').forEach(node => {
+      node.addEventListener('click', (e) => {
+        if (e.target.closest('.tree-toggle')) return;
+        const dn = node.dataset.dn;
+        if (dnInput) dnInput.value = dn;
+        
+        treeContainer.querySelectorAll('.tree-node.selected').forEach(n => n.classList.remove('selected'));
+        node.classList.add('selected');
+      });
+    });
   }
 };

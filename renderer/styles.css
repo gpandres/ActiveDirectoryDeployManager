@@ -886,11 +886,72 @@ tr:hover td { background: rgba(108, 99, 255, 0.03); }
 }
 
 /* ══════════════════════════════════════════════════════
+   Apps Page – Toolbar
+   ══════════════════════════════════════════════════════ */
+.apps-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+  flex-wrap: wrap;
+}
+
+.apps-counters {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.apps-counter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 24px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  user-select: none;
+}
+
+.apps-counter:hover {
+  border-color: rgba(108, 99, 255, 0.3);
+  background: var(--bg-card-hover);
+}
+
+.apps-counter.active {
+  border-color: var(--accent-primary);
+  background: var(--accent-primary-dim);
+}
+
+.apps-counter-value {
+  font-size: var(--font-md);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.apps-counter-label {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.apps-counter-dot {
+  width: 8px; height: 8px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.apps-counter-dot.deployed { background: var(--accent-secondary); box-shadow: 0 0 6px rgba(0, 212, 170, 0.5); }
+.apps-counter-dot.pending { background: var(--accent-warning); box-shadow: 0 0 6px rgba(245, 158, 11, 0.5); }
+
+/* ══════════════════════════════════════════════════════
    App Grid
    ══════════════════════════════════════════════════════ */
 .app-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: var(--space-md);
 }
 
@@ -901,62 +962,477 @@ tr:hover td { background: rgba(108, 99, 255, 0.03); }
   padding: var(--space-lg);
   transition: all var(--transition-normal);
   position: relative;
+  cursor: pointer;
+}
+
+/* Glassmorphism top accent bar */
+.app-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--gradient-primary);
+  opacity: 0;
+  transition: opacity var(--transition-normal);
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
 }
 
 .app-card:hover {
-  border-color: rgba(108, 99, 255, 0.25);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-glow);
+  border-color: rgba(108, 99, 255, 0.3);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25), var(--shadow-glow);
 }
 
-.app-card-header {
+.app-card:hover::before { opacity: 1; }
+
+/* Deployed/Pending card accent */
+.app-card--deployed { border-left: 3px solid var(--accent-secondary); }
+.app-card--pending { border-left: 3px solid var(--accent-warning); }
+
+/* Card Top Row: Icon + Name + Status */
+.app-card-top {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-md);
   margin-bottom: var(--space-md);
+}
+
+.app-card-icon {
+  width: 44px; height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--accent-primary-dim);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.4rem;
+  flex-shrink: 0;
+  border: 1px solid rgba(108, 99, 255, 0.15);
+}
+
+.app-card-info {
+  flex: 1;
+  min-width: 0;
 }
 
 .app-card-name {
   font-size: var(--font-md);
   font-weight: 600;
   color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .app-card-template {
   font-size: var(--font-xs);
   color: var(--text-muted);
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
+/* Status Dot */
+.app-card-status {
+  flex-shrink: 0;
+}
+
+.app-status-dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: var(--radius-full);
+  transition: all var(--transition-normal);
+}
+
+.app-status-dot.deployed {
+  background: var(--accent-secondary);
+  box-shadow: 0 0 8px rgba(0, 212, 170, 0.6);
+  animation: statusPulse 3s ease-in-out infinite;
+}
+
+.app-status-dot.pending {
+  background: var(--accent-warning);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
+}
+
+@keyframes statusPulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(0, 212, 170, 0.4); }
+  50% { box-shadow: 0 0 14px rgba(0, 212, 170, 0.8); }
+}
+
+/* Badges */
 .app-card-badges {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-xs);
-  margin-top: var(--space-md);
+  margin-bottom: var(--space-md);
 }
 
-.app-card-actions {
+/* Footer: Status Label + Menu Button */
+.app-card-footer {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
-  margin-top: var(--space-md);
+  align-items: center;
+  justify-content: space-between;
   padding-top: var(--space-md);
   border-top: 1px solid var(--border-color);
+}
+
+.app-card-deploy-info {
+  font-size: var(--font-xs);
+}
+
+.app-status-label {
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 0.65rem;
+}
+
+.app-status-label.deployed { color: var(--accent-secondary); }
+.app-status-label.pending { color: var(--accent-warning); }
+
+/* ── Dropdown Menu ─────────────────────────────────── */
+.app-card-menu {
+  position: relative;
+}
+
+.app-card-menu-btn {
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.app-card-menu-btn:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.app-card-dropdown {
+  position: absolute;
+  right: 0; top: 100%;
+  margin-top: 6px;
+  min-width: 190px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: var(--space-xs);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  z-index: 100;
+  display: none;
+  animation: dropdownFadeIn 0.15s ease;
+}
+
+.app-card-dropdown.visible { display: block; }
+
+@keyframes dropdownFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.dropdown-item {
+  display: flex;
   align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-family: var(--font-family);
+  font-size: var(--font-sm);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+  text-align: left;
 }
 
-.app-card-actions .btn-danger {
-  margin-left: auto;
+.dropdown-item:hover {
+  background: rgba(108, 99, 255, 0.1);
+  color: var(--text-primary);
 }
 
-.app-card .checkbox-select {
+.dropdown-item--success { color: var(--accent-secondary); }
+.dropdown-item--success:hover { background: var(--accent-secondary-dim); }
+
+.dropdown-item--warning { color: var(--accent-warning); }
+.dropdown-item--warning:hover { background: var(--accent-warning-dim); }
+
+.dropdown-item--danger { color: var(--accent-danger); }
+.dropdown-item--danger:hover { background: var(--accent-danger-dim); }
+
+.dropdown-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: var(--space-xs) 0;
+}
+
+/* Custom Styled Checkbox */
+.checkbox-select {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 2px solid var(--border-color);
+  background: var(--bg-input);
+  cursor: pointer;
+  position: relative;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+.checkbox-select:hover {
+  border-color: var(--accent-primary);
+  background: var(--bg-card-hover);
+}
+.checkbox-select:checked {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+.checkbox-select:checked::after {
+  content: '';
+  position: absolute;
+  left: 6.5px;
+  top: 3px;
+  width: 5px;
+  height: 10px;
+  border: solid #ffffff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.app-card .checkbox-select, .bundle-card .checkbox-select {
   position: absolute;
   top: var(--space-md);
   right: var(--space-md);
+  z-index: 2;
+}
+
+/* Fix static position for list views */
+.app-grid.list-view .checkbox-select, .cards-grid.list-view .checkbox-select {
+  position: static;
+}
+
+/* ══════════════════════════════════════════════════════
+   View Mode Toggle
+   ══════════════════════════════════════════════════════ */
+.view-toggle {
+  display: flex;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.view-toggle-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px;
+  background: var(--bg-card);
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.view-toggle-btn:not(:last-child) { border-right: 1px solid var(--border-color); }
+.view-toggle-btn:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+.view-toggle-btn.active { background: var(--accent-primary-dim); color: var(--accent-primary); }
+
+/* ══════════════════════════════════════════════════════
+   List View
+   ══════════════════════════════════════════════════════ */
+.app-grid.list-view {
+  grid-template-columns: 1fr;
+  gap: 2px;
+}
+
+.app-grid.list-view .app-card {
+  border-radius: var(--radius-sm);
+  padding: 12px var(--space-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.app-grid.list-view .app-card::before { display: none; }
+.app-grid.list-view .app-card:hover { transform: none; box-shadow: none; border-color: rgba(108, 99, 255, 0.3); }
+.app-grid.list-view .app-card--deployed { border-left: 3px solid var(--accent-secondary); }
+.app-grid.list-view .app-card--pending { border-left: 3px solid var(--accent-warning); }
+
+.app-grid.list-view .app-card-top {
+  flex: 1; margin-bottom: 0; min-width: 0;
+}
+
+.app-grid.list-view .app-card-icon {
+  width: 36px; height: 36px; font-size: 1.1rem;
+}
+
+.app-grid.list-view .app-card-badges {
+  margin-bottom: 0; flex-shrink: 0;
+}
+
+.app-grid.list-view .app-card-footer {
+  border-top: none; padding-top: 0; flex-shrink: 0;
+  min-width: 140px; justify-content: flex-end;
+}
+
+.app-grid.list-view .app-card-deploy-info { display: none; }
+
+.app-grid.list-view .checkbox-select {
+  position: static;
+  flex-shrink: 0;
+}
+
+/* ══════════════════════════════════════════════════════
+   Folder / Group Headers
+   ══════════════════════════════════════════════════════ */
+.app-folder-header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 10px 0 6px 0;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: var(--space-xs);
+  cursor: pointer;
+  user-select: none;
+}
+
+.app-folder-header svg { color: var(--accent-warning); flex-shrink: 0; }
+
+.app-folder-name {
+  font-size: var(--font-base);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.app-folder-count {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.app-folder-toggle {
   width: 20px; height: 20px;
-  accent-color: var(--accent-primary);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-muted);
+  transition: transform var(--transition-fast);
+}
+
+.app-folder-toggle.collapsed { transform: rotate(-90deg); }
+
+/* ══════════════════════════════════════════════════════
+   Bundle Cards (matching Apps redesign)
+   ══════════════════════════════════════════════════════ */
+.bundle-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  transition: all var(--transition-normal);
+  position: relative;
   cursor: pointer;
 }
+
+.bundle-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(135deg, #6C63FF, #3B82F6);
+  opacity: 0;
+  transition: opacity var(--transition-normal);
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
+}
+
+.bundle-card:hover {
+  border-color: rgba(108, 99, 255, 0.3);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25), var(--shadow-glow);
+}
+
+.bundle-card:hover::before { opacity: 1; }
+
+.bundle-card--deployed { border-left: 3px solid var(--accent-secondary); }
+.bundle-card--pending { border-left: 3px solid var(--accent-info); }
+
+.bundle-card-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.bundle-card-icon {
+  width: 44px; height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--accent-info-dim);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.4rem;
+  flex-shrink: 0;
+  border: 1px solid rgba(59, 130, 246, 0.15);
+}
+
+.bundle-card-info { flex: 1; min-width: 0; }
+
+.bundle-card-name {
+  font-size: var(--font-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.bundle-card-desc {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.bundle-card-apps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: var(--space-md);
+}
+
+.bundle-card-apps .app-chip {
+  padding: 2px 8px;
+  background: var(--bg-input);
+  border-radius: 4px;
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+}
+
+.bundle-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-color);
+}
+
+/* Bundles list view */
+.cards-grid.list-view {
+  grid-template-columns: 1fr;
+  gap: 2px;
+}
+
+.cards-grid.list-view .bundle-card {
+  border-radius: var(--radius-sm);
+  padding: 12px var(--space-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.cards-grid.list-view .bundle-card::before { display: none; }
+.cards-grid.list-view .bundle-card:hover { transform: none; box-shadow: none; }
+
+.cards-grid.list-view .bundle-card-top { flex: 1; margin-bottom: 0; }
+.cards-grid.list-view .bundle-card-icon { width: 36px; height: 36px; font-size: 1.1rem; }
+.cards-grid.list-view .bundle-card-apps { display: none; }
+.cards-grid.list-view .bundle-card-footer { border-top: none; padding-top: 0; flex-shrink: 0; min-width: 140px; justify-content: flex-end; }
 
 /* ══════════════════════════════════════════════════════
    Template Cards (for Wizard)
@@ -1778,6 +2254,45 @@ tr:hover td { background: rgba(108, 99, 255, 0.03); }
   display: flex;
   gap: 8px;
 }
+
+/* ══════════════════════════════════════════════════════
+   View Toggle Buttons (Tree / Assignments / Grid / List)
+   ══════════════════════════════════════════════════════ */
+.view-toggle {
+  display: flex;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  gap: 2px;
+}
+
+.view-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.view-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.view-toggle-btn.active {
+  background: var(--bg-hover);
+  color: var(--accent-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
 
 /* Context menu */
 .ctx-menu {

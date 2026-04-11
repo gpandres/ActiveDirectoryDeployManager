@@ -5,40 +5,56 @@ const configService = require('./config');
 const i18nService = require('./i18n');
 
 const TEMPLATES = {
-  generic: { category: 'General', name: 'Genérica (MSI/EXE)', description: 'Plantilla universal Drop & Run para cualquier instalador', fields: [] },
-  office: { category: 'General', name: 'Microsoft Office (XML)', description: 'Ejecuta setup.exe con archivo XML existente', fields: [{ key: 'configXml', label: 'Nombre del XML de Config', default: 'config_office.xml', hint: 'Debe estar en la misma carpeta' }] },
-  custom: { category: 'General', name: 'Script Custom', description: 'Escribe tu propio código PowerShell raw', fields: [{ key: 'customScript', label: 'Código PowerShell', type: 'textarea', default: '# Escribe tu código PowerShell aquí\\n', hint: 'Este código no será envuelto, utilízalo con precaución.' }] },
-  winget: { category: 'General', name: 'Winget Package', description: 'Instala desde Windows Package Manager (catálogo)', fields: [], noInstaller: true },
-  odt: { category: 'General', name: 'Microsoft Office (ODT)', description: 'Office 365/LTSC sin descarga manual — genera XML automáticamente', fields: [], noInstaller: true },
-  wazuh: { category: 'Seguridad', name: 'Wazuh Agent', description: 'Despliegue del agente SIEM/XDR de Wazuh', fields: [{key:'manager', label:'WAZUH_MANAGER', default:'', hint:'IP o FQDN del servidor Wazuh'}, {key:'group', label:'WAZUH_AGENT_GROUP', default:'default', hint:'Grupo de asignación'}, {key:'password', label:'WAZUH_REGISTRATION_PASSWORD', default:'', hint:'Contraseña de registro (opcional)'}] },
-  sentinelone: { category: 'Seguridad', name: 'SentinelOne', description: 'Despliegue con inyección de SITE_TOKEN', fields: [{key:'siteToken', label:'SITE_TOKEN', default:'', hint:'Cadena única del tenant SentinelOne'}] },
-  cortexxdr: { category: 'Seguridad', name: 'Cortex XDR', description: 'Despliegue XDR (Palo Alto)', fields: [{key:'installDir', label:'Directorio (Opcional)', default:'', hint:'Dejar vacío para predeterminado'}] },
-  bitdefender: { category: 'Seguridad', name: 'Bitdefender BEST', description: 'Despliegue estándar BEST', fields: [] },
-  crowdstrike: { category: 'Seguridad', name: 'CrowdStrike Falcon', description: 'Instala EXE con inyección de CID', fields: [{ key: 'cid', label: 'Customer ID (CID)', default: '', hint: 'CID de CrowdStrike Falcon' }] },
-  zscaler: { category: 'Conectividad', name: 'Zscaler Client Connector', description: 'Despliegue de Zscaler ZCC', fields: [{key:'cloudName', label:'CLOUDNAME', default:'zscaler', hint:'Ej: zscaler, zscalerone'}, {key:'userDomain', label:'USERDOMAIN', default:'', hint:'Dominio de la empresa para SSO'}, {key:'strictEnforcement', label:'Strict Enforcement', type:'checkbox', default:true, hint:'Prevenir que el usuario lo desactive'}] },
-  globalprotect: { category: 'Conectividad', name: 'GlobalProtect', description: 'Instalador MSI con inyección de PORTAL', fields: [{key:'portal', label:'Portal VPN', default:'', hint:'FQDN del portal (ej: vpn.empresa.com)'}] },
-  ciscosecureclient: { category: 'Conectividad', name: 'Cisco Secure Client', description: 'Instala MSI y copia profiles XML', fields: [{key:'profileXml', label:'Perfil XML', default:'profile.xml', hint:'Este XML debe estar junto al MSI'}] },
-  forticlient: { category: 'Conectividad', name: 'FortiClient VPN', description: 'Instala MSI + configura túnel VPN', fields: [ { key: 'vpnName', label: 'Nombre del túnel VPN', default: '', hint: 'Nombre del perfil VPN' }, { key: 'vpnDescription', label: 'Descripción', default: 'VPN Corporativa', hint: '' }, { key: 'vpnServer', label: 'Servidor:Puerto', default: '', hint: 'Ej: 192.168.1.1:10443' }, { key: 'ssoEnabled', label: 'Habilitar Single Sign-On (SSO)', type: 'checkbox', default: true, hint: 'Usa SAML/SSO para autenticarse' }, { key: 'serverCert', label: 'Validar Servidor CA', type: 'checkbox', default: false, hint: 'Casilla desmarcada (0) de serie' }, { key: 'noWarnInvalidCert', label: 'Silenciar Alerta de Certificado Inválido', type: 'checkbox', default: true, hint: 'No alertar en certificados auto-firmados' } ] },
-  lansweeper: { category: 'RMM', name: 'Lansweeper (LsAgent)', description: 'Agente local de inventario LsAgent', fields: [{key:'server', label:'SERVER', default:'', hint:'IP/FQDN de Lansweeper (si es local)'}, {key:'port', label:'PORT', default:'9524', hint:'Puerto'}, {key:'agentKey', label:'AGENTKEY (Cloud Relay)', default:'', hint:'Para sincronización por la nube'}] },
-  ninjaone: { category: 'RMM', name: 'NinjaOne / Datto RMM', description: 'Instalación genérica RMM por token', fields: [{key:'token', label:'Token / Clave', default:'', hint:'Token de organización'}] },
-  freshservice: { category: 'RMM', name: 'Freshservice Agent', description: 'Instala MSI con inyección de Token de Registro', fields: [{ key: 'token', label: 'Registration Token', default: '', hint: 'Token de la consola Freshservice' }] },
-  teamviewer: { category: 'RMM', name: 'TeamViewer Host', description: 'Despliegue Host MSI con APIToken', fields: [{key:'customId', label:'CUSTOMCONFIGID', default:'', hint:'ID de configuración Host'}, {key:'apiToken', label:'APITOKEN', default:'', hint:'Para autoasignar a la cuenta'}] },
-  anydesk: { category: 'RMM', name: 'AnyDesk Custom Client', description: 'Instalación genérica AnyDesk MSI', fields: [] },
-  veeam: { category: 'Backups', name: 'Veeam Agent', description: 'Despliegue con configuración XML de servidor', fields: [{key:'configXml', label:'XML de Configuración', default:'veeam_config.xml', hint:'Extraído de tu Veeam B&R server'}] },
-  crashplan: { category: 'Backups', name: 'CrashPlan Enterprise', description: 'Despliegue de backup endpoint', fields: [{key:'url', label:'DEPLOYMENT_URL', default:'', hint:'URL del authority server'}, {key:'token', label:'DEPLOYMENT_TOKEN', default:'', hint:'Token de la organización'}] },
-  'sap-gui': { category: 'Corporativo', name: 'SAP GUI', description: 'Instala EXE + copia XML de configuración', fields: [ { key: 'sapTheme', label: 'Tema SAP', type: 'select', default: '256', hint: '', options: [ {value:'1', label:'SAP Signature (1)'}, {value:'128', label:'Blue Crystal (128)'}, {value:'256', label:'Belize (256)'}, {value:'2048', label:'Quartz (2048)'}, {value:'16384', label:'Quartz Dark (16384)'} ] } ] }
+  generic: { category: 'General', name: 'Generic (MSI/EXE)', description: 'Universal Drop & Run template for any installer', fields: [] },
+  office: { category: 'General', name: 'Microsoft Office (XML)', description: 'Executes setup.exe with an existing XML file', fields: [{ key: 'configXml', label: 'Config XML Name', default: 'config_office.xml', hint: 'Must be placed in the same folder' }] },
+  custom: { category: 'General', name: 'Custom Script', description: 'Write your own raw PowerShell code', fields: [{ key: 'customScript', label: 'PowerShell Code', type: 'textarea', default: '# Write your PowerShell code here\\n', hint: 'This code will not be wrapped. Use with caution.' }] },
+  winget: { category: 'General', name: 'Winget Package', description: 'Installs from Windows Package Manager', fields: [], noInstaller: true },
+  odt: { category: 'General', name: 'Microsoft Office (ODT)', description: 'Office 365/LTSC without manual download — generates XML automatically', fields: [], noInstaller: true },
+  wazuh: { category: 'Security', name: 'Wazuh Agent', description: 'Wazuh SIEM/XDR agent deployment', fields: [{key:'manager', label:'WAZUH_MANAGER', default:'', hint:'Wazuh server IP or FQDN'}, {key:'group', label:'WAZUH_AGENT_GROUP', default:'default', hint:'Assignment group'}, {key:'password', label:'WAZUH_REGISTRATION_PASSWORD', default:'', hint:'Registration password (optional)'}] },
+  sentinelone: { category: 'Security', name: 'SentinelOne', description: 'Deployment with SITE_TOKEN injection', fields: [{key:'siteToken', label:'SITE_TOKEN', default:'', hint:'SentinelOne tenant unique string'}] },
+  cortexxdr: { category: 'Security', name: 'Cortex XDR', description: 'Cortex XDR Deployment (Palo Alto)', fields: [{key:'installDir', label:'Directory (Optional)', default:'', hint:'Leave empty for default directory'}] },
+  bitdefender: { category: 'Security', name: 'Bitdefender BEST', description: 'Standard BEST deployment', fields: [] },
+  crowdstrike: { category: 'Security', name: 'CrowdStrike Falcon', description: 'Installs EXE with CID injection', fields: [{ key: 'cid', label: 'Customer ID (CID)', default: '', hint: 'CrowdStrike Falcon CID' }] },
+  zscaler: { category: 'Connectivity', name: 'Zscaler Client Connector', description: 'Zscaler ZCC deployment', fields: [{key:'cloudName', label:'CLOUDNAME', default:'zscaler', hint:'i.e: zscaler, zscalerone'}, {key:'userDomain', label:'USERDOMAIN', default:'', hint:'Company domain for SSO'}, {key:'strictEnforcement', label:'Strict Enforcement', type:'checkbox', default:true, hint:'Prevent user disabling'}] },
+  globalprotect: { category: 'Connectivity', name: 'GlobalProtect', description: 'MSI installer with PORTAL injection', fields: [{key:'portal', label:'VPN Portal', default:'', hint:'Portal FQDN (i.e. vpn.company.com)'}] },
+  ciscosecureclient: { category: 'Connectivity', name: 'Cisco Secure Client', description: 'Installs MSI and copies XML profiles', fields: [{key:'profileXml', label:'XML Profile', default:'profile.xml', hint:'XML must be next to the MSI'}] },
+  forticlient: { category: 'Connectivity', name: 'FortiClient VPN', description: 'Installs MSI + configures VPN tunnel', fields: [ { key: 'vpnName', label: 'VPN Tunnel Name', default: '', hint: 'VPN Profile Name' }, { key: 'vpnDescription', label: 'Description', default: 'Corporate VPN', hint: '' }, { key: 'vpnServer', label: 'Server:Port', default: '', hint: 'i.e: 192.168.1.1:10443' }, { key: 'ssoEnabled', label: 'Enable Single Sign-On (SSO)', type: 'checkbox', default: true, hint: 'Use SAML/SSO for authentication' }, { key: 'serverCert', label: 'Validate CA Server', type: 'checkbox', default: false, hint: 'Unchecked (0) internally by default' }, { key: 'noWarnInvalidCert', label: 'Silence Invalid Cert Warning', type: 'checkbox', default: true, hint: 'Do not alert on self-signed certs' } ] },
+  lansweeper: { category: 'RMM', name: 'Lansweeper (LsAgent)', description: 'Local inventory LsAgent', fields: [{key:'server', label:'SERVER', default:'', hint:'Lansweeper IP/FQDN (if local)'}, {key:'port', label:'PORT', default:'9524', hint:'Port'}, {key:'agentKey', label:'AGENTKEY (Cloud Relay)', default:'', hint:'For cloud synchronization'}] },
+  ninjaone: { category: 'RMM', name: 'NinjaOne / Datto RMM', description: 'Generic RMM installation via token', fields: [{key:'token', label:'Token / Key', default:'', hint:'Organization token'}] },
+  freshservice: { category: 'RMM', name: 'Freshservice Agent', description: 'Installs MSI with Registration Token injection', fields: [{ key: 'token', label: 'Registration Token', default: '', hint: 'Freshservice console Token' }] },
+  teamviewer: { category: 'RMM', name: 'TeamViewer Host', description: 'MSI Host Deployment with APIToken', fields: [{key:'customId', label:'CUSTOMCONFIGID', default:'', hint:'Host config ID'}, {key:'apiToken', label:'APITOKEN', default:'', hint:'For account auto-assignment'}] },
+  anydesk: { category: 'RMM', name: 'AnyDesk Custom Client', description: 'Generic AnyDesk MSI installation', fields: [] },
+  veeam: { category: 'Backups', name: 'Veeam Agent', description: 'Deployment with server XML configuration', fields: [{key:'configXml', label:'Configuration XML', default:'veeam_config.xml', hint:'Extracted from your Veeam B&R server'}] },
+  crashplan: { category: 'Backups', name: 'CrashPlan Enterprise', description: 'Endpoint backup deployment', fields: [{key:'url', label:'DEPLOYMENT_URL', default:'', hint:'Authority server URL'}, {key:'token', label:'DEPLOYMENT_TOKEN', default:'', hint:'Organization Token'}] },
+  'sap-gui': { category: 'Corporate', name: 'SAP GUI', description: 'Installs EXE + copies configuration XML', fields: [ { key: 'sapTheme', label: 'SAP Theme', type: 'select', default: '256', hint: '', options: [ {value:'1', label:'SAP Signature (1)'}, {value:'128', label:'Blue Crystal (128)'}, {value:'256', label:'Belize (256)'}, {value:'2048', label:'Quartz (2048)'}, {value:'16384', label:'Quartz Dark (16384)'} ] } ] }
 };
 
 const scriptService = {
   getTemplateList() {
-    return Object.entries(TEMPLATES).map(([key, val]) => ({
-      id: key,
-      category: val.category || 'General',
-      name: val.name,
-      description: val.description,
-      fields: val.fields,
-      noInstaller: val.noInstaller || false
-    }));
+    const config = configService.getConfig();
+    const dict = i18nService.getTranslations(config.language || 'en');
+    
+    return Object.entries(TEMPLATES).map(([key, val]) => {
+      const tplDict = dict.templates?.[key] || {};
+      
+      const localizedFields = (val.fields || []).map(f => {
+        const fieldDict = tplDict.fields?.[f.key] || {};
+        return {
+          ...f,
+          label: fieldDict.label || f.label,
+          hint: fieldDict.hint || f.hint
+        };
+      });
+
+      return {
+        id: key,
+        category: tplDict.category || val.category || 'General',
+        name: tplDict.name || val.name,
+        description: tplDict.description || val.description,
+        fields: localizedFields,
+        noInstaller: val.noInstaller || false
+      };
+    });
   },
 
   generateScript(appConfig) {
@@ -193,8 +209,8 @@ function Send-UserToast {
 function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appDisplayName = '') {
   const config = configService.getConfig();
   const dict = i18nService.getTranslations(config.language || 'en');
-  const ToastTitleProcess = dict.apps?.toastTitleProcess || "Instalación en proceso";
-  const ToastMsgProcess = dict.apps?.toastMsgProcess || "Se está instalando $NombreApp. No apague el equipo.";
+  const ToastTitleProcess = dict.apps?.toastTitleProcess || "Installation in progress";
+  const ToastMsgProcess = dict.apps?.toastMsgProcess || "Installing $NombreApp. Please do not turn off your computer.";
 
   const notifyPrefix = notifyUser ? getNotificationLogic(appDisplayName) : '';
   const notifyBefore = notifyUser
@@ -237,8 +253,8 @@ ${notifyBefore}
 function getTrackerSaveLogic(notifyUser = false) {
   const config = configService.getConfig();
   const dict = i18nService.getTranslations(config.language || 'en');
-  const ToastTitleDone = dict.apps?.toastTitleDone || "Instalación completada";
-  const ToastMsgDone = dict.apps?.toastMsgDone || "$NombreApp se ha instalado correctamente. Ya puede continuar.";
+  const ToastTitleDone = dict.apps?.toastTitleDone || "Installation complete";
+  const ToastMsgDone = dict.apps?.toastMsgDone || "$NombreApp has been installed successfully. You may continue.";
 
   const notifyAfter = notifyUser
     ? `    Send-UserToast -ToastTitle "${ToastTitleDone}" -ToastMessage "${ToastMsgDone}" -IconType "Information"`
@@ -683,10 +699,10 @@ function generateWinget(cfg) {
   const notifyPrefix = notify ? getNotificationLogic(cfg.name) : '';
   const config   = configService.getConfig();
   const dict     = i18nService.getTranslations(config.language || 'en');
-  const ToastTitleProcess = dict.apps?.toastTitleProcess || 'Instalación en proceso';
-  const ToastMsgProcess   = dict.apps?.toastMsgProcess   || 'Se está instalando $NombreApp. No apague el equipo.';
-  const ToastTitleDone    = dict.apps?.toastTitleDone    || 'Instalación completada';
-  const ToastMsgDone      = dict.apps?.toastMsgDone      || '$NombreApp se ha instalado correctamente.';
+  const ToastTitleProcess = dict.apps?.toastTitleProcess || 'Installation in progress';
+  const ToastMsgProcess   = dict.apps?.toastMsgProcess   || 'Installing $NombreApp. Please do not turn off your computer.';
+  const ToastTitleDone    = dict.apps?.toastTitleDone    || 'Installation complete';
+  const ToastMsgDone      = dict.apps?.toastMsgDone      || '$NombreApp has been installed successfully.';
   const notifyBefore = notify ? `Send-UserToast -ToastTitle "${ToastTitleProcess}" -ToastMessage "${ToastMsgProcess}" -IconType "Warning"` : '';
   const notifyAfter  = notify ? `    Send-UserToast -ToastTitle "${ToastTitleDone}" -ToastMessage "${ToastMsgDone}" -IconType "Information"` : '';
 
@@ -742,7 +758,7 @@ if (-not $Winget) {
 }
 
 if (-not $Winget) {
-    Write-Host "winget no encontrado. Instala App Installer desde Microsoft Store (requiere Windows 10 21H2+)."
+    Write-Host "Winget not found. Please install App Installer from the Microsoft Store (requires Windows 10 21H2+)."
     exit 1
 }
 
@@ -755,7 +771,7 @@ try {
     Set-Content -Path $TrackerFile -Value $trackerData
 ${notifyAfter}
 } catch {
-    Write-Host "Error instalando ${cfg.name}: $_"
+    Write-Host "Error installing ${cfg.name}: $_"
     exit 1
 }
 `;
@@ -763,7 +779,7 @@ ${notifyAfter}
 
 function generateODT(cfg) {
   const odtConfig   = cfg.odtConfig || {};
-  const productId   = odtConfig.productId   || 'O365BusinessRetail';
+  const productId   = odtConfig.product   || 'O365BusinessRetail';
   const channel     = odtConfig.channel     || 'MonthlyEnterprise';
   const language    = odtConfig.language    || 'es-es';
   const arch        = odtConfig.arch        || '64';
@@ -772,10 +788,10 @@ function generateODT(cfg) {
   const notify      = cfg.notifyUser || false;
   const config      = configService.getConfig();
   const dict        = i18nService.getTranslations(config.language || 'en');
-  const ToastTitleProcess = dict.apps?.toastTitleProcess || 'Instalación en proceso';
-  const ToastMsgProcess   = dict.apps?.toastMsgProcess   || 'Se está instalando $NombreApp. No apague el equipo.';
-  const ToastTitleDone    = dict.apps?.toastTitleDone    || 'Instalación completada';
-  const ToastMsgDone      = dict.apps?.toastMsgDone      || '$NombreApp se ha instalado correctamente.';
+  const ToastTitleProcess = dict.apps?.toastTitleProcess || 'Installation in progress';
+  const ToastMsgProcess   = dict.apps?.toastMsgProcess   || 'Installing $NombreApp. Please do not turn off your computer.';
+  const ToastTitleDone    = dict.apps?.toastTitleDone    || 'Installation complete';
+  const ToastMsgDone      = dict.apps?.toastMsgDone      || '$NombreApp has been installed successfully.';
   const notifyPrefix = notify ? getNotificationLogic(cfg.name) : '';
   const notifyBefore = notify ? `Send-UserToast -ToastTitle "${ToastTitleProcess}" -ToastMessage "${ToastMsgProcess}" -IconType "Warning"` : '';
   const notifyAfter  = notify ? `    Send-UserToast -ToastTitle "${ToastTitleDone}" -ToastMessage "${ToastMsgDone}" -IconType "Information"` : '';
@@ -819,7 +835,7 @@ ${notifyBefore}
 $OdtSetup = Join-Path $PSScriptRoot "setup.exe"
 
 if (-not (Test-Path $OdtSetup)) {
-    Write-Host "Descargando Office Deployment Tool desde Microsoft..."
+    Write-Host "Downloading Office Deployment Tool from Microsoft..."
     $OdtInstaller = "$env:TEMP\\odt_installer.exe"
     $OdtExtract   = "$env:TEMP\\odt_extracted_${productId}"
     try {
@@ -830,11 +846,11 @@ if (-not (Test-Path $OdtSetup)) {
         Start-Process $OdtInstaller -ArgumentList "/quiet /extract:\`"$OdtExtract\`"" -Wait -NoNewWindow
         $OdtSetup = Join-Path $OdtExtract "setup.exe"
     } catch {
-        Write-Host "Error descargando ODT: $_"; exit 1
+        Write-Host "Error downloading ODT: $_"; exit 1
     }
 }
 
-if (-not (Test-Path $OdtSetup)) { Write-Host "setup.exe no encontrado"; exit 1 }
+if (-not (Test-Path $OdtSetup)) { Write-Host "setup.exe not found"; exit 1 }
 
 # ── Generar XML de configuración ─────────────────────────
 $XmlContent = @"
@@ -865,7 +881,7 @@ try {
     Set-Content -Path $TrackerFile -Value $trackerData
 ${notifyAfter}
 } catch {
-    Write-Host "Error instalando Office: $_"
+    Write-Host "Error installing Office: $_"
     exit 1
 }
 `;

@@ -107,7 +107,7 @@ app.whenReady().then(() => {
 
   // ─── IPC Handlers: AD Service ────────────────────────────────────
   ipcMain.handle('ad:checkRSAT', () => adService.checkRSAT());
-  ipcMain.handle('ad:getOUs', () => adService.getOUs());
+  ipcMain.handle('ad:getOUs', (_, ignoreBaseOU=false) => adService.getOUs(ignoreBaseOU));
   ipcMain.handle('ad:getGPOs', () => adService.getGPOs());
   ipcMain.handle('ad:createGPO', (_, name, path, ouDN) => adService.createGPO(name, path, ouDN));
   ipcMain.handle('ad:linkGPOtoOU', (_, gpoName, ouDN) => adService.linkGPOtoOU(gpoName, ouDN));
