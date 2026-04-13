@@ -8,7 +8,9 @@
     "dev": "electron . --dev",
     "build": "electron-builder --win portable",
     "build:dir": "electron-builder --win --dir",
-    "build:legacy": "npx electron-packager . \"AD_Deploy_Manager\" --platform=win32 --arch=x64 --electron-version=33.0.0 --out=dist --overwrite"
+    "build:legacy": "npx electron-packager . \"AD_Deploy_Manager\" --platform=win32 --arch=x64 --electron-version=33.0.0 --out=dist --overwrite",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "build": {
     "appId": "com.omnisec.appdeploymanager",
@@ -51,6 +53,7 @@
   "devDependencies": {
     "electron": "^33.0.0",
     "electron-builder": "^26.8.1",
-    "electron-packager": "^17.1.2"
+    "electron-packager": "^17.1.2",
+    "vitest": "^1.0.0"
   }
 }

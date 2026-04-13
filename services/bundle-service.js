@@ -12,47 +12,12 @@ function getBundlesPath() {
 }
 
 // ─── Share-backed storage (Option A: share is source of truth) ────────
-function getShareMetaPath(filename) {
-  try {
-    const configService = require('./config');
-    const cfg = configService.getConfig();
-    if (!cfg || !cfg.networkSharePath) return null;
-    return path.join(cfg.networkSharePath, '.appdeploy-meta', filename);
-  } catch (e) {
-    return null;
-  }
-}
-
-function tryReadShare(filename) {
-  const sharePath = getShareMetaPath(filename);
-  if (!sharePath) return null;
-  try {
-    if (fs.existsSync(sharePath)) {
-      return JSON.parse(fs.readFileSync(sharePath, 'utf-8'));
-    }
-  } catch (err) {
-    console.warn(`[share] Could not read ${filename} from share:`, err.message);
-  }
-  return null;
-}
-
-function tryWriteShare(filename, data) {
-  const sharePath = getShareMetaPath(filename);
-  if (!sharePath) return false;
-  try {
-    const dir = path.dirname(sharePath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(sharePath, JSON.stringify(data, null, 2), 'utf-8');
-    return true;
-  } catch (err) {
-    console.warn(`[share] Could not write ${filename} to share:`, err.message);
-    return false;
-  }
-}
+const { createShareStore } = require('./share-store');
+const bundlesShareStore = createShareStore('bundles-config.json');
 
 function loadBundles() {
   // Share is authoritative
-  const fromShare = tryReadShare('bundles-config.json');
+  const fromShare = bundlesShareStore.read();
   if (fromShare !== null) {
     try {
       fs.writeFileSync(getBundlesPath(), JSON.stringify(fromShare, null, 2), 'utf-8');
@@ -73,7 +38,7 @@ function loadBundles() {
 
 function saveBundles(bundles) {
   fs.writeFileSync(getBundlesPath(), JSON.stringify(bundles, null, 2), 'utf-8');
-  tryWriteShare('bundles-config.json', bundles);
+  bundlesShareStore.write(bundles);
 }
 
 function generateId() {
@@ -144,40 +109,15 @@ const bundleService = {
       })
       .filter(Boolean);
 
-    const notifyBlock = bundle.notifyUser ? `
-# ── Notificación al usuario ──────────────────────────
-function Send-UserToast {
-    param([string]$Title, [string]$Message, [string]$IconType)
-    try {
-        $LoggedUser = (Get-CimInstance Win32_ComputerSystem).UserName
-        if (-not $LoggedUser) { return }
-        $rnd = Get-Random -Minimum 1000 -Maximum 99999
-        $toastCode = "Add-Type -AssemblyName System.Windows.Forms; " +
-            "\`$b = New-Object System.Windows.Forms.NotifyIcon; " +
-            "\`$b.Icon = [System.Drawing.SystemIcons]::$IconType; " +
-            "\`$b.BalloonTipTitle = '$Title'; " +
-            "\`$b.BalloonTipText = '$Message'; " +
-            "\`$b.Visible = \`$true; " +
-            "\`$b.ShowBalloonTip(10000); " +
-            "Start-Sleep -Seconds 12; " +
-            "\`$b.Dispose()"
-        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -EP Bypass -Command $toastCode"
-        $principal = New-ScheduledTaskPrincipal -UserId $LoggedUser -LogonType Interactive
-        $taskName = "DeployNotify_$rnd"
-        Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Force | Out-Null
-        Start-ScheduledTask -TaskName $taskName
-        Start-Sleep -Seconds 15
-        Unregister-ScheduledTask -TaskName $taskName -Confirm:\`$false -ErrorAction SilentlyContinue
-    } catch {}
-}
-` : '';
+    const { getToastSnippet } = require('./ps-snippets');
+    const notifyBlock = bundle.notifyUser ? getToastSnippet() : '';
 
     const notifyStart = bundle.notifyUser
-      ? `Send-UserToast -Title "Instalación en proceso" -Message "Se están instalando ${bundle.apps.length} aplicaciones del pack ${bundle.name}. No apague el equipo." -IconType "Warning"`
+      ? `Send-UserToast -ToastTitle "Instalación en proceso" -ToastMessage "Se están instalando ${bundle.apps.length} aplicaciones del pack ${bundle.name}. No apague el equipo." -IconType "Warning"`
       : '';
 
     const notifyEnd = bundle.notifyUser
-      ? `Send-UserToast -Title "Instalación completada" -Message "Todas las aplicaciones del pack ${bundle.name} se han procesado. Ya puede continuar." -IconType "Information"`
+      ? `Send-UserToast -ToastTitle "Instalación completada" -ToastMessage "Todas las aplicaciones del pack ${bundle.name} se han procesado. Ya puede continuar." -IconType "Information"`
       : '';
 
     const appBlocks = appEntries.map((app, i) => {

@@ -51,6 +51,7 @@ app.whenReady().then(() => {
 
   const adService = require('./services/ad-service');
   const appService = require('./services/app-service');
+  const { assertString, assertStringOrNull, assertArray, assertBoolean, assertObject, assertId } = require('./services/ipc-validators');
   const scriptService = require('./services/script-service');
   const fileService = require('./services/file-service');
   const configService = require('./services/config');
@@ -107,25 +108,80 @@ app.whenReady().then(() => {
 
   // ─── IPC Handlers: AD Service ────────────────────────────────────
   ipcMain.handle('ad:checkRSAT', () => adService.checkRSAT());
-  ipcMain.handle('ad:getOUs', (_, ignoreBaseOU=false) => adService.getOUs(ignoreBaseOU));
+  ipcMain.handle('ad:getOUs', (_, ignoreBaseOU = false) => adService.getOUs(ignoreBaseOU));
   ipcMain.handle('ad:getGPOs', () => adService.getGPOs());
-  ipcMain.handle('ad:createGPO', (_, name, path, ouDN) => adService.createGPO(name, path, ouDN));
-  ipcMain.handle('ad:linkGPOtoOU', (_, gpoName, ouDN) => adService.linkGPOtoOU(gpoName, ouDN));
-  ipcMain.handle('ad:bulkLinkGPO', (_, gpoName, ouDNs) => adService.bulkLinkGPO(gpoName, ouDNs));
-  ipcMain.handle('ad:deleteGPO', (_, gpoName) => adService.deleteGPO(gpoName));
-  ipcMain.handle('ad:unlinkGPOfromOU', (_, gpoName, ouDN) => adService.unlinkGPOfromOU(gpoName, ouDN));
-  ipcMain.handle('ad:removeGPOStartupScript', (_, gpoName) => adService.removeGPOStartupScript(gpoName));
-  ipcMain.handle('ad:checkGPOConflicts', (_, ouDN) => adService.checkGPOConflicts(ouDN));
+  ipcMain.handle('ad:createGPO', (_, name, scriptPath, ouDN) => {
+    try {
+      assertString(name, 'name'); assertString(scriptPath, 'scriptPath'); assertStringOrNull(ouDN, 'ouDN');
+    } catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    return adService.createGPO(name, scriptPath, ouDN);
+  });
+  ipcMain.handle('ad:linkGPOtoOU', (_, gpoName, ouDN) => {
+    try { assertString(gpoName, 'gpoName'); assertString(ouDN, 'ouDN'); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    return adService.linkGPOtoOU(gpoName, ouDN);
+  });
+  ipcMain.handle('ad:bulkLinkGPO', (_, gpoName, ouDNs) => {
+    try { assertString(gpoName, 'gpoName'); assertArray(ouDNs, 'ouDNs'); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    return adService.bulkLinkGPO(gpoName, ouDNs);
+  });
+  ipcMain.handle('ad:deleteGPO', (_, gpoName) => {
+    try { assertString(gpoName, 'gpoName'); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    return adService.deleteGPO(gpoName);
+  });
+  ipcMain.handle('ad:unlinkGPOfromOU', (_, gpoName, ouDN) => {
+    try { assertString(gpoName, 'gpoName'); assertString(ouDN, 'ouDN'); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    return adService.unlinkGPOfromOU(gpoName, ouDN);
+  });
+  ipcMain.handle('ad:removeGPOStartupScript', (_, gpoName) => {
+    try { assertString(gpoName, 'gpoName'); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    return adService.removeGPOStartupScript(gpoName);
+  });
+  ipcMain.handle('ad:checkGPOConflicts', (_, ouDN) => {
+    try { assertString(ouDN, 'ouDN'); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    return adService.checkGPOConflicts(ouDN);
+  });
 
   // ─── IPC Handlers: App Service ───────────────────────────────────
   ipcMain.handle('apps:getAll', () => appService.getAll());
-  ipcMain.handle('apps:get', (_, id) => appService.get(id));
-  ipcMain.handle('apps:create', (_, data) => appService.create(data));
-  ipcMain.handle('apps:update', (_, id, data) => appService.update(id, data));
-  ipcMain.handle('apps:delete', (_, id, deleteFiles) => appService.remove(id, deleteFiles));
-  ipcMain.handle('apps:bulkAssignGPO', (_, ids, gpoName) => appService.bulkAssignGPO(ids, gpoName));
-  ipcMain.handle('apps:applyAssignmentPlan', (_, plan) => appService.applyAssignmentPlan(plan));
-  ipcMain.handle('apps:getInstallerVersion', (_, filePath) => appService.getInstallerVersion(filePath));
+  ipcMain.handle('apps:get', (_, id) => {
+    try { assertString(id, 'id'); } catch (e) { return null; }
+    return appService.get(id);
+  });
+  ipcMain.handle('apps:create', (_, data) => {
+    try { assertObject(data, 'data'); } catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    return appService.create(data);
+  });
+  ipcMain.handle('apps:update', (_, id, data) => {
+    try { assertString(id, 'id'); assertObject(data, 'data'); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    return appService.update(id, data);
+  });
+  ipcMain.handle('apps:delete', (_, id, deleteFiles) => {
+    try { assertString(id, 'id'); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    return appService.remove(id, deleteFiles);
+  });
+  ipcMain.handle('apps:bulkAssignGPO', (_, ids, gpoName) => {
+    try { assertArray(ids, 'ids'); assertString(gpoName, 'gpoName'); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    return appService.bulkAssignGPO(ids, gpoName);
+  });
+  ipcMain.handle('apps:applyAssignmentPlan', (_, plan) => {
+    try { assertObject(plan, 'plan'); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    return appService.applyAssignmentPlan(plan);
+  });
+  ipcMain.handle('apps:getInstallerVersion', (_, filePath) => {
+    try { assertString(filePath, 'filePath', 1024); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    return appService.getInstallerVersion(filePath);
+  });
   ipcMain.handle('apps:computeHash', (_, filePath) => ({ hash: appService.computeFileHash(filePath) }));
 
   // ─── IPC Handlers: Script Service ────────────────────────────────

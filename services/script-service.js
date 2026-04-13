@@ -29,6 +29,39 @@ const TEMPLATES = {
   'sap-gui': { category: 'Corporate', name: 'SAP GUI', description: 'Installs EXE + copies configuration XML', fields: [ { key: 'sapTheme', label: 'SAP Theme', type: 'select', default: '256', hint: '', options: [ {value:'1', label:'SAP Signature (1)'}, {value:'128', label:'Blue Crystal (128)'}, {value:'256', label:'Belize (256)'}, {value:'2048', label:'Quartz (2048)'}, {value:'16384', label:'Quartz Dark (16384)'} ] } ] }
 };
 
+// ─── Generator map — adding a new template only requires one entry here ───
+// (declared after all generateX functions are hoisted / defined)
+let GENERATORS;
+function getGenerators() {
+  if (!GENERATORS) {
+    GENERATORS = {
+      generic:           generateGeneric,
+      office:            generateOffice,
+      custom:            generateCustom,
+      winget:            generateWinget,
+      odt:               generateODT,
+      wazuh:             generateWazuh,
+      sentinelone:       generateSentinelOne,
+      cortexxdr:         generateCortexXDR,
+      bitdefender:       generateBitdefender,
+      crowdstrike:       generateCrowdstrike,
+      zscaler:           generateZscaler,
+      globalprotect:     generateGlobalProtect,
+      ciscosecureclient: generateCiscoSecureClient,
+      forticlient:       generateForticlient,
+      lansweeper:        generateLansweeper,
+      ninjaone:          generateNinjaOne,
+      freshservice:      generateFreshservice,
+      teamviewer:        generateTeamViewer,
+      anydesk:           generateAnyDesk,
+      veeam:             generateVeeam,
+      crashplan:         generateCrashPlan,
+      'sap-gui':         generateSapGui,
+    };
+  }
+  return GENERATORS;
+}
+
 const scriptService = {
   getTemplateList() {
     const config = configService.getConfig();
@@ -58,32 +91,9 @@ const scriptService = {
   },
 
   generateScript(appConfig) {
-    const template = appConfig.template || 'generic';
-    switch (template) {
-      case 'generic': return generateGeneric(appConfig);
-      case 'office': return generateOffice(appConfig);
-      case 'custom': return generateCustom(appConfig);
-      case 'wazuh': return generateWazuh(appConfig);
-      case 'sentinelone': return generateSentinelOne(appConfig);
-      case 'cortexxdr': return generateCortexXDR(appConfig);
-      case 'bitdefender': return generateBitdefender(appConfig);
-      case 'crowdstrike': return generateCrowdstrike(appConfig);
-      case 'zscaler': return generateZscaler(appConfig);
-      case 'globalprotect': return generateGlobalProtect(appConfig);
-      case 'ciscosecureclient': return generateCiscoSecureClient(appConfig);
-      case 'forticlient': return generateForticlient(appConfig);
-      case 'lansweeper': return generateLansweeper(appConfig);
-      case 'ninjaone': return generateNinjaOne(appConfig);
-      case 'freshservice': return generateFreshservice(appConfig);
-      case 'teamviewer': return generateTeamViewer(appConfig);
-      case 'anydesk': return generateAnyDesk(appConfig);
-      case 'veeam': return generateVeeam(appConfig);
-      case 'crashplan': return generateCrashPlan(appConfig);
-      case 'sap-gui': return generateSapGui(appConfig);
-      case 'winget': return generateWinget(appConfig);
-      case 'odt': return generateODT(appConfig);
-      default: return generateGeneric(appConfig);
-    }
+    const generators = getGenerators();
+    const fn = generators[appConfig.template] ?? generators.generic;
+    return fn(appConfig);
   },
 
   async deployScript(appConfig) {
@@ -176,34 +186,9 @@ const scriptService = {
   }
 };
 
-function getNotificationLogic(appName) {
-  return `
-# ── Notificación al usuario (Session 0 workaround) ──
-function Send-UserToast {
-    param([string]$ToastTitle, [string]$ToastMessage, [string]$IconType)
-    try {
-        $LoggedUser = (Get-CimInstance Win32_ComputerSystem).UserName
-        if (-not $LoggedUser) { return }
-        $rnd = Get-Random -Minimum 1000 -Maximum 99999
-        $toastCode = "Add-Type -AssemblyName System.Windows.Forms; " +
-            "\`$b = New-Object System.Windows.Forms.NotifyIcon; " +
-            "\`$b.Icon = [System.Drawing.SystemIcons]::$IconType; " +
-            "\`$b.BalloonTipTitle = '$ToastTitle'; " +
-            "\`$b.BalloonTipText = '$ToastMessage'; " +
-            "\`$b.Visible = \`$true; " +
-            "\`$b.ShowBalloonTip(10000); " +
-            "Start-Sleep -Seconds 12; " +
-            "\`$b.Dispose()"
-        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -EP Bypass -Command $toastCode"
-        $principal = New-ScheduledTaskPrincipal -UserId $LoggedUser -LogonType Interactive
-        $taskName = "DeployNotify_$rnd"
-        Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Force | Out-Null
-        Start-ScheduledTask -TaskName $taskName
-        Start-Sleep -Seconds 15
-        Unregister-ScheduledTask -TaskName $taskName -Confirm:\`$false -ErrorAction SilentlyContinue
-    } catch {}
-}
-`;
+const { getToastSnippet } = require('./ps-snippets');
+function getNotificationLogic(_appName) {
+  return getToastSnippet();
 }
 
 function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appDisplayName = '') {

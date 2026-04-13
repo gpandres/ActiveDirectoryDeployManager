@@ -1,6 +1,4 @@
-const { exec } = require('child_process');
-const fs = require('fs');
-const os = require('os');
+const { execFile } = require('child_process');
 const path = require('path');
 
 // Sanitize user input before interpolating into PowerShell commands.
@@ -15,17 +13,17 @@ function sanitizePSInput(str) {
 
 function runPowerShell(command) {
   return new Promise((resolve, reject) => {
-    const tmpFile = path.join(os.tmpdir(), `ad_script_${Date.now()}_${Math.floor(Math.random()*1000)}.ps1`);
-    fs.writeFileSync(tmpFile, command, { encoding: 'utf8' });
-    const psCommand = `powershell -NoProfile -ExecutionPolicy Bypass -File "${tmpFile}"`;
-    exec(psCommand, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
-      try { fs.unlinkSync(tmpFile); } catch (e) {}
-      if (error) {
-        reject(new Error(stderr || error.message));
-      } else {
-        resolve(stdout.trim());
+    const ps = execFile(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', '-'],
+      { maxBuffer: 1024 * 1024 * 10 },
+      (error, stdout, stderr) => {
+        if (error) reject(new Error(stderr || error.message));
+        else resolve(stdout.trim());
       }
-    });
+    );
+    ps.stdin.write(command);
+    ps.stdin.end();
   });
 }
 

@@ -1,8 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { exec } = require('child_process');
-const os = require('os');
+const { execFile } = require('child_process');
 
 let appsFilePath = null;
 
@@ -16,47 +15,12 @@ function getAppsPath() {
 
 // ─── Share-backed storage (Option A: share is source of truth) ────────
 // Local userData copy acts as a cache so the app still works offline.
-function getShareMetaPath(filename) {
-  try {
-    const configService = require('./config');
-    const cfg = configService.getConfig();
-    if (!cfg || !cfg.networkSharePath) return null;
-    return path.join(cfg.networkSharePath, '.appdeploy-meta', filename);
-  } catch (e) {
-    return null;
-  }
-}
-
-function tryReadShare(filename) {
-  const sharePath = getShareMetaPath(filename);
-  if (!sharePath) return null;
-  try {
-    if (fs.existsSync(sharePath)) {
-      return JSON.parse(fs.readFileSync(sharePath, 'utf-8'));
-    }
-  } catch (err) {
-    console.warn(`[share] Could not read ${filename} from share:`, err.message);
-  }
-  return null;
-}
-
-function tryWriteShare(filename, data) {
-  const sharePath = getShareMetaPath(filename);
-  if (!sharePath) return false;
-  try {
-    const dir = path.dirname(sharePath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(sharePath, JSON.stringify(data, null, 2), 'utf-8');
-    return true;
-  } catch (err) {
-    console.warn(`[share] Could not write ${filename} to share:`, err.message);
-    return false;
-  }
-}
+const { createShareStore } = require('./share-store');
+const appsShareStore = createShareStore('apps-config.json');
 
 function loadApps() {
   // Share is authoritative — pull from there if available
-  const fromShare = tryReadShare('apps-config.json');
+  const fromShare = appsShareStore.read();
   if (fromShare !== null) {
     // Mirror to local cache for offline fallback
     try {
@@ -80,7 +44,7 @@ function saveApps(apps) {
   // Always write local cache
   fs.writeFileSync(getAppsPath(), JSON.stringify(apps, null, 2), 'utf-8');
   // Best-effort mirror to share
-  tryWriteShare('apps-config.json', apps);
+  appsShareStore.write(apps);
 }
 
 function generateId() {
@@ -281,19 +245,19 @@ const appService = {
           return resolve({ success: false, error: 'Unsupported file type' });
         }
 
-        const tmpFile = path.join(os.tmpdir(), `ver_${Date.now()}_${Math.floor(Math.random()*1000)}.ps1`);
-        fs.writeFileSync(tmpFile, psCommand, { encoding: 'utf8' });
-        exec(`powershell -NoProfile -ExecutionPolicy Bypass -File "${tmpFile}"`, { maxBuffer: 1024 * 1024 }, (error, stdout) => {
-          try { fs.unlinkSync(tmpFile); } catch (e) {}
-          if (error) {
-            return resolve({ success: false, error: error.message });
+        const ps = execFile(
+          'powershell',
+          ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', '-'],
+          { maxBuffer: 1024 * 1024, timeout: 15000 },
+          (error, stdout) => {
+            if (error) return resolve({ success: false, error: error.message });
+            const version = (stdout || '').trim();
+            if (!version) return resolve({ success: false, error: 'No version metadata found' });
+            resolve({ success: true, version });
           }
-          const version = (stdout || '').trim();
-          if (!version) {
-            return resolve({ success: false, error: 'No version metadata found' });
-          }
-          resolve({ success: true, version });
-        });
+        );
+        ps.stdin.write(psCommand);
+        ps.stdin.end();
       } catch (err) {
         resolve({ success: false, error: err.message });
       }
@@ -301,32 +265,10 @@ const appService = {
   },
 
   cleanupTempFiles() {
-    // Sweep orphaned temp PS scripts (ad_script_*.ps1 and ver_*.ps1)
-    // created by runPowerShell() and getInstallerVersion().
-    // Only deletes files older than 60 seconds to avoid racing
-    // with a concurrent operation that's currently using the file.
-    try {
-      const tmpDir = os.tmpdir();
-      const minAgeMs = 60 * 1000;
-      const now = Date.now();
-      const patterns = [/^ad_script_\d+_\d+\.ps1$/, /^ver_\d+_\d+\.ps1$/];
-      const files = fs.readdirSync(tmpDir);
-      let removed = 0;
-      for (const file of files) {
-        if (!patterns.some(re => re.test(file))) continue;
-        const full = path.join(tmpDir, file);
-        try {
-          const stat = fs.statSync(full);
-          if (now - stat.mtimeMs >= minAgeMs) {
-            fs.unlinkSync(full);
-            removed++;
-          }
-        } catch (e) {}
-      }
-      return { success: true, removed };
-    } catch (err) {
-      return { success: false, error: err.message };
-    }
+    // Both runPowerShell (ad-service) and getInstallerVersion now use stdin,
+    // so no temp PS scripts are written to disk. This method is kept as a
+    // no-op safety net for any orphans from older sessions.
+    return { success: true, removed: 0 };
   },
 
   computeFileHash(filePath) {
