@@ -2582,6 +2582,20 @@ tr:hover td { background: rgba(108, 99, 255, 0.03); }
   color: var(--text-muted);
 }
 
+/* Winget CLI search status bar */
+.catalog-search-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: var(--space-md);
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+
 /* Filter Pills */
 .catalog-filters {
   display: flex;
@@ -2773,5 +2787,194 @@ tr:hover td { background: rgba(108, 99, 255, 0.03); }
   gap: var(--space-sm);
   font-size: var(--font-sm);
   color: var(--text-secondary);
+}
+
+/* ── ODT Wizard ──────────────────────────────────────────────────────── */
+.odt-wizard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.odt-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: rgba(30, 144, 255, 0.07);
+  border: 1px solid rgba(30, 144, 255, 0.2);
+  border-radius: var(--radius-md);
+}
+
+.odt-header-icon {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.odt-header-title {
+  font-weight: 700;
+  font-size: var(--font-md);
+  color: var(--text-primary);
+}
+
+.odt-header-sub {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.odt-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.odt-section-label {
+  font-size: var(--font-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+/* Product radio-cards */
+.odt-product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+.odt-product-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.odt-product-card input[type="radio"] {
+  display: none;
+}
+
+.odt-product-card:hover {
+  border-color: var(--primary-color);
+}
+
+.odt-product-card.active {
+  border-color: var(--primary-color);
+  background: rgba(108, 99, 255, 0.1);
+}
+
+.odt-product-name {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.odt-product-badge {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+
+/* App chip-toggles */
+.odt-apps-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.odt-app-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  user-select: none;
+}
+
+.odt-app-chip input[type="checkbox"] {
+  display: none;
+}
+
+.odt-app-chip:hover {
+  border-color: var(--primary-color);
+  color: var(--text-primary);
+}
+
+.odt-app-chip.active {
+  border-color: var(--primary-color);
+  background: rgba(108, 99, 255, 0.12);
+  color: var(--text-primary);
+}
+
+/* Options row */
+.odt-options-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.odt-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 120px;
+}
+
+.odt-option-sm {
+  flex: 0 0 130px;
+}
+
+.odt-option-label {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+/* Summary panel */
+.odt-summary {
+  padding: 12px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.odt-summary-row {
+  display: flex;
+  gap: 10px;
+  font-size: var(--font-sm);
+}
+
+.odt-summary-key {
+  color: var(--text-muted);
+  min-width: 130px;
+  font-size: var(--font-xs);
+}
+
+.odt-summary-val {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.odt-summary-warning {
+  margin-top: 6px;
+  font-size: var(--font-xs);
+  color: var(--accent-warning, #f59e0b);
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color);
 }
 

@@ -11,6 +11,7 @@ const CatalogPage = {
   _showUpdates: false,
   _versionCheckResults: [],
   _checkingUpdates: false,
+  _wingetSearching: false,
 
   async render(container) {
     // Load curated catalog for categories + ODT data
@@ -71,7 +72,7 @@ const CatalogPage = {
           </button>
         `).join('')}
         <button class="catalog-filter-pill ${this._activeCategory === 'Winget' ? 'active' : ''}" data-cat="Winget">
-          📦 Winget API
+          📦 Winget
         </button>
       </div>
 
@@ -104,8 +105,18 @@ const CatalogPage = {
   _renderResults() {
     const results = this._getFilteredResults();
 
+    let statusHtml = '';
+    if (this._wingetSearching) {
+      statusHtml = `
+        <div class="catalog-search-status">
+          <span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:8px;"></span>
+          Buscando en winget CLI...
+        </div>
+      `;
+    }
+
     if (results.length === 0) {
-      return `
+      return statusHtml + `
         <div class="empty-state" style="padding:48px 0;">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-muted);margin-bottom:12px;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <p style="color:var(--text-muted);font-size:var(--font-sm);">${t('catalog.noResults')}</p>
@@ -116,12 +127,12 @@ const CatalogPage = {
     // Group by category
     const grouped = {};
     results.forEach(item => {
-      const cat = item.source === 'winget-api' ? 'Winget API' : item.category;
+      const cat = (item.source === 'winget-api' || item.source === 'winget-cli') ? 'Winget' : item.category;
       if (!grouped[cat]) grouped[cat] = [];
       grouped[cat].push(item);
     });
 
-    let html = '<div class="catalog-grid-wrapper">';
+    let html = statusHtml + '<div class="catalog-grid-wrapper">';
     for (const [cat, items] of Object.entries(grouped)) {
       html += `
         <div class="catalog-category-section">
@@ -141,7 +152,7 @@ const CatalogPage = {
       (s.wingetId && s.wingetId === item.wingetId) || (s.id && s.id === item.id)
     );
     const version = item.version || item.defaultVersion || '';
-    const isApi = item.source === 'winget-api';
+    const isApi = item.source === 'winget-api' || item.source === 'winget-cli';
 
     return `
       <div class="catalog-card ${isSelected ? 'selected' : ''}"
@@ -216,8 +227,8 @@ const CatalogPage = {
   _getFilteredResults() {
     const cat = this._activeCategory;
     if (cat === 'Todo') return this._results;
-    if (cat === 'Winget') return this._results.filter(r => r.source === 'winget-api');
-    return this._results.filter(r => r.category === cat && r.source !== 'winget-api');
+    if (cat === 'Winget') return this._results.filter(r => r.source === 'winget-api' || r.source === 'winget-cli');
+    return this._results.filter(r => r.category === cat && r.source !== 'winget-api' && r.source !== 'winget-cli');
   },
 
   _bindEvents(container) {
@@ -276,24 +287,42 @@ const CatalogPage = {
 
   async _doSearch() {
     const query = document.getElementById('catalog-search')?.value?.trim() || '';
-    const hint = document.getElementById('catalog-search-hint');
-
-    if (query.length >= 2) {
-      if (hint) hint.style.display = 'flex';
-
-      try {
-        this._results = await window.api.catalog.search(query, this._activeCategory);
-      } catch {
-        this._results = [];
-      }
-
-      if (hint) hint.style.display = 'none';
-    } else {
-      // Reset to curated catalog
-      this._results = (this._catalogData?.catalog || []).map(item => ({ ...item, source: 'curated' }));
-    }
 
     this._showUpdates = false;
+
+    if (query.length < 2) {
+      // Reset to curated catalog
+      this._wingetSearching = false;
+      this._results = (this._catalogData?.catalog || []).map(item => ({ ...item, source: 'curated' }));
+      this._updateResults();
+      return;
+    }
+
+    // Fase 1: mostrar curated filtrado inmediatamente
+    const q = query.toLowerCase();
+    const curatedFiltered = (this._catalogData?.catalog || [])
+      .map(item => ({ ...item, source: 'curated' }))
+      .filter(item =>
+        item.name?.toLowerCase().includes(q) ||
+        item.wingetId?.toLowerCase().includes(q) ||
+        item.description?.toLowerCase().includes(q)
+      );
+
+    this._results = curatedFiltered;
+    this._wingetSearching = true;
+    this._updateResults();
+
+    // Fase 2: búsqueda CLI en paralelo (puede tardar 10-20s)
+    const curatedIds = new Set(curatedFiltered.map(r => r.wingetId).filter(Boolean));
+    try {
+      const wingetResults = await window.api.catalog.searchCLI(query);
+      const newOnly = wingetResults.filter(r => r.wingetId && !curatedIds.has(r.wingetId));
+      this._results = [...curatedFiltered, ...newOnly];
+    } catch {
+      // mantener solo curated
+    }
+
+    this._wingetSearching = false;
     this._updateResults();
   },
 

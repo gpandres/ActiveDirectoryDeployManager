@@ -96,6 +96,7 @@ contextBridge.exposeInMainWorld('api', {
   catalog: {
     getCatalog: () => ipcRenderer.invoke('catalog:getCatalog'),
     search: (query, category) => ipcRenderer.invoke('catalog:search', query, category),
+    searchCLI: (query) => ipcRenderer.invoke('catalog:searchCLI', query),
     checkVersions: (ids) => ipcRenderer.invoke('catalog:checkVersions', ids),
     checkSingle: (wingetId) => ipcRenderer.invoke('catalog:checkSingle', wingetId)
   }

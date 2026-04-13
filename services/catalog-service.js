@@ -250,50 +250,59 @@ function checkVersionWinget(wingetId) {
   });
 }
 
-// ─── Dynamic Winget API Search ──────────────────────────────
+// ─── CLI Winget Search ───────────────────────────────────────
+// Uses the local winget binary — stable, no external API dependency.
 
-function searchWingetAPI(query) {
+function searchWingetCLI(query) {
   return new Promise((resolve) => {
     if (!query || query.length < 2) { resolve([]); return; }
 
-    // Use the community winget REST API to search
-    const searchUrl = `/api/packages?query=${encodeURIComponent(query)}&count=30`;
-    const options = {
-      hostname: 'api.winget.run',
-      path: searchUrl,
-      headers: {
-        'User-Agent': 'AppDeployManager/1.0',
-        'Accept': 'application/json'
-      },
-      timeout: 10000
-    };
+    // Sanitise: strip double-quotes to avoid shell injection
+    const safeQuery = query.replace(/"/g, '');
+    const cmd = `winget search --query "${safeQuery}" --source winget --accept-source-agreements --disable-interactivity 2>nul`;
 
-    const req = https.get(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          const packages = json.Packages || json.packages || json || [];
-          const results = (Array.isArray(packages) ? packages : []).slice(0, 30).map(pkg => ({
-            id: (pkg.Id || pkg.PackageIdentifier || '').toLowerCase().replace(/\./g, '-'),
-            name: pkg.Name || pkg.PackageName || pkg.Id || 'Unknown',
-            wingetId: pkg.Id || pkg.PackageIdentifier || '',
-            publisher: pkg.Publisher || '',
-            version: pkg.Version || pkg.Latest?.Version || '',
-            description: pkg.Description || pkg.ShortDescription || '',
+    exec(cmd, { timeout: 20000, shell: 'cmd.exe' }, (err, stdout) => {
+      if (err || !stdout) { resolve([]); return; }
+
+      const lines = stdout.split(/\r?\n/);
+      // Separator line looks like: ────────... or ---------...
+      const sepIdx = lines.findIndex(l => /^[─\-]{3,}/.test(l.trim()));
+      if (sepIdx < 1) { resolve([]); return; }
+
+      const header   = lines[sepIdx - 1];
+      const idStart  = header.search(/\bId\b/);
+      const verStart = header.search(/Versi[oó]n|Version/i);
+      if (idStart < 0) { resolve([]); return; }
+
+      const results = lines.slice(sepIdx + 1)
+        .filter(l => l.trim() && !l.startsWith('\x1b'))
+        .map(line => {
+          const name = line.substring(0, idStart).trim();
+          const rest = line.substring(idStart);
+          const id   = verStart > idStart
+            ? rest.substring(0, verStart - idStart).trim()
+            : rest.split(/\s{2,}/)[0].trim();
+          const version = verStart > idStart
+            ? line.substring(verStart).split(/\s+/)[0].trim()
+            : '';
+
+          // winget IDs always contain a dot — skip malformed lines
+          if (!id || !id.includes('.')) return null;
+          return {
+            id: id.toLowerCase().replace(/\./g, '-'),
+            name: name || id,
+            wingetId: id,
+            version: version || '',
             category: 'Winget',
             icon: '📦',
-            source: 'winget-api'
-          }));
-          resolve(results);
-        } catch {
-          resolve([]);
-        }
-      });
+            source: 'winget-cli'
+          };
+        })
+        .filter(Boolean)
+        .slice(0, 30);
+
+      resolve(results);
     });
-    req.on('error', () => resolve([]));
-    req.on('timeout', () => { req.destroy(); resolve([]); });
   });
 }
 
@@ -334,19 +343,18 @@ const catalogService = {
       return matchCat && matchQ;
     }).map(item => ({ ...item, source: 'curated' }));
 
-    // 2. If query is provided and not filtering by specific non-winget category,
-    //    also search Winget API for more results
-    let apiResults = [];
+    // 2. If query is provided, also search via winget CLI for extended results
+    let cliResults = [];
     if (q.length >= 2 && (cat === 'Todo' || cat === 'Winget')) {
       try {
-        apiResults = await searchWingetAPI(q);
-        // Remove duplicates (already in curated)
+        cliResults = await searchWingetCLI(q);
+        // Remove duplicates already present in curated
         const curatedIds = new Set(curated.map(c => c.wingetId.toLowerCase()));
-        apiResults = apiResults.filter(r => !curatedIds.has(r.wingetId.toLowerCase()));
-      } catch { /* ignore API failures */ }
+        cliResults = cliResults.filter(r => !curatedIds.has((r.wingetId || '').toLowerCase()));
+      } catch { /* winget not available — return curated only */ }
     }
 
-    return [...curated, ...apiResults];
+    return [...curated, ...cliResults];
   },
 
   /**
@@ -383,6 +391,16 @@ const catalogService = {
     return results
       .filter(r => r.status === 'fulfilled')
       .map(r => r.value);
+  },
+
+  /**
+   * Direct CLI search — called from the catalog renderer for the second-phase
+   * results that appear after the instant curated filter.
+   * @param {string} query
+   * @returns {Promise<Array>}
+   */
+  searchCLI(query) {
+    return searchWingetCLI(query);
   },
 
   /**

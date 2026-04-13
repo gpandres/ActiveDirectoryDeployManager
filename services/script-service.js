@@ -202,34 +202,91 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
     ? `Send-UserToast -ToastTitle "${ToastTitleProcess}" -ToastMessage "${ToastMsgProcess}" -IconType "Warning"`
     : '';
   return `
+# ── Logging ────────────────────────────────────────────────────────────
 $LogDir = "C:\\ProgramData\\AppDeploy_Logs"
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 $NombreApp = (Get-Item $PSScriptRoot).Name
+$LogFile   = "$LogDir\\Install_$($NombreApp)_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+Start-Transcript -Path $LogFile -Force -ErrorAction SilentlyContinue
+
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ===== AppDeploy Manager ============================="
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] App     : $NombreApp"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Equipo  : $env:COMPUTERNAME"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Usuario : $env:USERNAME"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Fuente  : $PSScriptRoot"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ====================================================="
+
 $TrackerFile = "$LogDir\\Tracker_$NombreApp.json"
 
-# Leer manifiesto de versión desde red
+# ── Leer manifiesto ─────────────────────────────────────────────────────
 $VersionFile = Join-Path $PSScriptRoot "version.json"
-if (-not (Test-Path $VersionFile)) { exit }
-$Manifest = Get-Content $VersionFile -Raw | ConvertFrom-Json
-$CurrentHash = $Manifest.hash
-$CurrentVersion = $Manifest.version
+if (-not (Test-Path $VersionFile)) {
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: No se encontró version.json en $PSScriptRoot"
+    Stop-Transcript -ErrorAction SilentlyContinue
+    exit 0
+}
+try {
+    $Manifest       = Get-Content $VersionFile -Raw | ConvertFrom-Json
+    $CurrentHash    = $Manifest.hash
+    $CurrentVersion = $Manifest.version
+} catch {
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: version.json corrupto — $_"
+    Stop-Transcript -ErrorAction SilentlyContinue
+    exit 1
+}
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Versión : $CurrentVersion | Hash: $CurrentHash"
 
-# Comparar con última instalación registrada
-$LastTracker = if (Test-Path $TrackerFile) { Get-Content $TrackerFile -Raw | ConvertFrom-Json } else { $null }
-if ($LastTracker -and $LastTracker.hash -eq $CurrentHash) { exit }
+# ── Comprobar si ya instalado ────────────────────────────────────────────
+if (Test-Path $TrackerFile) {
+    try {
+        $t = Get-Content $TrackerFile -Raw | ConvertFrom-Json
+        if ($t.hash -eq $CurrentHash) {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Ya instalado (resultado anterior: $($t.result))"
+            Stop-Transcript -ErrorAction SilentlyContinue
+            exit 0
+        }
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Hash anterior: $($t.hash) — actualizando a $CurrentHash"
+    } catch {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Tracker corrupto, reinstalando"
+    }
+}
 
-# Comprobar instalador en red
-$InstaladorRed = Get-ChildItem -Path $PSScriptRoot -File | Where-Object { $_.Extension -match "${filter}" } | Select-Object -First 1
-if (-not $InstaladorRed) { exit }
+# ── Localizar instalador en share ────────────────────────────────────────
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Buscando instalador en share..."
+$InstaladorRed = Get-ChildItem -Path $PSScriptRoot -File -ErrorAction SilentlyContinue |
+                 Where-Object { $_.Extension -match "${filter}" } |
+                 Select-Object -First 1
+if (-not $InstaladorRed) {
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: No se encontró instalador (${filter}) en $PSScriptRoot"
+    Stop-Transcript -ErrorAction SilentlyContinue
+    exit 1
+}
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Instalador: $($InstaladorRed.Name) ($([Math]::Round($InstaladorRed.Length/1MB,1)) MB)"
 
-# Copiar a caché local
+# ── Copiar a caché local ─────────────────────────────────────────────────
 $CacheDir = "C:\\Temp\\Deploy\\$NombreApp"
-if (-not (Test-Path $CacheDir)) { New-Item -ItemType Directory -Path $CacheDir -Force | Out-Null }
-Copy-Item -Path "$PSScriptRoot\\*" -Destination $CacheDir -Recurse -Force
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Copiando a caché: $CacheDir"
+try {
+    if (-not (Test-Path $CacheDir)) { New-Item -ItemType Directory -Path $CacheDir -Force | Out-Null }
+    Copy-Item -Path "$PSScriptRoot\\*" -Destination $CacheDir -Recurse -Force -ErrorAction Stop
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Copia completada."
+} catch {
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR copiando desde share: $_"
+    Stop-Transcript -ErrorAction SilentlyContinue
+    exit 1
+}
 
-# Ejecutar localmente
-$Instalador = Get-ChildItem -Path $CacheDir -File | Where-Object { $_.Extension -match "${filter}" } | Select-Object -First 1
-$PSScriptRoot = $CacheDir
+# ── Localizar instalador en caché ────────────────────────────────────────
+$Instalador = Get-ChildItem -Path $CacheDir -File |
+              Where-Object { $_.Extension -match "${filter}" } |
+              Select-Object -First 1
+if (-not $Instalador) {
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Instalador no encontrado en caché tras la copia"
+    Stop-Transcript -ErrorAction SilentlyContinue
+    exit 1
+}
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Ejecutando instalación..."
+# NOTA: $PSScriptRoot sigue apuntando al share (solo lectura). Usar $CacheDir para rutas locales.
 ${notifyPrefix}
 ${notifyBefore}
 `;
@@ -244,10 +301,22 @@ function getTrackerSaveLogic(notifyUser = false) {
   const notifyAfter = notifyUser
     ? `    Send-UserToast -ToastTitle "${ToastTitleDone}" -ToastMessage "${ToastMsgDone}" -IconType "Information"`
     : '';
+  // NOTE: this snippet closes the caller's `try {` block, adds catch + Stop-Transcript.
+  // Templates must NOT have their own `} catch {}` after this interpolation.
   return `
-    $trackerData = @{ hash = $CurrentHash; version = $CurrentVersion; installedAt = (Get-Date).ToString('o') } | ConvertTo-Json
-    Set-Content -Path $TrackerFile -Value $trackerData
-${notifyAfter}`;
+    # ── Éxito ──────────────────────────────────────────────────────────
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: $NombreApp instalado correctamente (v$CurrentVersion)"
+${notifyAfter}
+    @{ hash = $CurrentHash; version = $CurrentVersion; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success' } |
+        ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+
+} catch {
+    # ── Error ──────────────────────────────────────────────────────────
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Fallo instalando $NombreApp — $_"
+    @{ hash = $CurrentHash; version = $CurrentVersion; failedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'failed'; error = $_.ToString() } |
+        ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+}
+Stop-Transcript -ErrorAction SilentlyContinue`;
 }
 
 function generateGeneric(cfg) {
@@ -273,7 +342,6 @@ try {
         Start-Process -FilePath $Instalador.FullName -ArgumentList $ArgumentosExe -Wait -NoNewWindow
     }
 ${getTrackerSaveLogic(notify)}
-} catch {}
 `;
 }
 
@@ -296,7 +364,6 @@ try {
     $msiArgs = "/i \`"$($Instalador.FullName)\`" REGISTRATIONTOKEN=\`"$Token\`" /qn /norestart"
     Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
-} catch {}
 `;
 }
 
@@ -318,11 +385,11 @@ ${getLocalCachingLogic("\\.exe$", notify, cfg.name)}
 try {
     Start-Process -FilePath $Instalador.FullName -ArgumentList "/S /quiet /install CID=$CID" -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
-} catch {}
 `;
 }
 
 function generateSapGui(cfg) {
+  const notify = cfg.notifyUser || false;
   return `# =========================================================================
 # SAP GUI - DROP & RUN
 # App: ${cfg.name}
@@ -331,11 +398,11 @@ function generateSapGui(cfg) {
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
     Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
 }
-${getLocalCachingLogic("\\.exe$")}
+${getLocalCachingLogic("\\.exe$", notify, cfg.name)}
 try {
     Start-Process -FilePath $Instalador.FullName -ArgumentList "/silent" -Wait -NoNewWindow
 
-    $xmlSource = Join-Path -Path $PSScriptRoot -ChildPath "SAPUILandscapeGlobal.xml"
+    $xmlSource = Join-Path -Path $CacheDir -ChildPath "SAPUILandscapeGlobal.xml"
     $xmlDestDir = "C:\\connectionsap"
     $xmlDestFile = "$xmlDestDir\\SAPUILandscapeGlobal.xml"
 
@@ -354,9 +421,7 @@ try {
     $themePath = "HKLM:\\SOFTWARE\\SAP\\General\\Appearance"
     if (!(Test-Path $themePath)) { New-Item -Path $themePath -Force | Out-Null }
     New-ItemProperty -Path $themePath -Name "SelectedTheme" -Value ${cfg.customParams?.sapTheme != null ? cfg.customParams.sapTheme : 1} -PropertyType DWord -Force | Out-Null
-
-    Set-Content -Path $TrackerFile -Value $Instalador.Name
-} catch {}
+${getTrackerSaveLogic(notify)}
 `;
 }
 
@@ -381,27 +446,28 @@ try {
     $msiArgs = "/i \`"$($Instalador.FullName)\`" REBOOT=ReallySuppress /qn"
     $installProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow -PassThru
 
-    if ($installProcess.ExitCode -eq 0 -or $installProcess.ExitCode -eq 3010 -or $installProcess.ExitCode -eq 1641) {
-        $vpnPath = "HKLM:\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels\\${vpnName}"
-        if (-not (Test-Path -LiteralPath $vpnPath)) { New-Item $vpnPath -Force -ea SilentlyContinue | Out-Null }
-
-        New-ItemProperty -LiteralPath $vpnPath -Name 'Description' -Value '${vpnDesc}' -PropertyType String -Force -ea SilentlyContinue | Out-Null
-        New-ItemProperty -LiteralPath $vpnPath -Name 'Server' -Value '${vpnServer}' -PropertyType String -Force -ea SilentlyContinue | Out-Null
-        New-ItemProperty -LiteralPath $vpnPath -Name 'sso_enabled' -Value ${sso} -PropertyType DWord -Force -ea SilentlyContinue | Out-Null
-        New-ItemProperty -LiteralPath $vpnPath -Name 'ServerCert' -Value '${srvCert}' -PropertyType String -Force -ea SilentlyContinue | Out-Null
-        
-        $sslPath = "HKLM:\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn"
-        if (-not (Test-Path -LiteralPath $sslPath)) { New-Item $sslPath -Force -ea SilentlyContinue | Out-Null }
-        New-ItemProperty -LiteralPath $sslPath -Name 'no_warn_invalid_cert' -Value ${noWarn} -PropertyType DWord -Force -ea SilentlyContinue | Out-Null
-
-        Set-Content -Path $TrackerFile -Value $Instalador.Name
+    if ($installProcess.ExitCode -notin @(0, 3010, 1641)) {
+        throw "msiexec salió con código $($installProcess.ExitCode)"
     }
-} catch {}
+
+    $vpnPath = "HKLM:\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels\\${vpnName}"
+    if (-not (Test-Path -LiteralPath $vpnPath)) { New-Item $vpnPath -Force -ea SilentlyContinue | Out-Null }
+
+    New-ItemProperty -LiteralPath $vpnPath -Name 'Description' -Value '${vpnDesc}' -PropertyType String -Force -ea SilentlyContinue | Out-Null
+    New-ItemProperty -LiteralPath $vpnPath -Name 'Server' -Value '${vpnServer}' -PropertyType String -Force -ea SilentlyContinue | Out-Null
+    New-ItemProperty -LiteralPath $vpnPath -Name 'sso_enabled' -Value ${sso} -PropertyType DWord -Force -ea SilentlyContinue | Out-Null
+    New-ItemProperty -LiteralPath $vpnPath -Name 'ServerCert' -Value '${srvCert}' -PropertyType String -Force -ea SilentlyContinue | Out-Null
+
+    $sslPath = "HKLM:\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn"
+    if (-not (Test-Path -LiteralPath $sslPath)) { New-Item $sslPath -Force -ea SilentlyContinue | Out-Null }
+    New-ItemProperty -LiteralPath $sslPath -Name 'no_warn_invalid_cert' -Value ${noWarn} -PropertyType DWord -Force -ea SilentlyContinue | Out-Null
+${getTrackerSaveLogic(notify)}
 `;
 }
 
 function generateOffice(cfg) {
   const configXml = cfg.customParams?.configXml || 'config_office.xml';
+  const notify = cfg.notifyUser || false;
   return `# =========================================================================
 # MICROSOFT OFFICE - DROP & RUN
 # App: ${cfg.name}
@@ -410,12 +476,11 @@ function generateOffice(cfg) {
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
     Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
 }
-${getLocalCachingLogic("\\.exe$")}
+${getLocalCachingLogic("\\.exe$", notify, cfg.name)}
 try {
-    $RutaXML = Join-Path -Path $PSScriptRoot -ChildPath "${configXml}"
+    $RutaXML = Join-Path -Path $CacheDir -ChildPath "${configXml}"
     Start-Process -FilePath $Instalador.FullName -ArgumentList "/configure \`"$RutaXML\`"" -Wait -NoNewWindow
-    Set-Content -Path $TrackerFile -Value $Instalador.Name
-} catch {}
+${getTrackerSaveLogic(notify)}
 `;
 }
 
@@ -447,7 +512,6 @@ try {
     $msiArgs += " /qn"
     Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
-} catch {}
 `;
 }
 
@@ -466,7 +530,6 @@ try {
         Start-Process -FilePath $Instalador.FullName -ArgumentList "-t ${st} -q" -Wait -NoNewWindow
     }
 ${getTrackerSaveLogic(notify)}
-} catch {}
 `;
 }
 
@@ -483,7 +546,6 @@ try {
     if ("${dir}") { $msiArgs += " INSTALLDIR=\`"${dir}\`"" }
     Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
-} catch {}
 `;
 }
 
@@ -501,7 +563,6 @@ try {
         Start-Process -FilePath $Instalador.FullName -ArgumentList "/silent" -Wait -NoNewWindow
     }
 ${getTrackerSaveLogic(notify)}
-} catch {}
 `;
 }
 
@@ -520,7 +581,6 @@ try {
     if ("${domain}") { $msiArgs += " USERDOMAIN=\`"${domain}\`"" }
     Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
-} catch {}
 `;
 }
 
@@ -536,7 +596,6 @@ try {
     $msiArgs = "/i \`"$($Instalador.FullName)\`" PORTAL=\`"${portal}\`" /qn"
     Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
-} catch {}
 `;
 }
 
@@ -550,15 +609,14 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\W
 ${getLocalCachingLogic("\\.msi$", notify, cfg.name)}
 try {
     Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$($Instalador.FullName)\`" /qn" -Wait -NoNewWindow
-    
-    $xmlSource = Join-Path -Path $PSScriptRoot -ChildPath "${xml}"
+
+    $xmlSource = Join-Path -Path $CacheDir -ChildPath "${xml}"
     $xmlDestDir = "C:\\ProgramData\\Cisco\\Cisco Secure Client\\VPN\\Profile"
     if (-not (Test-Path $xmlDestDir)) { New-Item -ItemType Directory -Path $xmlDestDir -Force | Out-Null }
     if (Test-Path $xmlSource) {
-        Copy-Item -Path $xmlSource -Destination "$xmlDestDir\\$xml" -Force
+        Copy-Item -Path $xmlSource -Destination "$xmlDestDir\\${xml}" -Force
     }
 ${getTrackerSaveLogic(notify)}
-} catch {}
 `;
 }
 
@@ -578,7 +636,6 @@ try {
     if ("${key}") { $args += " --agentkey ${key}" }
     Start-Process -FilePath $Instalador.FullName -ArgumentList $args -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
-} catch {}
 `;
 }
 
@@ -595,7 +652,6 @@ try {
     if ("${tk}") { $msiArgs += " TOKEN=\`"${tk}\`"" }
     Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
-} catch {}
 `;
 }
 
@@ -615,7 +671,6 @@ try {
     $msiArgs += " ASSIGNMENTOPTIONS=\`"--grant-easy-access\`""
     Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
-} catch {}
 `;
 }
 
@@ -629,7 +684,6 @@ ${getLocalCachingLogic("\\.msi$", notify, cfg.name)}
 try {
     Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$($Instalador.FullName)\`" /qn" -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
-} catch {}
 `;
 }
 
@@ -647,14 +701,13 @@ try {
     } else {
         Start-Process -FilePath $Instalador.FullName -ArgumentList "/silent /norestart" -Wait -NoNewWindow
     }
-    
-    $xmlSource = Join-Path -Path $PSScriptRoot -ChildPath "${xml}"
+
+    $xmlSource = Join-Path -Path $CacheDir -ChildPath "${xml}"
     if (Test-Path $xmlSource) {
         Start-Sleep -Seconds 15
         Start-Process -FilePath "C:\\Program Files\\Veeam\\Endpoint Backup\\Veeam.Agent.Configurator.exe" -ArgumentList "-setVBRsettings /f:\`"$xmlSource\`"" -Wait -NoNewWindow
     }
 ${getTrackerSaveLogic(notify)}
-} catch {}
 `;
 }
 
@@ -673,7 +726,6 @@ try {
     if ("${token}") { $msiArgs += " DEPLOYMENT_TOKEN=\`"${token}\`"" }
     Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
-} catch {}
 `;
 }
 
@@ -704,20 +756,34 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
 $LogDir = "C:\\ProgramData\\AppDeploy_Logs"
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 $NombreApp = (Get-Item $PSScriptRoot).Name
+$LogFile   = "$LogDir\\Install_$($NombreApp)_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+Start-Transcript -Path $LogFile -Force -ErrorAction SilentlyContinue
+
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ===== AppDeploy Manager ============================="
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] App     : $NombreApp [winget: ${wingetId}]"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Equipo  : $env:COMPUTERNAME"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Usuario : $env:USERNAME"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ====================================================="
+
 $TrackerFile = "$LogDir\\Tracker_$NombreApp.json"
 
-# Leer versión desde manifiesto de red
+# ── Leer versión desde manifiesto de red ─────────────────
 $CurrentVersion = "${version}"
 $VersionFile = Join-Path $PSScriptRoot "version.json"
 if (Test-Path $VersionFile) {
     try { $CurrentVersion = (Get-Content $VersionFile -Raw | ConvertFrom-Json).version } catch {}
 }
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Versión : $CurrentVersion"
 
-# Salir si ya está instalado en esta versión
+# ── Salir si ya está instalado en esta versión ───────────
 if (Test-Path $TrackerFile) {
     try {
         $t = Get-Content $TrackerFile -Raw | ConvertFrom-Json
-        if ($t.version -eq $CurrentVersion) { exit 0 }
+        if ($t.version -eq $CurrentVersion -and $t.result -eq 'success') {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Ya instalado (v$CurrentVersion)"
+            Stop-Transcript -ErrorAction SilentlyContinue
+            exit 0
+        }
     } catch {}
 }
 ${notifyPrefix}
@@ -743,36 +809,41 @@ if (-not $Winget) {
 }
 
 if (-not $Winget) {
-    Write-Host "Winget not found. Please install App Installer from the Microsoft Store (requires Windows 10 21H2+)."
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: winget no encontrado. Instalar App Installer desde Microsoft Store (requiere Windows 10 21H2+)."
+    Stop-Transcript -ErrorAction SilentlyContinue
     exit 1
 }
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] winget: $Winget"
 
 # ── Instalar ─────────────────────────────────────────────
 try {
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Ejecutando: winget install --id ${wingetId} --scope machine"
     & $Winget install --id "${wingetId}" --silent --accept-package-agreements --accept-source-agreements --scope machine
     if ($LASTEXITCODE -notin @(0, 1618, -1978335212)) { throw "winget salió con código $LASTEXITCODE" }
 
-    $trackerData = @{ version = $CurrentVersion; installedAt = (Get-Date).ToString('o'); method = "winget"; wingetId = "${wingetId}" } | ConvertTo-Json
-    Set-Content -Path $TrackerFile -Value $trackerData
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: $NombreApp instalado correctamente (v$CurrentVersion)"
 ${notifyAfter}
+    @{ version = $CurrentVersion; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success'; method = 'winget'; wingetId = "${wingetId}" } |
+        ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
 } catch {
-    Write-Host "Error installing ${cfg.name}: $_"
-    exit 1
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Fallo instalando $NombreApp — $_"
+    @{ version = $CurrentVersion; failedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'failed'; error = $_.ToString() } |
+        ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
 }
+Stop-Transcript -ErrorAction SilentlyContinue
 `;
 }
 
 function generateODT(cfg) {
-  const odtConfig   = cfg.odtConfig || {};
-  const productId   = odtConfig.product   || 'O365BusinessRetail';
-  const channel     = odtConfig.channel     || 'MonthlyEnterprise';
-  const language    = odtConfig.language    || 'es-es';
-  const arch        = odtConfig.arch        || '64';
-  const excludeApps = (odtConfig.excludeApps || []).map(a => `      <ExcludeApp ID="${a}" />`).join('\n');
-  const version     = cfg.version || '1.0.0';
-  const notify      = cfg.notifyUser || false;
-  const config      = configService.getConfig();
-  const dict        = i18nService.getTranslations(config.language || 'en');
+  const odtConfig  = cfg.odtConfig || {};
+  const productId  = odtConfig.product  || 'O365BusinessRetail';
+  const channel    = odtConfig.channel  || 'MonthlyEnterprise';
+  const language   = odtConfig.language || 'es-es';
+  const arch       = odtConfig.arch     || '64';
+  const version    = cfg.version || '1.0.0';
+  const notify     = cfg.notifyUser || false;
+  const config     = configService.getConfig();
+  const dict       = i18nService.getTranslations(config.language || 'en');
   const ToastTitleProcess = dict.apps?.toastTitleProcess || 'Installation in progress';
   const ToastMsgProcess   = dict.apps?.toastMsgProcess   || 'Installing $NombreApp. Please do not turn off your computer.';
   const ToastTitleDone    = dict.apps?.toastTitleDone    || 'Installation complete';
@@ -799,43 +870,95 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
 $LogDir = "C:\\ProgramData\\AppDeploy_Logs"
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 $NombreApp = (Get-Item $PSScriptRoot).Name
+$LogFile   = "$LogDir\\Install_$($NombreApp)_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+Start-Transcript -Path $LogFile -Force -ErrorAction SilentlyContinue
+
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ===== AppDeploy Manager ============================="
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] App     : $NombreApp (Office ODT)"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Producto: ${productId} | Canal: ${channel} | Idioma: ${language} | Arq: ${arch}"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Equipo  : $env:COMPUTERNAME"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Usuario : $env:USERNAME"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ====================================================="
+
 $TrackerFile = "$LogDir\\Tracker_$NombreApp.json"
 
+# ── Leer manifiesto ──────────────────────────────────────
 $CurrentVersion = "${version}"
 $VersionFile = Join-Path $PSScriptRoot "version.json"
-if (Test-Path $VersionFile) {
-    try { $CurrentVersion = (Get-Content $VersionFile -Raw | ConvertFrom-Json).version } catch {}
+if (-not (Test-Path $VersionFile)) {
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: No se encontró version.json en $PSScriptRoot"
+    Stop-Transcript -ErrorAction SilentlyContinue
+    exit 0
 }
+try {
+    $Manifest       = Get-Content $VersionFile -Raw | ConvertFrom-Json
+    $CurrentHash    = $Manifest.hash
+    $CurrentVersion = $Manifest.version
+} catch {
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: version.json corrupto — $_"
+    Stop-Transcript -ErrorAction SilentlyContinue
+    exit 1
+}
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Versión : $CurrentVersion"
 
+# ── Comprobar si ya instalado (Office en registro + tracker) ─
+$LastTracker = $null
 if (Test-Path $TrackerFile) {
-    try {
-        $t = Get-Content $TrackerFile -Raw | ConvertFrom-Json
-        if ($t.version -eq $CurrentVersion) { exit 0 }
-    } catch {}
+    try { $LastTracker = Get-Content $TrackerFile -Raw | ConvertFrom-Json } catch {}
 }
-${notifyPrefix}
-${notifyBefore}
+$OfficeInstalled = Get-ItemProperty \`
+    "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*",
+    "HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" \`
+    -ErrorAction SilentlyContinue |
+    Where-Object { $_.DisplayName -like "*Microsoft Office*" -or $_.DisplayName -like "*Microsoft 365*" } |
+    Select-Object -First 1
+if ($OfficeInstalled -and $LastTracker -and $LastTracker.result -eq 'success' -and $LastTracker.version -eq $CurrentVersion) {
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Office ya instalado — $($OfficeInstalled.DisplayName)"
+    Stop-Transcript -ErrorAction SilentlyContinue
+    exit 0
+}
 
-# ── Localizar o descargar ODT setup.exe ──────────────────
+# ── Localizar ODT setup.exe ──────────────────────────────
+# Si el admin dejó setup.exe en el share, usarlo directamente
 $OdtSetup = Join-Path $PSScriptRoot "setup.exe"
 
 if (-not (Test-Path $OdtSetup)) {
-    Write-Host "Downloading Office Deployment Tool from Microsoft..."
-    $OdtInstaller = "$env:TEMP\\odt_installer.exe"
-    $OdtExtract   = "$env:TEMP\\odt_extracted_${productId}"
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Descargando Office Deployment Tool..."
+    $OdtTemp    = "$env:TEMP\\odt_installer_$(Get-Random).exe"
+    $OdtExtract = "$env:TEMP\\odt_$(Get-Random)"
     try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         $wc = New-Object System.Net.WebClient
-        # Stable redirect to latest ODT — Microsoft CDN
-        $wc.DownloadFile("https://download.microsoft.com/download/2/7/A/27AF1BE6-DD20-4CB4-B154-EBAB8A7D4A7E/officedeploymenttool_17531-20046.exe", $OdtInstaller)
+        $wc.Headers.Add("User-Agent", "Mozilla/5.0")
+        # Intentar detectar la URL actual desde la página oficial de Microsoft
+        $OdtUrl = $null
+        try {
+            $page     = $wc.DownloadString("https://www.microsoft.com/en-us/download/confirmation.aspx?id=49117")
+            $urlMatch = [regex]::Match($page, 'https://download\\.microsoft\\.com/download/[^\\s"]+officedeploymenttool[^\\s"]+\\.exe')
+            if ($urlMatch.Success) { $OdtUrl = $urlMatch.Value }
+        } catch {}
+        if (-not $OdtUrl) {
+            $OdtUrl = "https://download.microsoft.com/download/2/7/A/27AF1BE6-DD20-4CB4-B154-EBAB8A7D4A7E/officedeploymenttool_17531-20046.exe"
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Usando URL de fallback del ODT"
+        }
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] URL: $OdtUrl"
+        $wc.DownloadFile($OdtUrl, $OdtTemp)
         New-Item -ItemType Directory -Path $OdtExtract -Force | Out-Null
-        Start-Process $OdtInstaller -ArgumentList "/quiet /extract:\`"$OdtExtract\`"" -Wait -NoNewWindow
+        Start-Process $OdtTemp -ArgumentList "/quiet /extract:\`"$OdtExtract\`"" -Wait -NoNewWindow
         $OdtSetup = Join-Path $OdtExtract "setup.exe"
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ODT listo: $OdtSetup"
     } catch {
-        Write-Host "Error downloading ODT: $_"; exit 1
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR descargando ODT: $_"
+        Stop-Transcript -ErrorAction SilentlyContinue
+        exit 1
     }
 }
 
-if (-not (Test-Path $OdtSetup)) { Write-Host "setup.exe not found"; exit 1 }
+if (-not (Test-Path $OdtSetup)) {
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: setup.exe no encontrado"
+    Stop-Transcript -ErrorAction SilentlyContinue
+    exit 1
+}
 
 # ── Generar XML de configuración ─────────────────────────
 $XmlContent = @"
@@ -854,21 +977,28 @@ ${excludeLines}
 </Configuration>
 "@
 
-$XmlPath = "$env:TEMP\\office_config_${productId}.xml"
+$XmlPath = "$env:TEMP\\office_config_${productId}_$(Get-Random).xml"
 $XmlContent | Set-Content -Path $XmlPath -Encoding UTF8
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] XML generado: $XmlPath"
+${notifyPrefix}
+${notifyBefore}
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Instalando Office. AVISO: Este proceso puede tardar entre 20 y 60 minutos."
 
 # ── Instalar ─────────────────────────────────────────────
 try {
     Start-Process -FilePath $OdtSetup -ArgumentList "/configure \`"$XmlPath\`"" -Wait -NoNewWindow
     if ($LASTEXITCODE -ne 0) { throw "ODT setup.exe salió con código $LASTEXITCODE" }
 
-    $trackerData = @{ version = $CurrentVersion; installedAt = (Get-Date).ToString('o'); method = "odt"; product = "${productId}" } | ConvertTo-Json
-    Set-Content -Path $TrackerFile -Value $trackerData
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: $NombreApp instalado correctamente (v$CurrentVersion)"
 ${notifyAfter}
+    @{ version = $CurrentVersion; hash = $CurrentHash; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success'; method = 'odt'; product = "${productId}" } |
+        ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
 } catch {
-    Write-Host "Error installing Office: $_"
-    exit 1
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Fallo instalando $NombreApp — $_"
+    @{ version = $CurrentVersion; hash = $CurrentHash; failedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'failed'; error = $_.ToString() } |
+        ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
 }
+Stop-Transcript -ErrorAction SilentlyContinue
 `;
 }
 

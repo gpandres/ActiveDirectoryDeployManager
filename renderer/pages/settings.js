@@ -72,9 +72,6 @@ const SettingsPage = {
           <p class="form-hint" style="margin-top:6px;">${t('settings.baseOuHint')}</p>
           <input type="hidden" id="cfg-base-ou" value="${this.esc(config.baseOU || '')}">
         </div>
-        <div id="gpo-list-container" class="mt-lg" style="display:none;">
-          <div id="gpo-list" class="mt-sm"></div>
-        </div>
       </div>
 
       <!-- RSAT Status -->
@@ -155,8 +152,8 @@ const SettingsPage = {
     });
 
     this.bindEvents(config);
+    this.loadGPOs(config);
     if (App.rsatAvailable) {
-      this.loadGPOs(config);
       this.loadOUs(config.baseOU);
     } else {
       document.getElementById('cfg-baseou-tree').innerHTML = `<p style="padding:8px;font-size:13px;color:var(--text-muted);">RSAT requerido para listar OUs</p>`;
@@ -233,37 +230,21 @@ const SettingsPage = {
 
   async loadGPOs(config) {
     try {
-      const result = await window.api.ad.getGPOs();
-      if (result.success && result.data.length > 0) {
-        const select = document.getElementById('cfg-default-gpo');
-        result.data.forEach(gpo => {
+      const apps = await window.api.apps.getAll().catch(() => []);
+      const programGPOs = [...new Set([
+        ...apps.filter(a => a.gpoName).map(a => a.gpoName),
+        config.defaultGPO || null
+      ].filter(Boolean))];
+
+      const select = document.getElementById('cfg-default-gpo');
+      if (select) {
+        programGPOs.forEach(gpoName => {
           const opt = document.createElement('option');
-          opt.value = gpo.DisplayName;
-          opt.textContent = gpo.DisplayName;
-          opt.selected = gpo.DisplayName === config.defaultGPO;
+          opt.value = gpoName;
+          opt.textContent = gpoName;
+          opt.selected = gpoName === config.defaultGPO;
           select.appendChild(opt);
         });
-
-        // Show GPO list
-        const listContainer = document.getElementById('gpo-list-container');
-        listContainer.style.display = 'block';
-
-        const listEl = document.getElementById('gpo-list');
-        listEl.innerHTML = `
-          <div class="table-wrapper">
-            <table>
-              <thead><tr><th>Nombre</th><th>Estado</th><th>Modificada</th></tr></thead>
-              <tbody>
-                ${result.data.map(gpo => `
-                  <tr>
-                    <td style="color:var(--text-primary)">${this.esc(gpo.DisplayName)}</td>
-                    <td><span class="badge ${gpo.GpoStatus === 'AllSettingsEnabled' ? 'badge-success' : 'badge-warning'}">${gpo.GpoStatus || 'N/A'}</span></td>
-                    <td class="text-muted">${App.formatDate(gpo.ModificationTime)}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>`;
       }
     } catch (e) {}
   },

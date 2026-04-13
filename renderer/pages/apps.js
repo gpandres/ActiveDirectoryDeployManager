@@ -767,19 +767,22 @@ const AppsPage = {
   },
 
   async loadGPOsForBulk() {
-    if (!App.rsatAvailable || App.rsatMissingGPMC) return;
     try {
-      if (!this.gposCache) {
-        const result = await window.api.ad.getGPOs();
-        if (result.success) this.gposCache = result.data;
-      }
-      if (this.gposCache) {
-        const select = document.getElementById('bulk-gpo-select');
+      const [apps, cfg] = await Promise.all([
+        window.api.apps.getAll().catch(() => []),
+        window.api.config.get().catch(() => ({}))
+      ]);
+      const programGPOs = [...new Set([
+        ...apps.filter(a => a.gpoName).map(a => a.gpoName),
+        cfg.defaultGPO || null
+      ].filter(Boolean))];
+      const select = document.getElementById('bulk-gpo-select');
+      if (select) {
         select.innerHTML = `<option value="">${t('apps.selectGpo')}</option>`;
-        this.gposCache.forEach(gpo => {
+        programGPOs.forEach(gpoName => {
           const opt = document.createElement('option');
-          opt.value = gpo.DisplayName;
-          opt.textContent = gpo.DisplayName;
+          opt.value = gpoName;
+          opt.textContent = gpoName;
           select.appendChild(opt);
         });
       }
@@ -866,14 +869,16 @@ const AppsPage = {
     );
 
     try {
-      const [templates, catalogData] = await Promise.all([
+      const [templates, catalogData, config] = await Promise.all([
         window.api.scripts.getTemplates(),
-        window.api.winget.getCatalog().catch(() => ({ catalog: [], odtProducts: [], odtApps: [], odtLanguages: [], odtChannels: [] }))
+        window.api.winget.getCatalog().catch(() => ({ catalog: [], odtProducts: [], odtApps: [], odtLanguages: [], odtChannels: [] })),
+        window.api.config.get().catch(() => ({}))
       ]);
       this.wingetCatalogCache = catalogData;
-      const isEdit = !!existingApp;
+      const isEdit = !!(existingApp?.id);
 
-      // Pre-fetch OUs so they are ready before the wizard renders step 3
+      // Pre-fetch OUs — always refresh for new apps so stale tree/baseOU change is reflected
+      if (!isEdit) { this.ousTreeCache = null; this.ousCache = null; }
       if (App.rsatAvailable && !App.rsatMissingGPMC && !this.ousTreeCache) {
         try {
           const ouResult = await window.api.ad.getOUs();
@@ -917,11 +922,14 @@ const AppsPage = {
       configXmlPath: existingApp?.configXmlPath || '',
       customParams: existingApp?.customParams || {},
       ouDN: existingApp?.ouDN || (existingApp?.assignedOUs && existingApp.assignedOUs[0]) || '',
-      gpoName: existingApp?.gpoName || '',
+      gpoName: isEdit ? (existingApp?.gpoName || '') : (config.defaultGPO || ''),
       createGPO: false,
       version: existingApp?.version || '1.0.0',
       suggestedVersion: '',
-      notifyUser: existingApp?.notifyUser || false
+      notifyUser: existingApp?.notifyUser || false,
+      wizardWingetResults: [],
+      wizardWingetSearching: false,
+      _wizardWingetTimer: null
     };
 
     const renderWizard = () => {
@@ -1029,14 +1037,41 @@ const AppsPage = {
               </div>`;
           });
 
-          if (!filteredCatalog.length && !odtMatchesSearch) {
+          if (!filteredCatalog.length && !odtMatchesQ) {
             body += `<p style="text-align:center;color:var(--text-muted);padding:20px 0;font-size:13px;">No se encontraron apps</p>`;
           }
           body += `</div>`; // close scrollable
 
+          // Winget CLI search results (two-phase)
+          if (state.wizardWingetSearching) {
+            body += `<div id="wiz-winget-section" style="display:flex;align-items:center;gap:6px;padding:8px 2px;font-size:12px;color:var(--text-muted);">
+              <span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;"></span>
+              Buscando en winget CLI...
+            </div>`;
+          } else if (state.wizardWingetResults?.length > 0) {
+            body += `<div id="wiz-winget-section" style="margin-top:8px;">
+              <h5 style="font-size:10px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;letter-spacing:.05em;">Winget CLI</h5>
+              <div class="template-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));">
+                ${state.wizardWingetResults.map(item => {
+                  const isSel = state.template === 'winget' && state.wingetId === item.wingetId;
+                  return `<div class="template-card catalog-item ${isSel ? 'selected' : ''}"
+                       data-catalog-type="winget" data-winget-id="${this.esc(item.wingetId)}"
+                       data-app-name="${this.esc(item.name)}" data-app-version="${this.esc(item.version||'')}"
+                       style="cursor:pointer;">
+                    <div class="template-card-icon" style="font-size:22px;">📦</div>
+                    <div class="template-card-name" style="font-size:11px;">${this.esc(item.name)}</div>
+                    ${item.version ? `<div class="template-card-desc" style="font-size:10px;">v${this.esc(item.version)}</div>` : ''}
+                  </div>`;
+                }).join('')}
+              </div>
+            </div>`;
+          } else {
+            body += `<div id="wiz-winget-section"></div>`;
+          }
+
         } else if (state.catalogTab === 'plantilla') {
           // ── Plantilla tab: Non-General templates + Office XML ─────
-          const plantillaCats = ['Seguridad', 'Conectividad', 'RMM', 'Backups', 'Corporativo'];
+          const plantillaCats = ['Security', 'Connectivity', 'RMM', 'Backups', 'Corporate'];
 
           // Search bar for Plantilla tab
           body += `
@@ -1128,53 +1163,89 @@ const AppsPage = {
           </div>`;
 
         } else if (isODT) {
-          // ── ODT mode: product + apps + language/channel/arch ────
+          // ── ODT mode: product radio-cards + app chip-toggles + options row ──
           const odtProds = catalogData?.odtProducts || [];
           const odtApps2 = catalogData?.odtApps || [];
           const odtLangs = catalogData?.odtLanguages || [];
           const odtChans = catalogData?.odtChannels || [];
           const cfg = state.odtConfig;
+          const curProd = odtProds.find(p => p.id === cfg.product);
+          const curChan = odtChans.find(c => c.id === cfg.channel);
+          const curLang = odtLangs.find(l => l.id === cfg.language);
 
           body += `
-          <div style="padding:12px 14px;background:rgba(30,144,255,0.07);border:1px solid rgba(30,144,255,0.2);border-radius:8px;margin-bottom:12px;">
-            <div style="font-weight:600;font-size:13px;color:var(--primary-color);margin-bottom:2px;">🏢 Office Deployment Tool (ODT)</div>
-            <p style="margin:0;font-size:12px;color:var(--text-secondary);">El script descargará la ODT de Microsoft e instalará Office automáticamente. No es necesario ningún archivo.</p>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Producto</label>
-            <select class="form-select" id="odt-product">
-              ${odtProds.map(p => `<option value="${this.esc(p.id)}" ${cfg.product === p.id ? 'selected' : ''}>${this.esc(p.label)}</option>`).join('')}
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Aplicaciones a incluir</label>
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px 12px;">
-              ${odtApps2.map(a => `
-                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">
-                  <input type="checkbox" name="odt-app" value="${this.esc(a.id)}" ${cfg.apps.includes(a.id) ? 'checked' : ''} style="width:auto;">
-                  ${this.esc(a.label)}
-                </label>`).join('')}
+          <div class="odt-wizard">
+            <div class="odt-header">
+              <div class="odt-header-icon">🏢</div>
+              <div>
+                <div class="odt-header-title">Microsoft Office</div>
+                <div class="odt-header-sub">Office Deployment Tool · Sin descarga manual</div>
+              </div>
             </div>
-          </div>
-          <div style="display:flex;gap:12px;">
-            <div class="form-group" style="flex:1;">
-              <label class="form-label">Idioma</label>
-              <select class="form-select" id="odt-language">
-                ${odtLangs.map(l => `<option value="${this.esc(l.id)}" ${cfg.language === l.id ? 'selected' : ''}>${this.esc(l.label)}</option>`).join('')}
-              </select>
+
+            <div class="odt-section">
+              <div class="odt-section-label">Producto</div>
+              <div class="odt-product-grid">
+                ${odtProds.map(p => `
+                  <label class="odt-product-card ${cfg.product === p.id ? 'active' : ''}">
+                    <input type="radio" name="odt-product-radio" value="${this.esc(p.id)}" ${cfg.product === p.id ? 'checked' : ''}>
+                    <div class="odt-product-name">${this.esc(p.label)}</div>
+                    <div class="odt-product-badge">${p.type === 'subscription' ? 'Suscripción' : 'Licencia perpetua'}</div>
+                  </label>`).join('')}
+              </div>
             </div>
-            <div class="form-group" style="flex:1;">
-              <label class="form-label">Canal de actualización</label>
-              <select class="form-select" id="odt-channel">
-                ${odtChans.map(c => `<option value="${this.esc(c.id)}" ${cfg.channel === c.id ? 'selected' : ''}>${this.esc(c.label)}</option>`).join('')}
-              </select>
+
+            <div class="odt-section">
+              <div class="odt-section-label">Aplicaciones a incluir</div>
+              <div class="odt-apps-grid">
+                ${odtApps2.map(a => `
+                  <label class="odt-app-chip ${cfg.apps.includes(a.id) ? 'active' : ''}">
+                    <input type="checkbox" name="odt-app" value="${this.esc(a.id)}" ${cfg.apps.includes(a.id) ? 'checked' : ''}>
+                    ${this.esc(a.label)}
+                  </label>`).join('')}
+              </div>
             </div>
-            <div class="form-group" style="flex:0 0 120px;">
-              <label class="form-label">Arquitectura</label>
-              <select class="form-select" id="odt-arch">
-                <option value="64" ${cfg.arch === '64' ? 'selected' : ''}>64 bits</option>
-                <option value="32" ${cfg.arch === '32' ? 'selected' : ''}>32 bits</option>
-              </select>
+
+            <div class="odt-section">
+              <div class="odt-options-row">
+                <div class="odt-option">
+                  <label class="odt-option-label">Idioma</label>
+                  <select class="form-select" id="odt-language">
+                    ${odtLangs.map(l => `<option value="${this.esc(l.id)}" ${cfg.language === l.id ? 'selected' : ''}>${this.esc(l.label)}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="odt-option">
+                  <label class="odt-option-label">Canal</label>
+                  <select class="form-select" id="odt-channel">
+                    ${odtChans.map(c => `<option value="${this.esc(c.id)}" ${cfg.channel === c.id ? 'selected' : ''}>${this.esc(c.label)}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="odt-option odt-option-sm">
+                  <label class="odt-option-label">Arquitectura</label>
+                  <select class="form-select" id="odt-arch">
+                    <option value="64" ${cfg.arch === '64' ? 'selected' : ''}>64 bits</option>
+                    <option value="32" ${cfg.arch === '32' ? 'selected' : ''}>32 bits</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div class="odt-summary" id="odt-summary">
+              <div class="odt-summary-row">
+                <span class="odt-summary-key">Producto</span>
+                <span class="odt-summary-val" id="odt-sum-product">${this.esc(curProd?.label || cfg.product)}</span>
+              </div>
+              <div class="odt-summary-row">
+                <span class="odt-summary-key">Apps</span>
+                <span class="odt-summary-val" id="odt-sum-apps">${cfg.apps.length > 0 ? cfg.apps.map(id => { const a = odtApps2.find(x => x.id === id); return this.esc(a?.label || id); }).join(', ') : 'Ninguna seleccionada'}</span>
+              </div>
+              <div class="odt-summary-row">
+                <span class="odt-summary-key">Canal · Idioma · Arq</span>
+                <span class="odt-summary-val" id="odt-sum-opts">${this.esc(curChan?.label || cfg.channel)} · ${this.esc(curLang?.label || cfg.language)} · ${cfg.arch} bits</span>
+              </div>
+              <div class="odt-summary-warning">
+                ⏱ La instalación puede tardar entre 20 y 60 minutos en los equipos cliente
+              </div>
             </div>
           </div>`;
 
@@ -1335,13 +1406,20 @@ const AppsPage = {
           </button>`
         }`;
 
-      App.openModal(isEdit ? t('apps.edit') : t('apps.newApp'), body, footer);
+      App.openModal(isEdit ? t('apps.edit') : t('apps.newApp'), body, footer); // isEdit is !!(existingApp?.id)
       this.bindWizardEvents(state, templates, renderWizard, isEdit, existingApp);
     };
 
     App._modalLocked = false;  // unlock before rendering the interactive wizard
     this._wizardOpening = false;
     renderWizard();
+    // If opened from catalog with a pre-selected app, scroll it into view
+    if (existingApp?.wingetId && !isEdit) {
+      requestAnimationFrame(() => {
+        const sel = document.querySelector('.catalog-item.selected');
+        if (sel) sel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      });
+    }
     } catch (err) {
       this._wizardOpening = false;
       App.toast(t('common.error') + ': ' + err.message, 'error');
@@ -1389,17 +1467,81 @@ const AppsPage = {
       });
     });
 
-    // ── Catalog search input ──────────────────────────────────
+    // ── Catalog search input (two-phase: curated + winget CLI) ──
     const catalogSearchInput = document.getElementById('catalog-search');
     if (catalogSearchInput) {
       catalogSearchInput.addEventListener('input', () => {
-        state.catalogSearch = catalogSearchInput.value;
+        const q = catalogSearchInput.value;
+        state.catalogSearch = q;
+        // Clear previous winget search state
+        if (state._wizardWingetTimer) clearTimeout(state._wizardWingetTimer);
+        state.wizardWingetResults = [];
+        state.wizardWingetSearching = q.trim().length >= 2;
+
+        // Phase 1: render curated results immediately
         renderWizard();
-        // Re-focus and restore cursor position after re-render
         const newInput = document.getElementById('catalog-search');
-        if (newInput) {
-          newInput.focus();
-          newInput.setSelectionRange(newInput.value.length, newInput.value.length);
+        if (newInput) { newInput.focus(); newInput.setSelectionRange(newInput.value.length, newInput.value.length); }
+
+        // Phase 2: winget CLI search (debounced 600ms)
+        if (q.trim().length >= 2) {
+          state._wizardWingetTimer = setTimeout(async () => {
+            const query = q.trim();
+            try {
+              const results = await window.api.catalog.searchCLI(query);
+              // Abort if the user has already typed something else
+              if (state.catalogSearch.trim() !== query) return;
+              const curatedIds = new Set(
+                (this.wingetCatalogCache?.catalog || [])
+                  .filter(item =>
+                    item.name.toLowerCase().includes(query.toLowerCase()) ||
+                    (item.wingetId || '').toLowerCase().includes(query.toLowerCase())
+                  )
+                  .map(item => (item.wingetId || '').toLowerCase())
+                  .filter(Boolean)
+              );
+              state.wizardWingetResults = results.filter(r => r.wingetId && !curatedIds.has(r.wingetId.toLowerCase()));
+              state.wizardWingetSearching = false;
+              // Update winget section in-place (no full re-render)
+              const ws = document.getElementById('wiz-winget-section');
+              if (ws) {
+                if (state.wizardWingetResults.length > 0) {
+                  ws.innerHTML = `<div style="margin-top:8px;">
+                    <h5 style="font-size:10px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;letter-spacing:.05em;">Winget CLI</h5>
+                    <div class="template-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));">
+                      ${state.wizardWingetResults.map(item => `
+                        <div class="template-card catalog-item ${state.template === 'winget' && state.wingetId === item.wingetId ? 'selected' : ''}"
+                             data-catalog-type="winget" data-winget-id="${this.esc(item.wingetId)}"
+                             data-app-name="${this.esc(item.name)}" data-app-version="${this.esc(item.version || '')}"
+                             style="cursor:pointer;">
+                          <div class="template-card-icon" style="font-size:22px;">📦</div>
+                          <div class="template-card-name" style="font-size:11px;">${this.esc(item.name)}</div>
+                          ${item.version ? `<div class="template-card-desc" style="font-size:10px;">v${this.esc(item.version)}</div>` : ''}
+                        </div>`).join('')}
+                    </div>
+                  </div>`;
+                  ws.querySelectorAll('.catalog-item').forEach(card => {
+                    card.addEventListener('click', (e) => {
+                      e.stopPropagation();
+                      state.template = 'winget';
+                      state.wingetId = card.dataset.wingetId || '';
+                      if (!state.name || state.name === 'Microsoft Office') state.name = card.dataset.appName || '';
+                      if (card.dataset.appVersion) state.version = card.dataset.appVersion;
+                      renderWizard();
+                      const ni = document.getElementById('catalog-search');
+                      if (ni) ni.focus();
+                    });
+                  });
+                } else {
+                  ws.innerHTML = '';
+                }
+              }
+            } catch {
+              state.wizardWingetSearching = false;
+              const ws = document.getElementById('wiz-winget-section');
+              if (ws) ws.innerHTML = '';
+            }
+          }, 600);
         }
       });
     }
@@ -1539,6 +1681,44 @@ const AppsPage = {
       });
     }
 
+    // ODT live summary update
+    const odtWizard = document.querySelector('.odt-wizard');
+    if (odtWizard) {
+      const updateODTSummary = () => {
+        const checkedProd = odtWizard.querySelector('input[name="odt-product-radio"]:checked');
+        const prodLabel = checkedProd?.closest('.odt-product-card')?.querySelector('.odt-product-name')?.textContent || '';
+        const sumProd = document.getElementById('odt-sum-product');
+        if (sumProd && prodLabel) sumProd.textContent = prodLabel;
+
+        const checkedApps = [...odtWizard.querySelectorAll('input[name="odt-app"]:checked')]
+          .map(cb => cb.closest('.odt-app-chip')?.textContent?.trim() || cb.value);
+        const sumApps = document.getElementById('odt-sum-apps');
+        if (sumApps) sumApps.textContent = checkedApps.length > 0 ? checkedApps.join(', ') : 'Ninguna seleccionada';
+
+        const lang = document.getElementById('odt-language');
+        const chan = document.getElementById('odt-channel');
+        const arch = document.getElementById('odt-arch');
+        const sumOpts = document.getElementById('odt-sum-opts');
+        if (sumOpts && lang && chan && arch) {
+          sumOpts.textContent = `${chan.options[chan.selectedIndex]?.text} · ${lang.options[lang.selectedIndex]?.text} · ${arch.value} bits`;
+        }
+
+        // Sync active class on radio cards
+        odtWizard.querySelectorAll('.odt-product-card').forEach(card => {
+          const radio = card.querySelector('input[type="radio"]');
+          card.classList.toggle('active', radio?.checked || false);
+        });
+
+        // Sync active class on chip toggles
+        odtWizard.querySelectorAll('.odt-app-chip').forEach(chip => {
+          const cb = chip.querySelector('input[type="checkbox"]');
+          chip.classList.toggle('active', cb?.checked || false);
+        });
+      };
+
+      odtWizard.addEventListener('change', updateODTSummary);
+    }
+
     const checkCreateGpo = document.getElementById('wiz-create-gpo');
     if (checkCreateGpo) {
       checkCreateGpo.addEventListener('change', () => {
@@ -1590,8 +1770,8 @@ const AppsPage = {
 
       // Save ODT config fields
       if (state.template === 'odt') {
-        const odtProd = document.getElementById('odt-product');
-        if (odtProd) state.odtConfig.product = odtProd.value;
+        const odtProdRadio = document.querySelector('input[name="odt-product-radio"]:checked');
+        if (odtProdRadio) state.odtConfig.product = odtProdRadio.value;
         const odtLang = document.getElementById('odt-language');
         if (odtLang) state.odtConfig.language = odtLang.value;
         const odtChan = document.getElementById('odt-channel');
@@ -1618,23 +1798,25 @@ const AppsPage = {
   },
 
   async loadGPOsForWizard(state) {
-    if (!App.rsatAvailable || App.rsatMissingGPMC) return;
     try {
-      if (!this.gposCache) {
-        const result = await window.api.ad.getGPOs();
-        if (result.success) this.gposCache = result.data;
-      }
-      if (this.gposCache) {
-        const select = document.getElementById('wiz-gpo');
-        if (select) {
-          this.gposCache.forEach(gpo => {
-            const opt = document.createElement('option');
-            opt.value = gpo.DisplayName;
-            opt.textContent = gpo.DisplayName;
-            opt.selected = gpo.DisplayName === state.gpoName;
-            select.appendChild(opt);
-          });
-        }
+      const [apps, cfg] = await Promise.all([
+        window.api.apps.getAll().catch(() => []),
+        window.api.config.get().catch(() => ({}))
+      ]);
+      const programGPOs = [...new Set([
+        ...apps.filter(a => a.gpoName).map(a => a.gpoName),
+        cfg.defaultGPO || null
+      ].filter(Boolean))];
+
+      const select = document.getElementById('wiz-gpo');
+      if (select) {
+        programGPOs.forEach(gpoName => {
+          const opt = document.createElement('option');
+          opt.value = gpoName;
+          opt.textContent = gpoName;
+          opt.selected = gpoName === state.gpoName;
+          select.appendChild(opt);
+        });
       }
     } catch (e) {}
   },

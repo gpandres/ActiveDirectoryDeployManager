@@ -9,8 +9,9 @@ function createWindow() {
     height: 860,
     minWidth: 1024,
     minHeight: 700,
-    frame: false,           // Frameless like Discord
+    frame: false,           
     backgroundColor: '#0a0e1a',
+    // icon: path.join(__dirname, 'assets', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -196,6 +197,10 @@ app.whenReady().then(() => {
   // New catalog endpoints (used by catalog page)
   ipcMain.handle('catalog:getCatalog', () => catalogService.getCatalog());
   ipcMain.handle('catalog:search', (_, query, category) => catalogService.search(query, category));
+  ipcMain.handle('catalog:searchCLI', (_, query) => {
+    if (typeof query !== 'string' || query.length > 256) return [];
+    return catalogService.searchCLI(query);
+  });
   ipcMain.handle('catalog:checkVersions', (_, catalogIds) => catalogService.checkVersions(catalogIds));
   ipcMain.handle('catalog:checkSingle', (_, wingetId) => catalogService.checkSingle(wingetId));
 
