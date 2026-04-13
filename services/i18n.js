@@ -267,14 +267,6 @@ const FALLBACK_EN = {
     deployingMsg: "Generating scripts and configuring GPOs...",
     bundleCreated: "Bundle created successfully",
     bundleDeleted: "Bundle deleted",
-    bundleUpdated: "Bundle updated successfully",
-    individualAppsNotDeleted: "Individual applications will not be deleted.",
-    deleteBtn: "Deleting...",
-    creatingGpo: "Creating GPO...",
-    gpoCreatedBound: "GPO created and optionally linked",
-    gpoError: "Error creating GPO: ",
-    bundleDeployedWaitMsg: "Bundle deployed, but error creating GPO: ",
-    bundleCreated: "Bundle created successfully",
     bundleDeleted: "Bundle deleted",
     noBundles: "No bundles configured",
     createBundleHint: "Create a bundle to group multiple apps into a single GPO deployment",
@@ -1098,12 +1090,14 @@ const i18nService = {
 
   _mergeDeep(target, source) {
     if (this._isObject(target) && this._isObject(source)) {
-      for (const key in source) {
-        if (this._isObject(source[key])) {
-          if (!target[key]) Object.assign(target, { [key]: {} });
-          this._mergeDeep(target[key], source[key]);
-        } else {
-          Object.assign(target, { [key]: source[key] });
+      for (const key of Object.keys(source)) {
+        if (!Object.prototype.hasOwnProperty.call(Object.prototype, key)) {
+          if (this._isObject(source[key])) {
+            if (!target[key]) Object.assign(target, { [key]: {} });
+            this._mergeDeep(target[key], source[key]);
+          } else {
+            Object.assign(target, { [key]: source[key] });
+          }
         }
       }
     }

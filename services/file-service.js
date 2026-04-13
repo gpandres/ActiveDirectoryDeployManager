@@ -62,7 +62,14 @@ const fileService = {
   getAppContents(name) {
     try {
       const config = configService.getConfig();
-      const dirPath = path.join(config.networkSharePath, name);
+      const safeName = (name || '').replace(/[^a-zA-Z0-9\s\-_.]/g, '').substring(0, 128);
+      if (!safeName || safeName !== name) {
+        return { success: false, error: 'Invalid folder name', data: [] };
+      }
+      const dirPath = path.normalize(path.join(config.networkSharePath, safeName));
+      if (!dirPath.startsWith(path.normalize(config.networkSharePath))) {
+        return { success: false, error: 'Path traversal detected', data: [] };
+      }
 
       if (!fs.existsSync(dirPath)) {
         return { success: false, error: 'Carpeta no encontrada', data: [] };
@@ -88,7 +95,14 @@ const fileService = {
   createAppFolder(name) {
     try {
       const config = configService.getConfig();
-      const dirPath = path.join(config.networkSharePath, name);
+      const safeName = (name || '').replace(/[^a-zA-Z0-9\s\-_.]/g, '').substring(0, 128);
+      if (!safeName || safeName !== name) {
+        return { success: false, error: 'Invalid folder name' };
+      }
+      const dirPath = path.normalize(path.join(config.networkSharePath, safeName));
+      if (!dirPath.startsWith(path.normalize(config.networkSharePath))) {
+        return { success: false, error: 'Path traversal detected' };
+      }
 
       if (!fs.existsSync(dirPath)) {
         fs.mkdirSync(dirPath, { recursive: true });

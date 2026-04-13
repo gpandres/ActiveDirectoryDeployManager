@@ -109,7 +109,14 @@ const appService = {
       const configService = require('./config');
       const cfg = configService.getConfig();
       if (cfg && cfg.networkSharePath) {
-        const folderPath = path.join(cfg.networkSharePath, appToDelete.name);
+        const safeAppName = (appToDelete.name || '').replace(/[^a-zA-Z0-9\s\-_.]/g, '').substring(0, 128);
+        if (safeAppName && safeAppName !== appToDelete.name) {
+          return { success: false, error: 'Invalid app name detected' };
+        }
+        const folderPath = path.normalize(path.join(cfg.networkSharePath, safeAppName));
+        if (!folderPath.startsWith(path.normalize(cfg.networkSharePath))) {
+          return { success: false, error: 'Path traversal detected' };
+        }
         try {
           if (fs.existsSync(folderPath)) {
             fs.rmSync(folderPath, { recursive: true, force: true });
@@ -299,16 +306,39 @@ const appService = {
 
   importAll(data) {
     try {
+      const DANGEROUS_KEYS = /^(__proto__|constructor|prototype)$/;
+      const isValidKey = (k) => !DANGEROUS_KEYS.test(k) && typeof k === 'string';
+      
       if (data.apps && Array.isArray(data.apps)) {
-        saveApps(data.apps);
+        const validApps = data.apps.filter(app => 
+          app && typeof app === 'object' && 
+          typeof app.name === 'string' && app.name.length <= 128 &&
+          Object.keys(app).every(isValidKey)
+        );
+        if (validApps.length > 0) {
+          saveApps(validApps);
+        }
       }
-      if (data.config) {
+      if (data.config && typeof data.config === 'object') {
         const configService = require('./config');
-        configService.setConfig(data.config);
+        const safeConfig = {};
+        for (const key of Object.keys(data.config)) {
+          if (isValidKey(key)) {
+            safeConfig[key] = data.config[key];
+          }
+        }
+        configService.setConfig(safeConfig);
       }
       if (data.bundles && Array.isArray(data.bundles)) {
-        const bundleService = require('./bundle-service');
-        bundleService.replaceAll(data.bundles);
+        const validBundles = data.bundles.filter(b => 
+          b && typeof b === 'object' && 
+          typeof b.name === 'string' && b.name.length <= 128 &&
+          Object.keys(b).every(isValidKey)
+        );
+        if (validBundles.length > 0) {
+          const bundleService = require('./bundle-service');
+          bundleService.replaceAll(validBundles);
+        }
       }
       return { success: true };
     } catch (err) {

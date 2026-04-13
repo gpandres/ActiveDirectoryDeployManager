@@ -2,13 +2,11 @@ const { execFile } = require('child_process');
 const path = require('path');
 
 // Sanitize user input before interpolating into PowerShell commands.
-// Allows alphanumerics, spaces, hyphens, underscores, dots, commas, equals,
-// and the characters required for AD Distinguished Names (OU=, DC=, etc.)
+// Uses allowlist approach: only alphanumeric, spaces, hyphens, underscores,
+// dots, commas, equals, @, and AD DN characters (OU=, DC=, CN=, etc.)
 function sanitizePSInput(str) {
   if (typeof str !== 'string') return '';
-  // Remove backticks, semicolons, pipe, ampersand, dollar, curly braces,
-  // parentheses, and other PS meta-characters that enable injection
-  return str.replace(/[`$;|&{}()\[\]@#!%^<>"\\]/g, '').trim();
+  return str.replace(/[^a-zA-Z0-9\s\-_.,=@OUouDCdcCNcn]/g, '').trim();
 }
 
 function runPowerShell(command) {
@@ -66,7 +64,12 @@ const adService = {
       const json = await runPowerShell(
         `Import-Module ActiveDirectory; Get-ADOrganizationalUnit -Filter * ${searchBaseStr} -Properties Name,DistinguishedName,Description | Select-Object Name,DistinguishedName,Description | ConvertTo-Json -Depth 5`
       );
-      const ous = JSON.parse(json || '[]');
+      let ous = [];
+      try {
+        ous = JSON.parse(json || '[]');
+      } catch (e) {
+        console.error('Error parsing OUs JSON:', e.message);
+      }
       const ouArray = Array.isArray(ous) ? ous : [ous];
       return { success: true, data: buildOUTree(ouArray) };
     } catch (err) {
@@ -79,7 +82,12 @@ const adService = {
       const json = await runPowerShell(
         "Import-Module GroupPolicy; Get-GPO -All | Select-Object DisplayName,Id,GpoStatus,CreationTime,ModificationTime | ConvertTo-Json -Depth 3"
       );
-      const gpos = JSON.parse(json || '[]');
+      let gpos = [];
+      try {
+        gpos = JSON.parse(json || '[]');
+      } catch (e) {
+        console.error('Error parsing GPOs JSON:', e.message);
+      }
       return { success: true, data: Array.isArray(gpos) ? gpos : [gpos] };
     } catch (err) {
       return { success: false, error: err.message, data: [] };
@@ -280,7 +288,12 @@ const adService = {
       const json = await runPowerShell(
         `Import-Module GroupPolicy; (Get-GPInheritance -Target '${safeOuDN}').GpoLinks | Select-Object DisplayName,Enabled,Order | ConvertTo-Json -Depth 2`
       );
-      const links = JSON.parse(json || '[]');
+      let links = [];
+      try {
+        links = JSON.parse(json || '[]');
+      } catch (e) {
+        console.error('Error parsing GPO conflicts JSON:', e.message);
+      }
       return { success: true, data: Array.isArray(links) ? links : [links] };
     } catch (err) {
       return { success: false, error: err.message, data: [] };
@@ -292,17 +305,10 @@ function buildOUTree(ous) {
   const map = {};
   const roots = [];
 
-  // Get domain root DN
-  let domainDN = '';
-  if (ous.length > 0) {
-    const firstDN = ous[0].DistinguishedName;
-    const dcParts = firstDN.split(',').filter(p => p.startsWith('DC='));
-    domainDN = dcParts.join(',');
-  }
-
   ous.forEach(ou => {
+    if (!ou.DistinguishedName) return;
     map[ou.DistinguishedName] = {
-      name: ou.Name,
+      name: ou.Name || 'Unknown',
       dn: ou.DistinguishedName,
       description: ou.Description || '',
       children: [],
@@ -311,6 +317,7 @@ function buildOUTree(ous) {
   });
 
   ous.forEach(ou => {
+    if (!ou.DistinguishedName) return;
     const parentDN = ou.DistinguishedName.replace(/^OU=[^,]+,/, '');
     if (map[parentDN]) {
       map[parentDN].children.push(map[ou.DistinguishedName]);

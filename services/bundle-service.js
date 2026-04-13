@@ -99,31 +99,35 @@ const bundleService = {
   },
 
   generateBundleScript(bundle, apps, config) {
+    const safeBundleName = (bundle.name || 'Bundle').replace(/[^a-zA-Z0-9\s\-_.,()]/g, '').substring(0, 128);
     const appEntries = bundle.apps
       .sort((a, b) => a.order - b.order)
       .map(entry => {
         const app = apps.find(a => a.id === entry.appId);
         if (!app) return null;
+        const safeAppName = (app.name || 'App').replace(/[^a-zA-Z0-9\s\-_.,()]/g, '');
         const appFolder = path.join(config.networkSharePath, app.name, 'install.ps1');
-        return { name: app.name, scriptPath: appFolder };
+        return { name: safeAppName, scriptPath: appFolder };
       })
       .filter(Boolean);
 
     const { getToastSnippet } = require('./ps-snippets');
     const notifyBlock = bundle.notifyUser ? getToastSnippet() : '';
+    const startMsg = `Se estan instalando ${bundle.apps.length} aplicaciones del pack. No apague.`;
+    const endMsg = `Todas las apps del pack ${safeBundleName} se han procesado.`;
 
     const notifyStart = bundle.notifyUser
-      ? `Send-UserToast -ToastTitle "Instalación en proceso" -ToastMessage "Se están instalando ${bundle.apps.length} aplicaciones del pack ${bundle.name}. No apague el equipo." -IconType "Warning"`
+      ? `Send-UserToast -ToastTitle "Instalacion en proceso" -ToastMessage "${startMsg}" -IconType "Warning"`
       : '';
 
     const notifyEnd = bundle.notifyUser
-      ? `Send-UserToast -ToastTitle "Instalación completada" -ToastMessage "Todas las aplicaciones del pack ${bundle.name} se han procesado. Ya puede continuar." -IconType "Information"`
+      ? `Send-UserToast -ToastTitle "Instalacion completada" -ToastMessage "${endMsg}" -IconType "Information"`
       : '';
 
     const appBlocks = appEntries.map((app, i) => {
       return `
 # ── App ${i + 1}/${appEntries.length}: ${app.name} ──
-$AppScript = "${app.scriptPath}"
+$AppScript = "${app.scriptPath.replace(/"/g, '`"')}"
 if (Test-Path $AppScript) {
     Write-Output "[$(Get-Date -Format 'HH:mm:ss')] Ejecutando: ${app.name}..."
     try {
@@ -138,9 +142,9 @@ if (Test-Path $AppScript) {
     }).join('\n');
 
     return `# =========================================================================
-# BUNDLE: ${bundle.name}
+# BUNDLE: ${safeBundleName}
 # Apps: ${appEntries.map(a => a.name).join(', ')}
-# Versión: ${bundle.version}
+# Version: ${bundle.version}
 # Generado: ${new Date().toISOString()}
 # =========================================================================
 
@@ -148,13 +152,13 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
     Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
 }
 
-$BundleName = "${bundle.name}"
+$BundleName = "${safeBundleName}"
 $LogDir = "C:\\ProgramData\\AppDeploy_Logs"
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 $BundleTracker = "$LogDir\\Tracker_Bundle_$($BundleName -replace '\\s','_').txt"
-$BundleVersion = "${bundle.version}"
+$BundleVersion = "${(bundle.version || '1.0.0').replace(/[^a-zA-Z0-9.]/g, '')}"
 
-# Comprobar si esta versión exacta ya se ejecutó
+# Comprobar si esta version exacta ya se ejecuto
 $LastVersion = if (Test-Path $BundleTracker) { Get-Content $BundleTracker } else { "" }
 if ($LastVersion -eq $BundleVersion) { exit }
 
@@ -169,7 +173,7 @@ ${appBlocks}
 
 ${notifyEnd}
 
-# Marcar versión como ejecutada
+# Marcar version como ejecutada
 Set-Content -Path $BundleTracker -Value $BundleVersion -Force
 Write-Output "=========================================="
 Write-Output "Bundle completado: $(Get-Date)"
@@ -181,7 +185,12 @@ Stop-Transcript
   async deployBundle(bundle, apps, config) {
     try {
       const bundlesDir = path.join(config.networkSharePath, '_bundles');
-      const bundleFolder = path.join(bundlesDir, bundle.name.replace(/\s/g, '_'));
+      const safeName = (bundle.name || 'bundle').replace(/[^a-zA-Z0-9\s\-_]/g, '').substring(0, 64);
+      const bundleFolder = path.normalize(path.join(bundlesDir, safeName));
+
+      if (!bundleFolder.startsWith(path.normalize(bundlesDir))) {
+        return { success: false, error: 'Invalid bundle name' };
+      }
 
       if (!fs.existsSync(bundleFolder)) {
         fs.mkdirSync(bundleFolder, { recursive: true });

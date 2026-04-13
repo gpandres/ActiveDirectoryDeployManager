@@ -284,6 +284,7 @@ app.whenReady().then(() => {
 
 }).catch(err => {
   console.error('FATAL ERROR:', err);
+  process.exit(1);
 });
 
 app.on('window-all-closed', () => {
@@ -292,4 +293,5 @@ app.on('window-all-closed', () => {
 
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
+  process.exit(1);
 });
