@@ -1,7 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+// vitest globals: describe, it, expect, vi are injected automatically
 
 // vi.mock calls are hoisted to the top of the module by Vitest's transform —
-// they must use import syntax to work correctly.
+// they must be declared before any require() of the mocked modules.
 
 vi.mock('../services/config', () => ({
   default: { getConfig: () => ({ networkSharePath: '\\\\SERVER\\Share', language: 'en' }) },
@@ -13,8 +13,7 @@ vi.mock('../services/i18n', () => ({
   getTranslations: () => ({})
 }));
 
-// Dynamic import so mocks are in place before the module initialises
-const { default: svc } = await import('../services/script-service.js');
+const svc = require('../services/script-service');
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function base(overrides = {}) {

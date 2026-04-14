@@ -77,6 +77,7 @@ const AppsPage = {
       <!-- Bulk Action Bar -->
       <div class="action-bar" id="bulk-action-bar">
         <span class="action-bar-text"><span id="selected-count">0</span> ${t('apps.selected')}</span>
+        <button class="btn btn-ghost btn-sm" id="btn-select-all" onclick="AppsPage.selectAll()">${t('apps.filterAll')}</button>
         <div class="action-bar-buttons" style="display:flex; gap:10px; align-items:center;">
           <select class="form-select" id="bulk-gpo-select" style="width:200px; padding:6px 10px;">
             <option value="">${t('apps.selectGpo')}</option>
@@ -196,8 +197,8 @@ const AppsPage = {
     const statusText = isDeployed ? t('apps.deployedBadge') : t('apps.detailNotDeployed');
     const icon = this.templateIcon(app.template);
     return `
-      <div class="app-card app-card--${statusClass}" data-id="${app.id}" data-deployed="${!!isDeployed}" onclick="AppsPage.showAppDetail('${app.id}')">
-        <input type="checkbox" class="checkbox-select app-card-cb" data-id="${app.id}" onchange="AppsPage.toggleSelect('${app.id}', this.checked)" onclick="event.stopPropagation()">
+      <div class="app-card app-card--${statusClass} ${this.selectedIds?.has(app.id) ? 'selected' : ''}" data-id="${app.id}" data-deployed="${!!isDeployed}" onclick="AppsPage.showAppDetail('${app.id}')">
+        <input type="checkbox" class="checkbox-select app-card-cb" data-id="${app.id}" onchange="AppsPage.toggleSelect('${app.id}', this.checked)" onclick="event.stopPropagation()" ${this.selectedIds?.has(app.id) ? 'checked' : ''}>
         <div class="app-card-top">
           <div class="app-card-icon">${icon}</div>
           <div class="app-card-info">
@@ -209,11 +210,8 @@ const AppsPage = {
           </div>
         </div>
         <div class="app-card-badges">
-          <span class="badge badge-primary">${this.esc(app.installerType?.toUpperCase() || 'EXE')}</span>
           <span class="badge badge-info">v${this.esc(app.version || '1.0.0')}</span>
           ${app.gpoName ? `<span class="badge badge-info" title="GPO">${this.esc(app.gpoName)}</span>` : ''}
-          ${app.assignedOUs && app.assignedOUs.length > 0 ? `<span class="badge badge-success">${app.assignedOUs.length} OU(s)</span>` : ''}
-          ${app.notifyUser ? '<span class="badge badge-warning">🔔</span>' : ''}
         </div>
         <div class="app-card-footer" onclick="event.stopPropagation()">
           <div class="app-card-deploy-info">
@@ -264,11 +262,29 @@ const AppsPage = {
   },
 
   toggleMenu(btn) {
-    const dropdown = btn.nextElementSibling;
-    const wasVisible = dropdown.classList.contains('visible');
-    // Close all other dropdowns first
-    document.querySelectorAll('.app-card-dropdown.visible').forEach(d => d.classList.remove('visible'));
-    if (!wasVisible) dropdown.classList.add('visible');
+    // Remove any existing floating dropdown
+    document.querySelectorAll('.app-card-dropdown--floating').forEach(d => d.remove());
+
+    const dropdown = btn.nextElementSibling.cloneNode(true);
+    dropdown.classList.add('app-card-dropdown--floating');
+    dropdown.classList.add('visible');
+
+    // Position fixed relative to button
+    const rect = btn.getBoundingClientRect();
+    dropdown.style.position = 'fixed';
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+    dropdown.style.right = (window.innerWidth - rect.right) + 'px';
+    dropdown.style.zIndex = '9999';
+    document.body.appendChild(dropdown);
+
+    // Close on outside click
+    const close = (e) => {
+      if (!dropdown.contains(e.target) && e.target !== btn) {
+        dropdown.remove();
+        document.removeEventListener('click', close, true);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', close, true), 0);
   },
 
   _renderGroupedApps(apps, templates) {
@@ -722,14 +738,31 @@ const AppsPage = {
   // ─── Selection ─────────────────────────────────────
   toggleSelect(id, checked) {
     if (checked) this.selectedIds.add(id); else this.selectedIds.delete(id);
+    const card = document.querySelector(`.app-card[data-id="${id}"]`);
+    if (card) card.classList.toggle('selected', this.selectedIds.has(id));
     this.updateBulkBar();
   },
 
   clearSelection() {
     this.selectedIds.clear();
-    document.querySelectorAll('.checkbox-select').forEach(cb => cb.checked = false);
-    const selectAll = document.getElementById('select-all-apps');
-    if (selectAll) selectAll.checked = false;
+    document.querySelectorAll('#apps-grid .app-card').forEach(c => {
+      c.classList.remove('selected');
+      const cb = c.querySelector('.checkbox-select');
+      if (cb) cb.checked = false;
+    });
+    this.updateBulkBar();
+  },
+
+  selectAll() {
+    const cards = document.querySelectorAll('#apps-grid .app-card');
+    cards.forEach(card => {
+      if (card.style.display !== 'none') {
+        this.selectedIds.add(card.dataset.id);
+        card.classList.add('selected');
+        const cb = card.querySelector('.checkbox-select');
+        if (cb) cb.checked = true;
+      }
+    });
     this.updateBulkBar();
   },
 
@@ -737,14 +770,15 @@ const AppsPage = {
     const cards = document.querySelectorAll('#apps-grid .app-card');
     cards.forEach(card => {
       if (card.style.display !== 'none') {
-        const id = card.dataset.id;
-        const checkbox = card.querySelector('.checkbox-select.app-card-cb');
+        const cb = card.querySelector('.checkbox-select');
         if (checked) {
-          this.selectedIds.add(id);
-          if (checkbox) checkbox.checked = true;
+          this.selectedIds.add(card.dataset.id);
+          card.classList.add('selected');
+          if (cb) cb.checked = true;
         } else {
-          this.selectedIds.delete(id);
-          if (checkbox) checkbox.checked = false;
+          this.selectedIds.delete(card.dataset.id);
+          card.classList.remove('selected');
+          if (cb) cb.checked = false;
         }
       }
     });
@@ -757,12 +791,13 @@ const AppsPage = {
     document.getElementById('selected-count').textContent = count;
     bar.classList.toggle('visible', count > 0);
 
-    const selectAll = document.getElementById('select-all-apps');
-    if (selectAll) {
+    const selectAllBtn = document.getElementById('btn-select-all');
+    if (selectAllBtn) {
       const visibleCards = Array.from(document.querySelectorAll('#apps-grid .app-card')).filter(c => c.style.display !== 'none');
-      const allSelected = visibleCards.length > 0 && visibleCards.every(c => this.selectedIds.has(c.dataset.id));
-      selectAll.checked = count > 0 && allSelected;
-      selectAll.indeterminate = count > 0 && !allSelected;
+      const total = visibleCards.length;
+      selectAllBtn.textContent = count === total && total > 0
+        ? t('common.cancel')
+        : `${t('apps.filterAll')} (${total})`;
     }
   },
 
@@ -900,7 +935,8 @@ const AppsPage = {
     // State
     const plantillaTemplateIds = templates.filter(tmpl => tmpl.category !== 'General' || tmpl.id === 'office').map(tmpl => tmpl.id);
     const state = {
-      step: 1,
+      // Skip step 1 if opened from catalog with a pre-selected app (no id = not editing)
+      step: (existingApp && !existingApp.id) ? 2 : 1,
       catalogTab: existingApp?.wingetId ? 'catalog' :
                   existingApp?.template === 'odt' ? 'catalog' :
                   (existingApp && plantillaTemplateIds.includes(existingApp.template)) ? 'plantilla' :
@@ -988,7 +1024,7 @@ const AppsPage = {
           const odtSel = state.template === 'odt';
           const odtKeywords = ['office', 'microsoft', '365', 'odt', 'ltsc', 'word', 'excel'];
           const odtMatchesQ = !q || odtKeywords.some(k => k.includes(q));
-          const odtMatchesCat = activeCat === 'Todo' || activeCat === 'Productividad' || activeCat === 'Ofimática';
+          const odtMatchesCat = activeCat === 'Todo' || activeCat === 'Tools';
           if (odtMatchesQ && odtMatchesCat) {
             body += `
               <div style="margin-bottom:var(--space-sm);">
@@ -1014,7 +1050,7 @@ const AppsPage = {
             if (!grouped2[item.category]) grouped2[item.category] = [];
             grouped2[item.category].push(item);
           });
-          const catOrder2 = ['Navegadores', 'Herramientas', 'Conectividad', 'Comunicación', 'Multimedia', 'Desarrollo'];
+          const catOrder2 = ['Browsers', 'Tools', 'Connectivity', 'Communication', 'Multimedia', 'Development'];
           catOrder2.forEach(cat => {
             if (!grouped2[cat]) return;
             body += `
@@ -1159,7 +1195,10 @@ const AppsPage = {
           <div style="padding:12px 14px;background:rgba(108,99,255,0.07);border:1px solid rgba(108,99,255,0.25);border-radius:8px;margin-bottom:12px;">
             <div style="font-weight:600;font-size:13px;margin-bottom:4px;color:var(--primary-color);">📦 Windows Package Manager</div>
             <p style="margin:0 0 8px 0;font-size:12px;color:var(--text-secondary);">Se instalará automáticamente usando winget. No es necesario descargar ningún instalador.</p>
-            <code style="font-size:11px;color:var(--text-muted);background:var(--bg-tertiary);padding:4px 8px;border-radius:4px;display:block;">winget install --id ${this.esc(state.wingetId)} --scope machine --silent</code>
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">Winget ID</label>
+              <input type="text" class="form-input" value="${this.esc(state.wingetId)}" readonly style="background:var(--bg-tertiary);cursor:default;font-family:monospace;font-size:12px;">
+            </div>
           </div>`;
 
         } else if (isODT) {
@@ -1402,7 +1441,7 @@ const AppsPage = {
           `<button class="btn btn-primary" id="wiz-next" ${state.step === 1 && !state.template ? 'disabled' : ''}>${t('apps.next')}</button>` :
           `<button class="btn btn-success" id="wiz-deploy">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-            ${isEdit ? t('apps.saveAndDeploy') : t('apps.createAndDeploy')}
+            ${isEdit ? t('apps.saveAndDeploy') : t('apps.create')}
           </button>`
         }`;
 
@@ -1454,15 +1493,21 @@ const AppsPage = {
           if (!state.name || state.name === 'Microsoft Office') state.name = card.dataset.appName || '';
           if (card.dataset.appVersion) state.version = card.dataset.appVersion;
         }
+        // Auto-advance to step 2 (name/config)
+        if (state._wizardWingetTimer) clearTimeout(state._wizardWingetTimer);
+        state.wizardWingetSearching = false;
+        state.step = 2;
         renderWizard();
       });
     });
 
-    // ── Template selection (agents / manual tabs) ──────────────
+    // ── Template selection (plantilla / manual tabs) ──────────────
     document.querySelectorAll('.template-card:not(.catalog-item)').forEach(card => {
       card.addEventListener('click', () => {
         state.template = card.dataset.template;
         state.wingetId = '';
+        // Auto-advance to step 2 (name/config)
+        state.step = 2;
         renderWizard();
       });
     });
@@ -1470,6 +1515,21 @@ const AppsPage = {
     // ── Catalog search input (two-phase: curated + winget CLI) ──
     const catalogSearchInput = document.getElementById('catalog-search');
     if (catalogSearchInput) {
+      // Enter: fire CLI search immediately (don't let it bubble to Next button)
+      catalogSearchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation();
+          const q = catalogSearchInput.value.trim();
+          if (q.length >= 2 && state._wizardWingetTimer) {
+            // Cancel debounce and fire immediately
+            clearTimeout(state._wizardWingetTimer);
+            state._wizardWingetTimer = null;
+            this._runWizardWingetSearch(q, state, renderWizard);
+          }
+        }
+      });
+
       catalogSearchInput.addEventListener('input', () => {
         const q = catalogSearchInput.value;
         state.catalogSearch = q;
@@ -1485,62 +1545,9 @@ const AppsPage = {
 
         // Phase 2: winget CLI search (debounced 600ms)
         if (q.trim().length >= 2) {
-          state._wizardWingetTimer = setTimeout(async () => {
-            const query = q.trim();
-            try {
-              const results = await window.api.catalog.searchCLI(query);
-              // Abort if the user has already typed something else
-              if (state.catalogSearch.trim() !== query) return;
-              const curatedIds = new Set(
-                (this.wingetCatalogCache?.catalog || [])
-                  .filter(item =>
-                    item.name.toLowerCase().includes(query.toLowerCase()) ||
-                    (item.wingetId || '').toLowerCase().includes(query.toLowerCase())
-                  )
-                  .map(item => (item.wingetId || '').toLowerCase())
-                  .filter(Boolean)
-              );
-              state.wizardWingetResults = results.filter(r => r.wingetId && !curatedIds.has(r.wingetId.toLowerCase()));
-              state.wizardWingetSearching = false;
-              // Update winget section in-place (no full re-render)
-              const ws = document.getElementById('wiz-winget-section');
-              if (ws) {
-                if (state.wizardWingetResults.length > 0) {
-                  ws.innerHTML = `<div style="margin-top:8px;">
-                    <h5 style="font-size:10px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;letter-spacing:.05em;">Winget CLI</h5>
-                    <div class="template-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));">
-                      ${state.wizardWingetResults.map(item => `
-                        <div class="template-card catalog-item ${state.template === 'winget' && state.wingetId === item.wingetId ? 'selected' : ''}"
-                             data-catalog-type="winget" data-winget-id="${this.esc(item.wingetId)}"
-                             data-app-name="${this.esc(item.name)}" data-app-version="${this.esc(item.version || '')}"
-                             style="cursor:pointer;">
-                          <div class="template-card-icon" style="font-size:22px;">📦</div>
-                          <div class="template-card-name" style="font-size:11px;">${this.esc(item.name)}</div>
-                          ${item.version ? `<div class="template-card-desc" style="font-size:10px;">v${this.esc(item.version)}</div>` : ''}
-                        </div>`).join('')}
-                    </div>
-                  </div>`;
-                  ws.querySelectorAll('.catalog-item').forEach(card => {
-                    card.addEventListener('click', (e) => {
-                      e.stopPropagation();
-                      state.template = 'winget';
-                      state.wingetId = card.dataset.wingetId || '';
-                      if (!state.name || state.name === 'Microsoft Office') state.name = card.dataset.appName || '';
-                      if (card.dataset.appVersion) state.version = card.dataset.appVersion;
-                      renderWizard();
-                      const ni = document.getElementById('catalog-search');
-                      if (ni) ni.focus();
-                    });
-                  });
-                } else {
-                  ws.innerHTML = '';
-                }
-              }
-            } catch {
-              state.wizardWingetSearching = false;
-              const ws = document.getElementById('wiz-winget-section');
-              if (ws) ws.innerHTML = '';
-            }
+          state._wizardWingetTimer = setTimeout(() => {
+            state._wizardWingetTimer = null;
+            this._runWizardWingetSearch(q.trim(), state, renderWizard);
           }, 600);
         }
       });
@@ -1797,6 +1804,67 @@ const AppsPage = {
     if (notifyCheck) state.notifyUser = notifyCheck.checked;
   },
 
+  async _runWizardWingetSearch(query, state, renderWizard) {
+    try {
+      const results = await window.api.catalog.searchCLI(query);
+      // Abort if the user has already typed something new
+      if (state.catalogSearch.trim() !== query) return;
+      const curatedIds = new Set(
+        (this.wingetCatalogCache?.catalog || [])
+          .filter(item =>
+            item.name.toLowerCase().includes(query.toLowerCase()) ||
+            (item.wingetId || '').toLowerCase().includes(query.toLowerCase())
+          )
+          .map(item => (item.wingetId || '').toLowerCase())
+          .filter(Boolean)
+      );
+      state.wizardWingetResults = results.filter(r => r.wingetId && !curatedIds.has(r.wingetId.toLowerCase()));
+      state.wizardWingetSearching = false;
+
+      const ws = document.getElementById('wiz-winget-section');
+      if (!ws) return;
+
+      if (state.wizardWingetResults.length === 0) {
+        ws.innerHTML = '';
+        return;
+      }
+
+      ws.innerHTML = `<div style="margin-top:8px;">
+        <h5 style="font-size:10px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;letter-spacing:.05em;">Winget CLI</h5>
+        <div class="template-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));">
+          ${state.wizardWingetResults.map(item => `
+            <div class="template-card catalog-item"
+                 data-catalog-type="winget" data-winget-id="${this.esc(item.wingetId)}"
+                 data-app-name="${this.esc(item.name)}" data-app-version="${this.esc(item.version || '')}"
+                 style="cursor:pointer;">
+              <div class="template-card-icon" style="font-size:22px;">📦</div>
+              <div class="template-card-name" style="font-size:11px;">${this.esc(item.name)}</div>
+              ${item.version ? `<div class="template-card-desc" style="font-size:10px;">v${this.esc(item.version)}</div>` : ''}
+            </div>`).join('')}
+        </div>
+      </div>`;
+
+      ws.querySelectorAll('.catalog-item').forEach(card => {
+        card.addEventListener('click', (e) => {
+          e.stopPropagation();
+          state.template = 'winget';
+          state.wingetId = card.dataset.wingetId || '';
+          if (!state.name || state.name === 'Microsoft Office') state.name = card.dataset.appName || '';
+          if (card.dataset.appVersion) state.version = card.dataset.appVersion;
+          // Auto-advance to step 2
+          if (state._wizardWingetTimer) clearTimeout(state._wizardWingetTimer);
+          state.wizardWingetSearching = false;
+          state.step = 2;
+          renderWizard();
+        });
+      });
+    } catch {
+      state.wizardWingetSearching = false;
+      const ws = document.getElementById('wiz-winget-section');
+      if (ws) ws.innerHTML = '';
+    }
+  },
+
   async loadGPOsForWizard(state) {
     try {
       const [apps, cfg] = await Promise.all([
@@ -2024,7 +2092,7 @@ const AppsPage = {
       <div style="flex:1"></div>
       <button class="btn btn-success" id="btn-confirm-create">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-        ${isEdit ? t('apps.saveAndDeploy') : t('apps.createAndDeploy')}
+        ${isEdit ? t('apps.saveAndDeploy') : t('apps.create')}
       </button>
     `;
 
@@ -2272,7 +2340,7 @@ const AppsPage = {
           freshApp.deployedPath = '';
           freshApp.gpoName = deleteGPO ? '' : app.gpoName;
           freshApp.assignedOUs = (unlinkGPO || deleteGPO) ? [] : app.assignedOUs;
-          const recreated = await window.api.apps.create(freshApp);
+          await window.api.apps.create(freshApp);
           await window.api.activity.add('app_disable', { appName: app.name, deletedFiles: true, deletedGPO: deleteGPO });
         } else {
           // Just update the app status

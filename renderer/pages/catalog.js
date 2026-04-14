@@ -68,7 +68,7 @@ const CatalogPage = {
       <div class="catalog-filters" id="catalog-filters">
         ${categories.map(cat => `
           <button class="catalog-filter-pill ${this._activeCategory === cat ? 'active' : ''}" data-cat="${this.esc(cat)}">
-            ${this.esc(cat)}
+            ${this.esc(this._translateCategory(cat))}
           </button>
         `).join('')}
         <button class="catalog-filter-pill ${this._activeCategory === 'Winget' ? 'active' : ''}" data-cat="Winget">
@@ -109,8 +109,8 @@ const CatalogPage = {
     if (this._wingetSearching) {
       statusHtml = `
         <div class="catalog-search-status">
-          <span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:8px;"></span>
-          Buscando en winget CLI...
+          <span class="spinner" style="width:14px;height:14px;border-width:2px;flex-shrink:0;"></span>
+          <span>${t('catalog.searchingWinget')}</span>
         </div>
       `;
     }
@@ -136,7 +136,7 @@ const CatalogPage = {
     for (const [cat, items] of Object.entries(grouped)) {
       html += `
         <div class="catalog-category-section">
-          <h5 class="catalog-category-title">${this.esc(cat)}</h5>
+          <h5 class="catalog-category-title">${this.esc(this._translateCategory(cat))}</h5>
           <div class="catalog-grid">
             ${items.map(item => this._renderCard(item)).join('')}
           </div>
@@ -240,6 +240,7 @@ const CatalogPage = {
     });
     searchInput?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
+        if (this._wingetSearching) return;
         clearTimeout(this._searchTimer);
         this._doSearch();
       }
@@ -316,6 +317,8 @@ const CatalogPage = {
     const curatedIds = new Set(curatedFiltered.map(r => r.wingetId).filter(Boolean));
     try {
       const wingetResults = await window.api.catalog.searchCLI(query);
+      // Abort if the user has already typed something different
+      if ((document.getElementById('catalog-search')?.value?.trim() || '') !== query) return;
       const newOnly = wingetResults.filter(r => r.wingetId && !curatedIds.has(r.wingetId));
       this._results = [...curatedFiltered, ...newOnly];
     } catch {
@@ -430,5 +433,17 @@ const CatalogPage = {
     const div = document.createElement('div');
     div.textContent = str || '';
     return div.innerHTML;
+  },
+
+  _translateCategory(cat) {
+    const map = {
+      'Todo':          t('catalog.filterAll'),
+      'Browsers':      t('catalog.cat_browsers'),
+      'Tools':         t('catalog.cat_tools'),
+      'Connectivity':  t('catalog.cat_connectivity'),
+      'Communication': t('catalog.cat_communication'),
+      'Development':   t('catalog.cat_development')
+    };
+    return map[cat] || cat;
   }
 };

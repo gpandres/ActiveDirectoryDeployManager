@@ -47,6 +47,12 @@ const SetupPage = {
           <p class="form-hint">${t('setup.defaultGpoHint')}</p>
         </div>
 
+        <div class="form-group">
+          <label class="form-label">${t('setup.preferredDC') || 'Domain Controller (multi-DC)'}</label>
+          <input class="form-input" id="setup-dc" value="${this.esc(config.preferredDC || '')}" placeholder="dc1.empresa.local">
+          <p class="form-hint">${t('setup.preferredDCHint') || 'Deja vacío para usar automáticamente el PDC emulator. En entornos con varios DCs, especifica el DC principal para evitar problemas de replicación.'}</p>
+        </div>
+
         <div class="form-group mb-md">
           <label class="form-label">${t('setup.baseOu')}</label>
           <div style="position:relative;margin-bottom:8px;">
@@ -93,6 +99,7 @@ const SetupPage = {
         networkSharePath: document.getElementById('setup-network').value.trim(),
         logDirectory: document.getElementById('setup-logs').value.trim(),
         defaultGPO: document.getElementById('setup-gpo').value.trim(),
+        preferredDC: document.getElementById('setup-dc').value.trim(),
         baseOU: document.getElementById('setup-baseou').value.trim(),
         // setting firstRun to false will let them enter the app
         firstRun: false

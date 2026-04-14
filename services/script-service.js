@@ -177,15 +177,17 @@ const scriptService = {
 
       const scriptContent = this.generateScript(appConfig);
       const scriptPath = path.join(appFolder, 'install.ps1');
-      await fs.promises.writeFile(scriptPath, scriptContent, 'utf-8');
+      await fs.promises.writeFile(scriptPath, '\uFEFF' + scriptContent, 'utf-8');
 
       // Generate version.json manifest
+      const cfgForManifest = require('./config').getConfig();
       const manifest = {
         app: appConfig.name,
         version: appConfig.version || '1.0.0',
         hash: installerHash,
         notifyUser: appConfig.notifyUser || false,
-        deployedAt: new Date().toISOString()
+        deployedAt: new Date().toISOString(),
+        shareId: cfgForManifest.shareId || ''
       };
       await fs.promises.writeFile(
         path.join(appFolder, 'version.json'),
@@ -244,7 +246,7 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
     '    $CurrentHash    = $Manifest.hash',
     '    $CurrentVersion = $Manifest.version',
     '} catch {',
-    '    Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] ERROR: version.json corrupto — $_"',
+    '    Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] ERROR: version.json corrupto - $_"',
     '    Stop-Transcript -ErrorAction SilentlyContinue',
     '    exit 1',
     '}',
@@ -254,12 +256,17 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
     'if (Test-Path $TrackerFile) {',
     '    try {',
     '        $t = Get-Content $TrackerFile -Raw | ConvertFrom-Json',
-    '        if ($t.hash -eq $CurrentHash) {',
-    '            Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] OMITIDO: Ya instalado (resultado anterior: $($t.result))"',
+    '        if ($t.hash -eq $CurrentHash -and $t.result -eq \'success\') {',
+    '            Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] OMITIDO: Ya instalado (v$($t.version), hash coincide)"',
     '            Stop-Transcript -ErrorAction SilentlyContinue',
     '            exit 0',
     '        }',
-    '        Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] Hash anterior: $($t.hash) — actualizando a $CurrentHash"',
+    '        if ($t.hash -eq $CurrentHash -and $t.result -eq \'failed\') {',
+    '            Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] OMITIDO: Instalacion fallida previamente (mismo hash). Actualiza la app para reintentar."',
+    '            Stop-Transcript -ErrorAction SilentlyContinue',
+    '            exit 0',
+    '        }',
+    '        Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] Hash anterior: $($t.hash) - actualizando a $CurrentHash"',
     '    } catch {',
     '        Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] AVISO: Tracker corrupto, reinstalando"',
     '    }',
@@ -272,6 +279,10 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
     '                 Select-Object -First 1',
     'if (-not $InstaladorRed) {',
     '    Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] ERROR: No se encontro instalador (' + safeFilter + ') en $PSScriptRoot"',
+    '    if (Test-Path $VersionFile) {',
+    '        @{ hash = $CurrentHash; version = $CurrentVersion; failedAt = (Get-Date).ToString(\'o\'); computer = $env:COMPUTERNAME; result = \'failed\'; error = \'Installer not found in share\' } |',
+    '            ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8',
+    '    }',
     '    Stop-Transcript -ErrorAction SilentlyContinue',
     '    exit 1',
     '}',
@@ -326,7 +337,7 @@ ${notifyAfter}
 
 } catch {
     # ── Error ──────────────────────────────────────────────────────────
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Fallo instalando $NombreApp — $_"
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Fallo instalando $NombreApp - $_"
     @{ hash = $CurrentHash; version = $CurrentVersion; failedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'failed'; error = $_.ToString() } |
         ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
 }
@@ -369,7 +380,7 @@ function generateFreshservice(cfg) {
 # Version: ${cfg.version || '1.0.0'}
 # Generado: ${new Date().toISOString()}
 # =========================================================================
-$Token = "$token"
+$Token = "${token}"
 
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
     Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
@@ -391,7 +402,7 @@ function generateCrowdstrike(cfg) {
 # Version: ${cfg.version || '1.0.0'}
 # Generado: ${new Date().toISOString()}
 # =========================================================================
-$CID = "$cid"
+$CID = "${cid}"
 
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
     Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
@@ -456,6 +467,9 @@ function generateForticlient(cfg) {
 # App: ${sanitizeAppName(cfg.name)}
 # Generado: ${new Date().toISOString()}
 # =========================================================================
+$FcVpnName   = "${vpnName}"
+$FcVpnDesc   = "${vpnDesc}"
+$FcVpnServer = "${vpnServer}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
     Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
 }
@@ -465,14 +479,14 @@ try {
     $installProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow -PassThru
 
     if ($installProcess.ExitCode -notin @(0, 3010, 1641)) {
-        throw "msiexec salió con código $($installProcess.ExitCode)"
+        throw "msiexec salio con codigo $($installProcess.ExitCode)"
     }
 
-    $vpnPath = "HKLM:\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels\\$vpnName"
+    $vpnPath = "HKLM:\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels\\$FcVpnName"
     if (-not (Test-Path -LiteralPath $vpnPath)) { New-Item $vpnPath -Force -ea SilentlyContinue | Out-Null }
 
-    New-ItemProperty -LiteralPath $vpnPath -Name 'Description' -Value "$vpnDesc" -PropertyType String -Force -ea SilentlyContinue | Out-Null
-    New-ItemProperty -LiteralPath $vpnPath -Name 'Server' -Value "$vpnServer" -PropertyType String -Force -ea SilentlyContinue | Out-Null
+    New-ItemProperty -LiteralPath $vpnPath -Name 'Description' -Value $FcVpnDesc  -PropertyType String -Force -ea SilentlyContinue | Out-Null
+    New-ItemProperty -LiteralPath $vpnPath -Name 'Server'      -Value $FcVpnServer -PropertyType String -Force -ea SilentlyContinue | Out-Null
     New-ItemProperty -LiteralPath $vpnPath -Name 'sso_enabled' -Value ${sso} -PropertyType DWord -Force -ea SilentlyContinue | Out-Null
     New-ItemProperty -LiteralPath $vpnPath -Name 'ServerCert' -Value '${srvCert}' -PropertyType String -Force -ea SilentlyContinue | Out-Null
 
@@ -525,11 +539,14 @@ function generateWazuh(cfg) {
 # WAZUH AGENT - DROP & RUN
 # App: ${sanitizeAppName(cfg.name)}
 # =========================================================================
+$WazuhManager = "${manager}"
+$WazuhGroup   = "${group}"
+$WazuhPwd     = "${pwd}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
 ${getLocalCachingLogic("\\.msi$", notify, sanitizeAppName(cfg.name))}
 try {
-    $msiArgs = "/i \`"$($Instalador.FullName)\`" WAZUH_MANAGER=\`"$manager\`" WAZUH_AGENT_GROUP=\`"$group\`""
-    if ("$pwd") { $msiArgs += " WAZUH_REGISTRATION_PASSWORD=\`"$pwd\`"" }
+    $msiArgs = "/i \`"$($Instalador.FullName)\`" WAZUH_MANAGER=\`"$WazuhManager\`" WAZUH_AGENT_GROUP=\`"$WazuhGroup\`""
+    if ($WazuhPwd) { $msiArgs += " WAZUH_REGISTRATION_PASSWORD=\`"$WazuhPwd\`"" }
     $msiArgs += " /qn"
     Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
@@ -542,13 +559,14 @@ function generateSentinelOne(cfg) {
   return `# =========================================================================
 # SENTINELONE - DROP & RUN
 # =========================================================================
+$SiteToken = "${st}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
 ${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
     if ($Instalador.Extension -eq ".msi") {
-        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$($Instalador.FullName)\`" SITE_TOKEN=\`"$st\`" /qn" -Wait -NoNewWindow
+        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$($Instalador.FullName)\`" SITE_TOKEN=\`"$SiteToken\`" /qn" -Wait -NoNewWindow
     } else {
-        Start-Process -FilePath $Instalador.FullName -ArgumentList "-t $st -q" -Wait -NoNewWindow
+        Start-Process -FilePath $Instalador.FullName -ArgumentList "-t $SiteToken -q" -Wait -NoNewWindow
     }
 ${getTrackerSaveLogic(notify)}
 `;
@@ -560,11 +578,12 @@ function generateCortexXDR(cfg) {
   return `# =========================================================================
 # CORTEX XDR - DROP & RUN
 # =========================================================================
+$CortexDir = "${dir}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
 ${getLocalCachingLogic("\\.msi$", notify, sanitizeAppName(cfg.name))}
 try {
     $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn"
-    if ("$dir") { $msiArgs += " INSTALLDIR=\`"$dir\`"" }
+    if ($CortexDir) { $msiArgs += " INSTALLDIR=\`"$CortexDir\`"" }
     Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
 `;
@@ -595,11 +614,13 @@ function generateZscaler(cfg) {
   return `# =========================================================================
 # ZSCALER ZCC - DROP & RUN
 # =========================================================================
+$ZscCloud  = "${cloud}"
+$ZscDomain = "${domain}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
 ${getLocalCachingLogic("\\.msi$", notify, sanitizeAppName(cfg.name))}
 try {
-    $msiArgs = "/i \`"$($Instalador.FullName)\`" CLOUDNAME=\`"$cloud\`" STRICTENFORCEMENT=${strict} /qn"
-    if ("$domain") { $msiArgs += " USERDOMAIN=\`"$domain\`"" }
+    $msiArgs = "/i \`"$($Instalador.FullName)\`" CLOUDNAME=\`"$ZscCloud\`" STRICTENFORCEMENT=${strict} /qn"
+    if ($ZscDomain) { $msiArgs += " USERDOMAIN=\`"$ZscDomain\`"" }
     Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
 `;
@@ -611,10 +632,11 @@ function generateGlobalProtect(cfg) {
   return `# =========================================================================
 # GLOBALPROTECT - DROP & RUN
 # =========================================================================
+$VpnPortal = "${portal}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
 ${getLocalCachingLogic("\\.msi$", notify, sanitizeAppName(cfg.name))}
 try {
-    $msiArgs = "/i \`"$($Instalador.FullName)\`" PORTAL=\`"$portal\`" /qn"
+    $msiArgs = "/i \`"$($Instalador.FullName)\`" PORTAL=\`"$VpnPortal\`" /qn"
     Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
 `;
@@ -626,16 +648,17 @@ function generateCiscoSecureClient(cfg) {
   return `# =========================================================================
 # CISCO SECURE CLIENT - DROP & RUN
 # =========================================================================
+$XmlProfile = "${xml}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
 ${getLocalCachingLogic("\\.msi$", notify, sanitizeAppName(cfg.name))}
 try {
     Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$($Instalador.FullName)\`" /qn" -Wait -NoNewWindow
 
-    $xmlSource = Join-Path -Path $CacheDir -ChildPath "$xml"
+    $xmlSource = Join-Path -Path $CacheDir -ChildPath $XmlProfile
     $xmlDestDir = "C:\\ProgramData\\Cisco\\Cisco Secure Client\\VPN\\Profile"
     if (-not (Test-Path $xmlDestDir)) { New-Item -ItemType Directory -Path $xmlDestDir -Force | Out-Null }
     if (Test-Path $xmlSource) {
-        Copy-Item -Path $xmlSource -Destination "$xmlDestDir\\$xml" -Force
+        Copy-Item -Path $xmlSource -Destination "$xmlDestDir\\$XmlProfile" -Force
     }
 ${getTrackerSaveLogic(notify)}
 `;
@@ -649,12 +672,15 @@ function generateLansweeper(cfg) {
   return `# =========================================================================
 # LANSWEEPER LSAGENT - DROP & RUN
 # =========================================================================
+$LsServer = "${srv}"
+$LsPort   = "${port}"
+$LsKey    = "${key}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
 ${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
     $args = "--mode unattended"
-    if ("$srv") { $args += " --server $srv --port $port" }
-    if ("$key") { $args += " --agentkey $key" }
+    if ($LsServer) { $args += " --server $LsServer --port $LsPort" }
+    if ($LsKey)    { $args += " --agentkey $LsKey" }
     Start-Process -FilePath $Instalador.FullName -ArgumentList $args -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
 `;
@@ -666,11 +692,12 @@ function generateNinjaOne(cfg) {
   return `# =========================================================================
 # NINJAONE / DATTO RMM - DROP & RUN
 # =========================================================================
+$NinjaTk = "${tk}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
 ${getLocalCachingLogic("\\.msi$", notify, sanitizeAppName(cfg.name))}
 try {
     $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn"
-    if ("$tk") { $msiArgs += " TOKEN=\`"$tk\`"" }
+    if ($NinjaTk) { $msiArgs += " TOKEN=\`"$NinjaTk\`"" }
     Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
 `;
@@ -683,12 +710,14 @@ function generateTeamViewer(cfg) {
   return `# =========================================================================
 # TEAMVIEWER HOST - DROP & RUN
 # =========================================================================
+$TvCid = "${cid}"
+$TvApi = "${api}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
 ${getLocalCachingLogic("\\.msi$", notify, sanitizeAppName(cfg.name))}
 try {
     $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn"
-    if ("$cid") { $msiArgs += " CUSTOMCONFIGID=\`"$cid\`"" }
-    if ("$api") { $msiArgs += " APITOKEN=\`"$api\`"" }
+    if ($TvCid) { $msiArgs += " CUSTOMCONFIGID=\`"$TvCid\`"" }
+    if ($TvApi) { $msiArgs += " APITOKEN=\`"$TvApi\`"" }
     $msiArgs += " ASSIGNMENTOPTIONS=\`"--grant-easy-access\`""
     Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
@@ -714,6 +743,7 @@ function generateVeeam(cfg) {
   return `# =========================================================================
 # VEEAM AGENT - DROP & RUN
 # =========================================================================
+$XmlProfile = "${xml}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
 ${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
@@ -723,7 +753,7 @@ try {
         Start-Process -FilePath $Instalador.FullName -ArgumentList "/silent /norestart" -Wait -NoNewWindow
     }
 
-    $xmlSource = Join-Path -Path $CacheDir -ChildPath "$xml"
+    $xmlSource = Join-Path -Path $CacheDir -ChildPath $XmlProfile
     if (Test-Path $xmlSource) {
         Start-Sleep -Seconds 15
         Start-Process -FilePath "C:\\Program Files\\Veeam\\Endpoint Backup\\Veeam.Agent.Configurator.exe" -ArgumentList "-setVBRsettings /f:\`"$xmlSource\`"" -Wait -NoNewWindow
@@ -739,12 +769,14 @@ function generateCrashPlan(cfg) {
   return `# =========================================================================
 # CRASHPLAN ENTERPRISE - DROP & RUN
 # =========================================================================
+$CpUrl   = "${url}"
+$CpToken = "${token}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
 ${getLocalCachingLogic("\\.msi$", notify, sanitizeAppName(cfg.name))}
 try {
     $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn"
-    if ("$url") { $msiArgs += " DEPLOYMENT_URL=\`"$url\`"" }
-    if ("$token") { $msiArgs += " DEPLOYMENT_TOKEN=\`"$token\`"" }
+    if ($CpUrl)   { $msiArgs += " DEPLOYMENT_URL=\`"$CpUrl\`"" }
+    if ($CpToken) { $msiArgs += " DEPLOYMENT_TOKEN=\`"$CpToken\`"" }
     Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
 ${getTrackerSaveLogic(notify)}
 `;
@@ -771,6 +803,7 @@ function generateWinget(cfg) {
 # Version: ${version}
 # Generado: ${new Date().toISOString()}
 # =========================================================================
+$wingetId = "${wingetId}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
     Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
 }
@@ -810,44 +843,69 @@ if (Test-Path $TrackerFile) {
 }
 ${notifyPrefix}
 
-# ── Localizar winget (funciona como SYSTEM) ──────────────
+# ── Localizar winget (contexto SYSTEM / GPO startup) ─────
+# Varios métodos porque SYSTEM no tiene acceso normal a WindowsApps
 $Winget = $null
-try {
-    $pkg = Get-AppxPackage -AllUsers "Microsoft.DesktopAppInstaller" -ErrorAction SilentlyContinue |
-           Sort-Object { [version]($_.Version -replace '[^0-9.]','') } -Descending |
-           Select-Object -First 1
-    if ($pkg) {
-        $candidate = Join-Path $pkg.InstallLocation "winget.exe"
-        if (Test-Path $candidate) { $Winget = $candidate }
-    }
-} catch {}
 
+# Método 1: PATH / stub sistema (Windows 11 22H2+)
+$fromPath = (Get-Command winget.exe -ErrorAction SilentlyContinue).Source
+if ($fromPath -and (Test-Path $fromPath)) { $Winget = $fromPath }
+
+# Método 2: Symlink en System32 (Windows 11 23H2+)
 if (-not $Winget) {
-    $pattern = "$env:ProgramFiles\\WindowsApps\\Microsoft.DesktopAppInstaller_*_x64__8wekyb3d8bbwe\\winget.exe"
-    $found = Get-Item $pattern -ErrorAction SilentlyContinue |
-             Sort-Object FullName -Descending | Select-Object -First 1
-    if ($found) { $Winget = $found.FullName }
+    $p = "$env:SystemRoot\System32\winget.exe"
+    if (Test-Path $p) { $Winget = $p }
+}
+
+# Método 3: Enumerar WindowsApps con cmd /c dir (evita ACL de SYSTEM)
+if (-not $Winget) {
+    $appsBase = "$env:ProgramFiles\WindowsApps"
+    $entry = (& cmd.exe /c "dir /b /ad \`"$appsBase\`" 2>nul") -split "\`n" |
+             Where-Object { $_ -like 'Microsoft.DesktopAppInstaller_*_x64__8wekyb3d8bbwe' } |
+             Sort-Object -Descending | Select-Object -First 1
+    if ($entry) { $Winget = "$appsBase\$($entry.Trim())\winget.exe" }
+}
+
+# Método 4: Get-AppxPackage (puede fallar en inicio, pero se intenta)
+if (-not $Winget) {
+    try {
+        $pkg = Get-AppxPackage -AllUsers "Microsoft.DesktopAppInstaller" -ErrorAction SilentlyContinue |
+               Sort-Object { [version]($_.Version -replace '[^0-9.]','') } -Descending | Select-Object -First 1
+        if ($pkg) {
+            $p = Join-Path $pkg.InstallLocation "winget.exe"
+            if (Test-Path $p) { $Winget = $p }
+        }
+    } catch {}
 }
 
 if (-not $Winget) {
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: winget no encontrado. Instalar App Installer desde Microsoft Store (requiere Windows 10 21H2+)."
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: winget.exe no encontrado. Requiere Windows 10 21H2+ con App Installer (Microsoft Store)."
     Stop-Transcript -ErrorAction SilentlyContinue
     exit 1
 }
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] winget: $Winget"
 
+# Actualizar fuentes (necesario en contexto SYSTEM; ignorar error si falla)
+try { & $Winget source update --disable-interactivity 2>&1 | Out-Null } catch {}
+
 # ── Instalar ─────────────────────────────────────────────
+# Códigos de salida conocidos de winget:
+#   0            = éxito
+#   1618         = otra instalación en curso (reintentar después)
+#  -1978335212  = ya instalado en versión igual o superior (éxito)
+#  -1978335189  = ya instalado (otra variante, éxito)
+#   0x8A150109  = no se requiere actualización (éxito)
 try {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Ejecutando: winget install --id $wingetId --scope machine"
     & $Winget install --id "$wingetId" --silent --accept-package-agreements --accept-source-agreements --scope machine
-    if ($LASTEXITCODE -notin @(0, 1618, -1978335212)) { throw "winget salio con codigo $LASTEXITCODE" }
+    if ($LASTEXITCODE -notin @(0, 1618, -1978335212, -1978335189, -1978335140)) { throw "winget salio con codigo $LASTEXITCODE" }
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: $NombreApp instalado correctamente (v$CurrentVersion)"
 ${notifyAfter}
     @{ version = $CurrentVersion; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success'; method = 'winget'; wingetId = "$wingetId" } |
         ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
 } catch {
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Fallo instalando $NombreApp — $_"
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Fallo instalando $NombreApp - $_"
     @{ version = $CurrentVersion; failedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'failed'; error = $_.ToString() } |
         ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
 }
@@ -907,7 +965,7 @@ $TrackerFile = "$LogDir\\Tracker_$NombreApp.json"
 $CurrentVersion = "${version}"
 $VersionFile = Join-Path $PSScriptRoot "version.json"
 if (-not (Test-Path $VersionFile)) {
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: No se encontró version.json en $PSScriptRoot"
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: No se encontro version.json en $PSScriptRoot"
     Stop-Transcript -ErrorAction SilentlyContinue
     exit 0
 }
@@ -916,11 +974,11 @@ try {
     $CurrentHash    = $Manifest.hash
     $CurrentVersion = $Manifest.version
 } catch {
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: version.json corrupto — $_"
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: version.json corrupto - $_"
     Stop-Transcript -ErrorAction SilentlyContinue
     exit 1
 }
-Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Versión : $CurrentVersion"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Version : $CurrentVersion"
 
 # ── Comprobar si ya instalado (Office en registro + tracker) ─
 $LastTracker = $null
@@ -934,7 +992,7 @@ $OfficeInstalled = Get-ItemProperty \`
     Where-Object { $_.DisplayName -like "*Microsoft Office*" -or $_.DisplayName -like "*Microsoft 365*" } |
     Select-Object -First 1
 if ($OfficeInstalled -and $LastTracker -and $LastTracker.result -eq 'success' -and $LastTracker.version -eq $CurrentVersion) {
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Office ya instalado — $($OfficeInstalled.DisplayName)"
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Office ya instalado - $($OfficeInstalled.DisplayName)"
     Stop-Transcript -ErrorAction SilentlyContinue
     exit 0
 }
@@ -1008,14 +1066,14 @@ Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Instalando Office. AVISO: Este proc
 # ── Instalar ─────────────────────────────────────────────
 try {
     Start-Process -FilePath $OdtSetup -ArgumentList "/configure \`"$XmlPath\`"" -Wait -NoNewWindow
-    if ($LASTEXITCODE -ne 0) { throw "ODT setup.exe salió con código $LASTEXITCODE" }
+    if ($LASTEXITCODE -ne 0) { throw "ODT setup.exe salio con codigo $LASTEXITCODE" }
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: $NombreApp instalado correctamente (v$CurrentVersion)"
 ${notifyAfter}
     @{ version = $CurrentVersion; hash = $CurrentHash; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success'; method = 'odt'; product = "${productId}" } |
         ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
 } catch {
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Fallo instalando $NombreApp — $_"
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Fallo instalando $NombreApp - $_"
     @{ version = $CurrentVersion; hash = $CurrentHash; failedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'failed'; error = $_.ToString() } |
         ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
 }

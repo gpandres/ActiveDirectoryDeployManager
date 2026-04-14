@@ -2265,6 +2265,7 @@ tr:hover td { background: rgba(108, 99, 255, 0.03); }
   border-radius: var(--radius-md);
   padding: 3px;
   gap: 2px;
+  overflow: visible; /* override earlier overflow:hidden so text labels are not clipped */
 }
 
 .view-toggle-btn {
@@ -2272,6 +2273,8 @@ tr:hover td { background: rgba(108, 99, 255, 0.03); }
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
+  width: auto;   /* override earlier 34px fixed width */
+  height: auto;  /* override earlier 34px fixed height */
   background: transparent;
   border: none;
   border-radius: var(--radius-sm);

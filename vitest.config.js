@@ -1,9 +1,7 @@
-import { defineConfig } from 'vitest/config';
-
-export default defineConfig({
+module.exports = {
   test: {
     environment: 'node',
-    globals: false,
+    globals: true,
     include: ['tests/**/*.test.js'],
     // Run in a single fork so CJS module cache is shared with mock registry
     pool: 'forks',
@@ -13,4 +11,4 @@ export default defineConfig({
       }
     }
   }
-});
+};

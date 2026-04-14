@@ -199,7 +199,7 @@ Stop-Transcript
       // Generate and write bundle script
       const script = this.generateBundleScript(bundle, apps, config);
       const scriptPath = path.join(bundleFolder, 'bundle_install.ps1');
-      fs.writeFileSync(scriptPath, script, 'utf-8');
+      fs.writeFileSync(scriptPath, '\uFEFF' + script, 'utf-8');
 
       // Write bundle manifest
       const manifest = {

@@ -10,121 +10,121 @@ const { exec } = require('child_process');
 // versionCheck.method: 'github' | 'winget' | 'none'
 
 const CURATED_CATALOG = [
-  // ─── Navegadores ──────────────────────────────────────────
+  // ─── Browsers ─────────────────────────────────────────────
   {
     id: 'google-chrome', name: 'Google Chrome', wingetId: 'Google.Chrome',
-    category: 'Navegadores', icon: '🌐', defaultVersion: '126.0',
+    category: 'Browsers', icon: '🌐', defaultVersion: '126.0',
     versionCheck: { method: 'winget' }
   },
   {
     id: 'firefox', name: 'Mozilla Firefox', wingetId: 'Mozilla.Firefox',
-    category: 'Navegadores', icon: '🦊', defaultVersion: '127.0',
+    category: 'Browsers', icon: '🦊', defaultVersion: '127.0',
     versionCheck: { method: 'winget' }
   },
   {
     id: 'microsoft-edge', name: 'Microsoft Edge', wingetId: 'Microsoft.Edge',
-    category: 'Navegadores', icon: '🔵', defaultVersion: '126.0',
+    category: 'Browsers', icon: '🔵', defaultVersion: '126.0',
     versionCheck: { method: 'winget' }
   },
   {
     id: 'brave', name: 'Brave Browser', wingetId: 'Brave.Brave',
-    category: 'Navegadores', icon: '🦁', defaultVersion: '1.67',
+    category: 'Browsers', icon: '🦁', defaultVersion: '1.67',
     versionCheck: { method: 'github', repo: 'brave/brave-browser' }
   },
 
   // ─── Herramientas ─────────────────────────────────────────
   {
     id: '7zip', name: '7-Zip', wingetId: '7zip.7zip',
-    category: 'Herramientas', icon: '🗜️', defaultVersion: '24.08',
+    category: 'Tools', icon: '🗜️', defaultVersion: '24.08',
     versionCheck: { method: 'winget' }
   },
   {
     id: 'notepadplusplus', name: 'Notepad++', wingetId: 'Notepad++.Notepad++',
-    category: 'Herramientas', icon: '📝', defaultVersion: '8.6',
+    category: 'Tools', icon: '📝', defaultVersion: '8.6',
     versionCheck: { method: 'github', repo: 'notepad-plus-plus/notepad-plus-plus' }
   },
   {
     id: 'adobereader', name: 'Adobe Acrobat Reader', wingetId: 'Adobe.Acrobat.Reader.64-bit',
-    category: 'Herramientas', icon: '📄', defaultVersion: '24.0',
+    category: 'Tools', icon: '📄', defaultVersion: '24.0',
     versionCheck: { method: 'winget' }
   },
   {
     id: 'pdf24', name: 'PDF24 Creator', wingetId: 'geekSoftware.PDF24Creator',
-    category: 'Herramientas', icon: '📋', defaultVersion: '11.20',
+    category: 'Tools', icon: '📋', defaultVersion: '11.20',
     versionCheck: { method: 'winget' }
   },
   {
     id: 'greenshot', name: 'Greenshot', wingetId: 'Greenshot.Greenshot',
-    category: 'Herramientas', icon: '📸', defaultVersion: '1.2.10',
+    category: 'Tools', icon: '📸', defaultVersion: '1.2.10',
     versionCheck: { method: 'github', repo: 'greenshot/greenshot' }
   },
   {
     id: 'sharex', name: 'ShareX', wingetId: 'ShareX.ShareX',
-    category: 'Herramientas', icon: '🖼️', defaultVersion: '16.1',
+    category: 'Tools', icon: '🖼️', defaultVersion: '16.1',
     versionCheck: { method: 'github', repo: 'ShareX/ShareX' }
   },
   {
     id: 'paintnet', name: 'Paint.NET', wingetId: 'dotPDN.PaintDotNet',
-    category: 'Herramientas', icon: '🎨', defaultVersion: '5.1',
+    category: 'Tools', icon: '🎨', defaultVersion: '5.1',
     versionCheck: { method: 'winget' }
   },
   {
     id: 'keepass', name: 'KeePass', wingetId: 'DominikReichl.KeePass',
-    category: 'Herramientas', icon: '🔐', defaultVersion: '2.57',
+    category: 'Tools', icon: '🔐', defaultVersion: '2.57',
     versionCheck: { method: 'winget' }
   },
 
   // ─── Conectividad ─────────────────────────────────────────
   {
     id: 'filezilla', name: 'FileZilla', wingetId: 'TimKosse.FileZilla.Client',
-    category: 'Conectividad', icon: '📁', defaultVersion: '3.67',
+    category: 'Connectivity', icon: '📁', defaultVersion: '3.67',
     versionCheck: { method: 'winget' }
   },
   {
     id: 'winscp', name: 'WinSCP', wingetId: 'WinSCP.WinSCP',
-    category: 'Conectividad', icon: '🔒', defaultVersion: '6.3',
+    category: 'Connectivity', icon: '🔒', defaultVersion: '6.3',
     versionCheck: { method: 'winget' }
   },
   {
     id: 'putty', name: 'PuTTY', wingetId: 'PuTTY.PuTTY',
-    category: 'Conectividad', icon: '🖥️', defaultVersion: '0.81',
+    category: 'Connectivity', icon: '🖥️', defaultVersion: '0.81',
     versionCheck: { method: 'winget' }
   },
   {
     id: 'mremoteng', name: 'mRemoteNG', wingetId: 'mRemoteNG.mRemoteNG',
-    category: 'Conectividad', icon: '🌐', defaultVersion: '1.77',
+    category: 'Connectivity', icon: '🌐', defaultVersion: '1.77',
     versionCheck: { method: 'github', repo: 'mRemoteNG/mRemoteNG' }
   },
   {
     id: 'openvpn', name: 'OpenVPN', wingetId: 'OpenVPNTechnologies.OpenVPN',
-    category: 'Conectividad', icon: '🔑', defaultVersion: '2.6',
+    category: 'Connectivity', icon: '🔑', defaultVersion: '2.6',
     versionCheck: { method: 'winget' }
   },
 
   // ─── Comunicación ─────────────────────────────────────────
   {
     id: 'zoom', name: 'Zoom', wingetId: 'Zoom.Zoom',
-    category: 'Comunicación', icon: '📹', defaultVersion: '6.1',
+    category: 'Communication', icon: '📹', defaultVersion: '6.1',
     versionCheck: { method: 'winget' }
   },
   {
     id: 'teams', name: 'Microsoft Teams', wingetId: 'Microsoft.Teams',
-    category: 'Comunicación', icon: '💬', defaultVersion: '24.0',
+    category: 'Communication', icon: '💬', defaultVersion: '24.0',
     versionCheck: { method: 'winget' }
   },
   {
     id: 'slack', name: 'Slack', wingetId: 'SlackTechnologies.Slack',
-    category: 'Comunicación', icon: '💜', defaultVersion: '4.39',
+    category: 'Communication', icon: '💜', defaultVersion: '4.39',
     versionCheck: { method: 'winget' }
   },
   {
     id: 'discord', name: 'Discord', wingetId: 'Discord.Discord',
-    category: 'Comunicación', icon: '🎮', defaultVersion: '1.0',
+    category: 'Communication', icon: '🎮', defaultVersion: '1.0',
     versionCheck: { method: 'winget' }
   },
   {
     id: 'whatsapp', name: 'WhatsApp', wingetId: 'WhatsApp.WhatsApp',
-    category: 'Comunicación', icon: '📱', defaultVersion: '2.2',
+    category: 'Communication', icon: '📱', defaultVersion: '2.2',
     versionCheck: { method: 'winget' }
   },
 
@@ -148,30 +148,30 @@ const CURATED_CATALOG = [
   // ─── Desarrollo ───────────────────────────────────────────
   {
     id: 'vscode', name: 'Visual Studio Code', wingetId: 'Microsoft.VisualStudioCode',
-    category: 'Desarrollo', icon: '💻', defaultVersion: '1.91',
+    category: 'Development', icon: '💻', defaultVersion: '1.91',
     versionCheck: { method: 'github', repo: 'microsoft/vscode' }
   },
   {
     id: 'git', name: 'Git', wingetId: 'Git.Git',
-    category: 'Desarrollo', icon: '🔀', defaultVersion: '2.46',
+    category: 'Development', icon: '🔀', defaultVersion: '2.46',
     versionCheck: { method: 'github', repo: 'git-for-windows/git' }
   },
   {
     id: 'python', name: 'Python 3', wingetId: 'Python.Python.3.12',
-    category: 'Desarrollo', icon: '🐍', defaultVersion: '3.12',
+    category: 'Development', icon: '🐍', defaultVersion: '3.12',
     versionCheck: { method: 'winget' }
   },
   {
     id: 'nodejs', name: 'Node.js LTS', wingetId: 'OpenJS.NodeJS.LTS',
-    category: 'Desarrollo', icon: '🟩', defaultVersion: '20.0',
+    category: 'Development', icon: '🟩', defaultVersion: '20.0',
     versionCheck: { method: 'winget' }
   },
 ];
 
 // ─── Office (ODT) Data ──────────────────────────────────────
 const ODT_PRODUCTS = [
-  { id: 'O365BusinessRetail',   label: 'Microsoft 365 Business',    channel: 'MonthlyEnterprise', type: '365' },
-  { id: 'O365ProPlusRetail',    label: 'Microsoft 365 Apps',        channel: 'MonthlyEnterprise', type: '365' },
+  { id: 'O365BusinessRetail',   label: 'Microsoft 365 Business',    channel: 'MonthlyEnterprise', type: 'subscription' },
+  { id: 'O365ProPlusRetail',    label: 'Microsoft 365 Apps',        channel: 'MonthlyEnterprise', type: 'subscription' },
   { id: 'ProPlus2021Volume',    label: 'Office LTSC 2021',          channel: 'PerpetualVL2021',   type: 'ltsc' },
   { id: 'ProPlus2019Volume',    label: 'Office LTSC 2019',          channel: 'PerpetualVL2019',   type: 'ltsc' },
 ];
@@ -180,7 +180,8 @@ const ODT_APPS = [
   { id: 'Word',      label: 'Word',        default: true },
   { id: 'Excel',     label: 'Excel',       default: true },
   { id: 'PowerPoint',label: 'PowerPoint',  default: true },
-  { id: 'Outlook',   label: 'Outlook',     default: true },
+  { id: 'Outlook',    label: 'Outlook (Classic)', default: true },
+  { id: 'OutlookNew', label: 'Outlook (New)',     default: false },
   { id: 'OneNote',   label: 'OneNote',     default: true },
   { id: 'Access',    label: 'Access',      default: false },
   { id: 'Publisher', label: 'Publisher',   default: false },
@@ -259,40 +260,40 @@ function searchWingetCLI(query) {
 
     // Sanitise: strip double-quotes to avoid shell injection
     const safeQuery = query.replace(/"/g, '');
-    const cmd = `winget search --query "${safeQuery}" --source winget --accept-source-agreements --disable-interactivity 2>nul`;
+    // Note: --disable-interactivity was added in winget 1.5 — omit for compatibility
+    const cmd = `winget search --query "${safeQuery}" --source winget --accept-source-agreements 2>nul`;
 
-    exec(cmd, { timeout: 20000, shell: 'cmd.exe' }, (err, stdout) => {
-      if (err || !stdout) { resolve([]); return; }
+    exec(cmd, { timeout: 25000, shell: 'cmd.exe' }, (_err, stdout) => {
+      if (!stdout || !stdout.trim()) { resolve([]); return; }
 
-      const lines = stdout.split(/\r?\n/);
-      // Separator line looks like: ────────... or ---------...
-      const sepIdx = lines.findIndex(l => /^[─\-]{3,}/.test(l.trim()));
+      // Strip ANSI/VT escape sequences winget may emit
+      const clean = stdout.replace(/\x1B\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
+      const lines = clean.split('\n').filter(l => l.trim());
+
+      // Find the separator line (dashes or box-drawing chars)
+      const sepIdx = lines.findIndex(l => /^[\-─]{3,}/.test(l.trim()));
       if (sepIdx < 1) { resolve([]); return; }
 
-      const header   = lines[sepIdx - 1];
-      const idStart  = header.search(/\bId\b/);
-      const verStart = header.search(/Versi[oó]n|Version/i);
-      if (idStart < 0) { resolve([]); return; }
-
+      // Parse data rows — use 2+ consecutive spaces as column separator (locale-independent)
       const results = lines.slice(sepIdx + 1)
-        .filter(l => l.trim() && !l.startsWith('\x1b'))
         .map(line => {
-          const name = line.substring(0, idStart).trim();
-          const rest = line.substring(idStart);
-          const id   = verStart > idStart
-            ? rest.substring(0, verStart - idStart).trim()
-            : rest.split(/\s{2,}/)[0].trim();
-          const version = verStart > idStart
-            ? line.substring(verStart).split(/\s+/)[0].trim()
-            : '';
+          // Split by 2+ spaces; this splits "Name    Publisher.Id    1.0.0" correctly
+          const cols = line.split(/\s{2,}/).map(s => s.trim()).filter(Boolean);
+          if (cols.length < 2) return null;
 
-          // winget IDs always contain a dot — skip malformed lines
-          if (!id || !id.includes('.')) return null;
+          // Winget IDs always look like Publisher.AppName — find that column
+          const idColIdx = cols.findIndex(c => /^[A-Za-z0-9][A-Za-z0-9.\-_]*\.[A-Za-z0-9][A-Za-z0-9.\-_]*$/.test(c));
+          if (idColIdx < 0) return null;
+
+          const wingetId = cols[idColIdx];
+          const name     = cols.slice(0, idColIdx).join(' ').trim() || wingetId;
+          const version  = cols[idColIdx + 1] || '';
+
           return {
-            id: id.toLowerCase().replace(/\./g, '-'),
-            name: name || id,
-            wingetId: id,
-            version: version || '',
+            id: wingetId.toLowerCase().replace(/\./g, '-'),
+            name,
+            wingetId,
+            version,
             category: 'Winget',
             icon: '📦',
             source: 'winget-cli'

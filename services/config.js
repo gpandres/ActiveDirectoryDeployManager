@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 let configFilePath = null;
 
@@ -16,8 +17,10 @@ const DEFAULT_CONFIG = {
   logDirectory: 'C:\\ProgramData\\AppDeploy_Logs',
   defaultGPO: '',
   baseOU: '',
+  preferredDC: '',   // leave empty to auto-use PDC emulator; set to a DC hostname for multi-DC environments
   language: 'es',
-  firstRun: true
+  firstRun: true,
+  shareId: ''
 };
 
 const DANGEROUS_KEYS = /^(__proto__|constructor|prototype)$/;
@@ -52,6 +55,9 @@ const configService = {
       const current = this.getConfig();
       const safeData = sanitizeConfigData(data);
       const merged = { ...current, ...safeData, firstRun: false };
+      if (!merged.shareId) {
+        merged.shareId = crypto.randomUUID().split('-')[0].toUpperCase();
+      }
       fs.writeFileSync(getConfigPath(), JSON.stringify(merged, null, 2), 'utf-8');
       return { success: true, data: merged };
     } catch (err) {

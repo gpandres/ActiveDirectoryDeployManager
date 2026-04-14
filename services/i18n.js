@@ -1,20 +1,8 @@
-const fs = require('fs');
-const path = require('path');
-const { app } = require('electron');
+// i18n — translations are embedded in code only.
+// No external .json files are read or written. To add a language, add a new
+// TRANSLATIONS_XX object below and register it in getTranslations().
 
-let langDir = null;
-
-function getLangDir() {
-  if (!langDir) {
-    langDir = path.join(app.getPath('userData'), 'lang');
-    if (!fs.existsSync(langDir)) {
-      fs.mkdirSync(langDir, { recursive: true });
-    }
-  }
-  return langDir;
-}
-
-const FALLBACK_EN = {
+const TRANSLATIONS_EN = {
   nav: {
     dashboard: "Dashboard",
     ous: "Organizational Units",
@@ -29,7 +17,7 @@ const FALLBACK_EN = {
     title: "Initial Configuration",
     subtitle: "Welcome to AD Deploy Manager. Please configure the basic settings to continue.",
     language: "Language",
-    languageHint: "You can add more languages by putting .json files in the lang folder.",
+    languageHint: "Choose the language for the application UI.",
     networkShare: "Network Share Path",
     networkShareHint: "UNC path where installers and scripts will be stored (e.g. \\\\server\\share).",
     browse: "Browse...",
@@ -245,7 +233,10 @@ const FALLBACK_EN = {
     quickUpdateDowngradeWarn: "You are downgrading from v{old} to v{new}. Proceed with caution.",
     quickUpdateConfirm: "Update & Redeploy",
     quickUpdateSuccess: "App updated to v{version}",
-    detailSectionHistory: "Version History"
+    detailSectionHistory: "Version History",
+    noGroup: "No group",
+    groupByTemplate: "Group by template",
+    create: "Create"
   },
   bundles: {
     title: "Bundles",
@@ -422,7 +413,8 @@ const FALLBACK_EN = {
     copyStaged: "{n} assignments staged",
     alreadyEmpty: "This OU has no assignments to clear",
     clearStaged: "{n} unassignments staged",
-    refresh: "Refresh"
+    refresh: "Refresh",
+    showAllOUs: "Show all OUs"
   },
   deployments: {
     title: "Deployments",
@@ -503,7 +495,8 @@ const FALLBACK_EN = {
     rsatWarningTitle: "Install GroupPolicy Module",
     rsatWarningMsg: "Although AD is active, GPOs are disabled without this module. Run as Administrator in PowerShell:",
     rsatNotInstalledTitle: "RSAT is not installed",
-    rsatNotInstalledMsg: "Active Directory features are disabled. Run as Administrator in PowerShell:"
+    rsatNotInstalledMsg: "Active Directory features are disabled. Run as Administrator in PowerShell:",
+    details: "Details"
   },
   catalog: {
     title: "App Catalog",
@@ -519,11 +512,17 @@ const FALLBACK_EN = {
     backToResults: "Back to catalog",
     addToNewApp: "Add to Apps",
     addToBundle: "Add to Bundle",
-    filterAll: "All"
+    filterAll: "All",
+    searchingWinget: "Searching in winget CLI...",
+    cat_browsers: "Browsers",
+    cat_tools: "Tools",
+    cat_connectivity: "Connectivity",
+    cat_communication: "Communication",
+    cat_development: "Development"
   }
 };
 
-const DEFAULT_ES = {
+const TRANSLATIONS_ES = {
   nav: {
     dashboard: "Dashboard",
     ous: "Unidades Organizativas",
@@ -538,7 +537,7 @@ const DEFAULT_ES = {
     title: "Configuración Inicial",
     subtitle: "Bienvenido a AD Deploy Manager. Configura los ajustes básicos para continuar.",
     language: "Idioma",
-    languageHint: "Puedes añadir más idiomas en la carpeta lang con archivos .json.",
+    languageHint: "Elige el idioma de la interfaz de la aplicación.",
     networkShare: "Carpeta de Red (Network Share)",
     networkShareHint: "Ruta UNC donde se guardarán instaladores y scripts (ej. \\\\servidor\\share).",
     browse: "Examinar...",
@@ -754,7 +753,10 @@ const DEFAULT_ES = {
     quickUpdateDowngradeWarn: "Estás haciendo downgrade de v{old} a v{new}. Procede con precaución.",
     quickUpdateConfirm: "Actualizar y Redesplegar",
     quickUpdateSuccess: "App actualizada a v{version}",
-    detailSectionHistory: "Historial de Versiones"
+    detailSectionHistory: "Historial de Versiones",
+    noGroup: "Sin grupo",
+    groupByTemplate: "Agrupar por plantilla",
+    create: "Crear"
   },
   bundles: {
     title: "Bundles",
@@ -938,7 +940,8 @@ const DEFAULT_ES = {
     copyStaged: "{n} asignaciones preparadas",
     alreadyEmpty: "Esta UO no tiene asignaciones",
     clearStaged: "{n} desasignaciones preparadas",
-    refresh: "Actualizar"
+    refresh: "Actualizar",
+    showAllOUs: "Mostrar todas las UOs"
   },
   deployments: {
     title: "Despliegues",
@@ -1019,7 +1022,8 @@ const DEFAULT_ES = {
     rsatWarningTitle: "Instala el Módulo GroupPolicy",
     rsatWarningMsg: "Aunque AD está activo, las GPOs están deshabilitadas sin este módulo. Ejecuta como Administrador en PowerShell:",
     rsatNotInstalledTitle: "RSAT no está instalado",
-    rsatNotInstalledMsg: "Las funciones de Active Directory están deshabilitadas. Ejecuta como Administrador en PowerShell:"
+    rsatNotInstalledMsg: "Las funciones de Active Directory están deshabilitadas. Ejecuta como Administrador en PowerShell:",
+    details: "Detalles"
   },
   catalog: {
     title: "Catálogo de Apps",
@@ -1035,76 +1039,30 @@ const DEFAULT_ES = {
     backToResults: "Volver al catálogo",
     addToNewApp: "Añadir a Apps",
     addToBundle: "Añadir a Bundle",
-    filterAll: "Todos"
+    filterAll: "Todos",
+    searchingWinget: "Buscando en winget CLI...",
+    cat_browsers: "Navegadores",
+    cat_tools: "Herramientas",
+    cat_connectivity: "Conectividad",
+    cat_communication: "Comunicación",
+    cat_development: "Desarrollo"
   }
 };
 
 const i18nService = {
   initialize() {
-    const dir = getLangDir();
-    // Create ES file
-    const esFile = path.join(dir, 'es.json');
-    if (!fs.existsSync(esFile)) {
-      fs.writeFileSync(esFile, JSON.stringify(DEFAULT_ES, null, 2), 'utf-8');
-    }
-    // Create EN file
-    const enFile = path.join(dir, 'en.json');
-    if (!fs.existsSync(enFile)) {
-      fs.writeFileSync(enFile, JSON.stringify(FALLBACK_EN, null, 2), 'utf-8');
-    }
+    // No-op: translations are embedded in code only.
   },
 
   getAvailableLanguages() {
-    const dir = getLangDir();
-    if (!fs.existsSync(dir)) return [{ code: 'en', name: 'English' }, { code: 'es', name: 'Español' }];
-    
-    const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
-    return files.map(f => {
-      const code = f.replace('.json', '');
-      return {
-        code,
-        name: code.toUpperCase() // Could read from inside the json if we put a "langName" flag
-      };
-    });
+    return [
+      { code: 'en', name: 'English' },
+      { code: 'es', name: 'Español' }
+    ];
   },
 
   getTranslations(langCode) {
-    // If not found or empty, fallback to internal EN
-    let translations = { ...FALLBACK_EN };
-
-    try {
-      const dir = getLangDir();
-      const file = path.join(dir, langCode + '.json');
-      if (fs.existsSync(file)) {
-        const raw = fs.readFileSync(file, 'utf-8');
-        const parsed = JSON.parse(raw);
-        // Deep merge
-        this._mergeDeep(translations, parsed);
-      }
-    } catch (e) {
-      console.error('Error reading i18n file:', e);
-    }
-
-    return translations;
-  },
-
-  _mergeDeep(target, source) {
-    if (this._isObject(target) && this._isObject(source)) {
-      for (const key of Object.keys(source)) {
-        if (!Object.prototype.hasOwnProperty.call(Object.prototype, key)) {
-          if (this._isObject(source[key])) {
-            if (!target[key]) Object.assign(target, { [key]: {} });
-            this._mergeDeep(target[key], source[key]);
-          } else {
-            Object.assign(target, { [key]: source[key] });
-          }
-        }
-      }
-    }
-  },
-
-  _isObject(item) {
-    return (item && typeof item === 'object' && !Array.isArray(item));
+    return langCode === 'es' ? TRANSLATIONS_ES : TRANSLATIONS_EN;
   }
 };
 

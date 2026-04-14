@@ -7,6 +7,7 @@ const fileService = {
     try {
       const config = configService.getConfig();
       const basePath = config.networkSharePath;
+      const myShareId = config.shareId || '';
 
       if (!fs.existsSync(basePath)) {
         return { success: false, error: `La ruta no existe: ${basePath}`, data: [] };
@@ -40,6 +41,12 @@ const fileService = {
             }
           } catch (e) {}
 
+          // If config has a shareId, only include folders that match it
+          // (folders without shareId in manifest are always included for backward compat)
+          if (myShareId && manifest?.shareId && manifest.shareId !== myShareId) {
+            return null;
+          }
+
           return {
             name: dir.name,
             path: dirPath,
@@ -49,9 +56,10 @@ const fileService = {
             version: manifest?.version || null,
             hash: manifest?.hash || null,
             deployedAt: manifest?.deployedAt || null,
+            shareId: manifest?.shareId || null,
             status: hasScript && hasInstaller ? 'ready' : hasScript ? 'missing-installer' : 'missing-script'
           };
-        });
+        }).filter(Boolean);
 
       return { success: true, data: apps };
     } catch (err) {

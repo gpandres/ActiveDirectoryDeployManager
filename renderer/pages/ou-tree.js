@@ -26,7 +26,8 @@ const OUsPage = {
     // Assignments (matrix) view: which OUs the user picked to display
     assignmentOUs: [],            // ordered array of dn strings
     assignmentOUSearch: '',       // search inside the picker
-    pickerOpen: false             // true = show OU picker step
+    pickerOpen: false,            // true = show OU picker step
+    showAllOUs: false             // true = ignore baseOU filter
   },
 
   // ─── Entry point ─────────────────────────────────────
@@ -43,7 +44,7 @@ const OUsPage = {
           </h1>
           <p class="page-subtitle">${t('ous.subtitle')}</p>
         </div>
-        <div class="flex gap-sm">
+        <div class="flex gap-sm" style="flex-shrink:0;align-items:center;">
           <div class="view-toggle" id="ous-view-toggle">
             <button class="view-toggle-btn ${this.state.view === 'tree' ? 'active' : ''}" data-view="tree">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/></svg>
@@ -91,7 +92,7 @@ const OUsPage = {
 
     try {
       const [ouResult, apps] = await Promise.all([
-        window.api.ad.getOUs(),
+        window.api.ad.getOUs(this.state.showAllOUs),
         window.api.apps.getAll()
       ]);
 
@@ -186,6 +187,11 @@ const OUsPage = {
     this.renderPendingBar();
   },
 
+  toggleShowAllOUs() {
+    this.state.showAllOUs = !this.state.showAllOUs;
+    this.loadData();
+  },
+
   // ─── Stats bar ───────────────────────────────────────
   renderStatsBar() {
     const bar = document.getElementById('ous-stats-bar');
@@ -213,7 +219,12 @@ const OUsPage = {
     mainArea.innerHTML = `
       <div class="ous-layout">
         <div class="card ous-tree-card">
-          <div class="card-title">${t('ous.treeTitle')}</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div class="card-title" style="margin-bottom:0;">${t('ous.treeTitle')}</div>
+            <button class="btn btn-sm ${this.state.showAllOUs ? 'btn-primary' : 'btn-ghost'}" id="btn-toggle-all-ous" onclick="OUsPage.toggleShowAllOUs()" style="font-size:11px;">
+              ${this.state.showAllOUs ? t('ous.refresh') : (t('ous.showAllOUs') || 'Show all OUs')}
+            </button>
+          </div>
           <div class="ous-search-box">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <input type="text" class="form-input" id="ous-search-ou" placeholder="${t('ous.searchOUs')}" value="${this.esc(this.state.ouSearch)}">
