@@ -1,5 +1,4 @@
 const { execFile } = require('child_process');
-const path = require('path');
 
 // Sanitize user input before interpolating into PowerShell commands.
 // Uses allowlist approach: only alphanumeric, spaces, hyphens, underscores,
@@ -7,6 +6,17 @@ const path = require('path');
 function sanitizePSInput(str) {
   if (typeof str !== 'string') return '';
   return str.replace(/[^a-zA-Z0-9\s\-_.,=@OUouDCdcCNcn]/g, '').trim();
+}
+
+// Sanitize a Windows/UNC file path for embedding inside a PowerShell single-quoted
+// string. Keeps backslashes, forward slashes, colons (drive letters), spaces, and
+// all normal path characters. Only removes characters that could break out of a PS
+// single-quoted string or inject commands: backtick, $, ;, |, &, {, }, <, >, ", NUL.
+// Single quotes are doubled (PS escaping), which is safe inside '...' strings.
+function sanitizePSPath(str) {
+  if (typeof str !== 'string') return '';
+  // Remove PS/shell injection characters; keep everything else a path can contain
+  return str.replace(/[`$;|&{}<>"\0]/g, '').replace(/'/g, "''").trim();
 }
 
 function runPowerShell(command) {
@@ -103,7 +113,7 @@ const adService = {
     try {
       const config = require('./config').getConfig();
       const json = await runPowerShell(
-        `Import-Module ActiveDirectory; Import-Module GroupPolicy; ${dcSnippet(config.preferredDC)}; Get-GPO -All -Domain $adServer -Server $adServer | Select-Object DisplayName,Id,GpoStatus,CreationTime,ModificationTime | ConvertTo-Json -Depth 3`
+        `Import-Module ActiveDirectory; Import-Module GroupPolicy; ${dcSnippet(config.preferredDC)}; Get-GPO -All -Server $adServer | Select-Object DisplayName,Id,GpoStatus,CreationTime,ModificationTime | ConvertTo-Json -Depth 3`
       );
       let gpos = [];
       try {
@@ -147,7 +157,7 @@ const adService = {
     try {
       const config = require('./config').getConfig();
       const safeGpoName = sanitizePSInput(gpoName).replace(/'/g, "''");
-      const safeScriptPath = sanitizePSInput(scriptPath).replace(/'/g, "''");
+      const safeScriptPath = sanitizePSPath(scriptPath);
       const safeOuDN = ouDN ? sanitizePSInput(ouDN).replace(/'/g, "''") : '';
 
       const ps = `
@@ -220,7 +230,7 @@ const adService = {
   async deleteGPO(gpoName) {
     try {
       const config = require('./config').getConfig();
-      const ps = `Import-Module ActiveDirectory; Import-Module GroupPolicy; ${dcSnippet(config.preferredDC)}; Remove-GPO -Name '${sanitizePSInput(gpoName).replace(/'/g, "''")}' -Domain $adServer -Server $adServer -ErrorAction Stop`;
+      const ps = `Import-Module ActiveDirectory; Import-Module GroupPolicy; ${dcSnippet(config.preferredDC)}; Remove-GPO -Name '${sanitizePSInput(gpoName).replace(/'/g, "''")}' -Server $adServer -ErrorAction Stop`;
       await runPowerShell(ps);
       return { success: true };
     } catch (err) {
@@ -228,6 +238,19 @@ const adService = {
         return { success: true };
       }
       return { success: false, error: err.message };
+    }
+  },
+
+  async checkGPOExists(gpoName) {
+    try {
+      const config = require('./config').getConfig();
+      const safe = sanitizePSInput(gpoName).replace(/'/g, "''");
+      const result = await runPowerShell(
+        `Import-Module GroupPolicy; ${dcSnippet(config.preferredDC)}; $g = Get-GPO -Name '${safe}' -Server $adServer -ErrorAction SilentlyContinue; if ($g) { Write-Output 'EXISTS' } else { Write-Output 'NOT_FOUND' }`
+      );
+      return { exists: result.trim() === 'EXISTS' };
+    } catch {
+      return { exists: false };
     }
   },
 

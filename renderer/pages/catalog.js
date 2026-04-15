@@ -12,6 +12,7 @@ const CatalogPage = {
   _versionCheckResults: [],
   _checkingUpdates: false,
   _wingetSearching: false,
+  _userApps: [],  // cached user app list for matching wingetId
 
   async render(container) {
     // Load curated catalog for categories + ODT data
@@ -26,6 +27,8 @@ const CatalogPage = {
     this._selectedItems = [];
     this._showUpdates = false;
     this._activeCategory = 'Todo';
+    this._versionCheckResults = [];
+    this._userApps = [];
 
     this._renderPage(container);
   },
@@ -151,7 +154,9 @@ const CatalogPage = {
     const isSelected = this._selectedItems.some(s =>
       (s.wingetId && s.wingetId === item.wingetId) || (s.id && s.id === item.id)
     );
-    const version = item.version || item.defaultVersion || '';
+    // Use latest known version if available from a previous version check
+    const checkedResult = this._versionCheckResults.find(r => r.wingetId && r.wingetId === item.wingetId);
+    const version = (checkedResult && checkedResult.latestVersion) || item.version || item.defaultVersion || '';
     const isApi = item.source === 'winget-api' || item.source === 'winget-cli';
 
     return `
@@ -194,26 +199,46 @@ const CatalogPage = {
       `;
     }
 
+    // Match results to user's installed apps
+    const resultsWithApps = this._versionCheckResults.map(r => {
+      const userApp = (this._userApps || []).find(a => a.wingetId && a.wingetId === r.wingetId);
+      return { ...r, userApp };
+    });
+    // Count how many user apps can actually be updated
+    const updatableCount = resultsWithApps.filter(r => r.userApp).length;
+
     return `
       <div class="card" style="margin-bottom:var(--space-md);">
         <div class="card-title" style="display:flex;align-items:center;gap:8px;">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg>
           ${t('catalog.updateResults')}
-          <span class="badge badge-warning" style="margin-left:auto;">${this._versionCheckResults.length}</span>
+          <span class="badge badge-warning" style="margin-left:4px;">${this._versionCheckResults.length}</span>
+          <div style="flex:1"></div>
+          ${updatableCount > 1 ? `<button class="btn btn-success btn-sm" id="catalog-update-all-btn">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg>
+            ${t('catalog.updateAll')} (${updatableCount})
+          </button>` : ''}
         </div>
         <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px;">
-          ${this._versionCheckResults.map(r => `
+          ${resultsWithApps.map((r, i) => `
             <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--bg-input);border-radius:var(--radius-sm);">
               <span style="font-size:22px;">${r.icon || '📦'}</span>
               <div style="flex:1;min-width:0;">
                 <div style="font-weight:600;color:var(--text-primary);font-size:var(--font-sm);">${this.esc(r.name || r.wingetId)}</div>
                 <div style="font-size:var(--font-xs);color:var(--text-muted);">${this.esc(r.wingetId)}</div>
+                ${r.userApp ? `<div style="font-size:var(--font-xs);color:var(--text-secondary);margin-top:1px;">Tu app: v${this.esc(r.userApp.version || '1.0.0')}</div>` : ''}
               </div>
-              <div style="text-align:right;font-size:var(--font-sm);">
+              <div style="text-align:right;font-size:var(--font-sm);margin-right:8px;">
                 <span style="color:var(--text-muted);">${this.esc(r.catalogVersion || '?')}</span>
                 <span style="color:var(--accent-primary);margin:0 6px;">→</span>
                 <span style="color:var(--accent-secondary);font-weight:600;">${this.esc(r.latestVersion || '?')}</span>
               </div>
+              ${r.userApp ? `
+                <button class="btn btn-primary btn-sm catalog-update-btn" data-idx="${i}" style="white-space:nowrap;min-width:90px;">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg>
+                  ${t('catalog.updateApp')}
+                </button>
+              ` : `<span style="font-size:var(--font-xs);color:var(--text-muted);white-space:nowrap;">${t('catalog.noAppsToUpdate')}</span>`}
             </div>
           `).join('')}
         </div>
@@ -333,12 +358,8 @@ const CatalogPage = {
     const container = document.getElementById('catalog-results-container');
     if (!container) return;
     container.innerHTML = this._showUpdates ? this._renderUpdatesPanel() : this._renderResults();
-    // Re-bind back button if in updates view
     if (this._showUpdates) {
-      document.getElementById('catalog-back-to-results')?.addEventListener('click', () => {
-        this._showUpdates = false;
-        this._updateResults();
-      });
+      this._bindUpdatesButtons(container);
     }
   },
 
@@ -382,6 +403,9 @@ const CatalogPage = {
     this._updateResults();
 
     try {
+      // Load user's apps for matching
+      this._userApps = await window.api.apps.getAll();
+
       const allIds = (this._catalogData?.catalog || []).map(c => c.id);
       const results = await window.api.catalog.checkVersions(allIds);
 
@@ -392,6 +416,7 @@ const CatalogPage = {
       });
     } catch {
       this._versionCheckResults = [];
+      this._userApps = [];
     }
 
     this._checkingUpdates = false;
@@ -402,11 +427,90 @@ const CatalogPage = {
     const container = document.getElementById('catalog-results-container');
     if (!container) return;
     container.innerHTML = this._renderUpdatesPanel();
+    this._bindUpdatesButtons(container);
+  },
+
+  _bindUpdatesButtons(container) {
     document.getElementById('catalog-back-to-results')?.addEventListener('click', () => {
       this._showUpdates = false;
       const c2 = document.getElementById('catalog-results-container');
       if (c2) c2.innerHTML = this._renderResults();
     });
+
+    // Per-row update buttons
+    container.querySelectorAll('.catalog-update-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.idx);
+        const resultsWithApps = this._versionCheckResults.map(r => {
+          const userApp = (this._userApps || []).find(a => a.wingetId && a.wingetId === r.wingetId);
+          return { ...r, userApp };
+        });
+        const row = resultsWithApps[idx];
+        if (row?.userApp) {
+          this._performUpdateFromCatalog(row.userApp, row.latestVersion, row.name, btn);
+        }
+      });
+    });
+
+    // Update all button
+    document.getElementById('catalog-update-all-btn')?.addEventListener('click', () => {
+      this._performBulkUpdateFromCatalog();
+    });
+  },
+
+  async _performUpdateFromCatalog(userApp, newVersion, appName, btnEl) {
+    if (btnEl) {
+      btnEl.disabled = true;
+      btnEl.innerHTML = `<span class="spinner" style="width:12px;height:12px;display:inline-block;border-width:2px;"></span> ${t('catalog.updatingApp')}`;
+    }
+
+    try {
+      const history = Array.isArray(userApp.versionHistory) ? [...userApp.versionHistory] : [];
+      history.push({
+        version: userApp.version || '1.0.0',
+        hash: userApp.lastDeployHash || '',
+        replacedAt: new Date().toISOString(),
+        replacedBy: 'catalog-update'
+      });
+
+      const updatedData = { version: newVersion, versionHistory: history };
+      await window.api.apps.update(userApp.id, updatedData);
+
+      const fullApp = { ...userApp, ...updatedData, id: userApp.id };
+      const deployResult = await window.api.scripts.deploy(fullApp);
+      if (!deployResult.success) throw new Error(deployResult.error);
+
+      await window.api.apps.update(userApp.id, { deployed: true, deployedPath: deployResult.path });
+      await window.api.activity.add('app_auto_update', { appName, newVersion });
+
+      App.toast(t('apps.updateSuccess').replace('{name}', appName || userApp.name).replace('{version}', newVersion), 'success');
+
+      // Update local cache and re-render
+      const appIdx = this._userApps.findIndex(a => a.id === userApp.id);
+      if (appIdx >= 0) this._userApps[appIdx] = { ...this._userApps[appIdx], version: newVersion };
+
+      this._refreshResultsContainer();
+    } catch (err) {
+      App.toast(`Error: ${err.message}`, 'error');
+      if (btnEl) {
+        btnEl.disabled = false;
+        btnEl.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg> ${t('catalog.updateApp')}`;
+      }
+    }
+  },
+
+  async _performBulkUpdateFromCatalog() {
+    const resultsWithApps = this._versionCheckResults.map(r => {
+      const userApp = (this._userApps || []).find(a => a.wingetId && a.wingetId === r.wingetId);
+      return { ...r, userApp };
+    }).filter(r => r.userApp);
+
+    const btn = document.getElementById('catalog-update-all-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spinner" style="width:12px;height:12px;display:inline-block;border-width:2px;"></span>`; }
+
+    for (const r of resultsWithApps) {
+      await this._performUpdateFromCatalog(r.userApp, r.latestVersion, r.name, null);
+    }
   },
 
   _addToNewApp() {

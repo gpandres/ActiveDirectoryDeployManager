@@ -27,6 +27,8 @@ const TRANSLATIONS_EN = {
     defaultGpoHint: "If specified, this GPO will be selected by default when creating new apps.",
     baseOu: "Base OU (Optional)",
     baseOuHint: "DN of the OU to limit AD searches (e.g. OU=Clients,DC=domain,DC=com).",
+    preferredDC: "Domain Controller (multi-DC)",
+    preferredDCHint: "Leave empty to auto-use the PDC emulator. In multi-DC environments, specify the primary DC to avoid replication issues.",
     saveAndContinue: "Save and Continue"
   },
   dashboard: {
@@ -142,6 +144,22 @@ const TRANSLATIONS_EN = {
     generatingGpo: "Building GPO:",
     gpoCreatedSuccess: "GPO '{gpo}' successfully created and linked",
     gpoWarningOnlyServer: "Warning: Files hosted on Server, but auto-GPO creation failed:",
+    gpoConflictTitle: "GPO already exists",
+    gpoConflictBody: "This GPO already exists in Active Directory. It was created by this program.",
+    gpoConflictQuestion: "What do you want to do?",
+    gpoConflictUpdate: "Update script",
+    gpoConflictReplace: "Delete and recreate",
+    gpoConflictSkipped: "GPO left unchanged.",
+    gpoConflictDeleting: "Deleting GPO",
+    gpoDeleteError: "Error deleting GPO:",
+    bulkDeleteTitle: "Delete applications",
+    bulkDeleteWarning: "You are about to permanently delete {count} application(s). This action cannot be undone.",
+    bulkDeleteCleanFiles: "Delete folder from network share",
+    bulkDeleteCleanFilesHint: "Removes install.ps1, version.json and installers from the share",
+    bulkDeleteCleanGpo: "Also delete linked GPOs from Active Directory",
+    bulkDeleteConfirm: "Delete {count} app(s)",
+    bulkDeleting: "Deleting {count} apps...",
+    bulkDeleteSuccess: "{count} app(s) deleted successfully.",
     scriptCopied: "Script copied to clipboard",
     copyBtn: "Copy",
     deployingLoader: "Deploying...",
@@ -236,7 +254,15 @@ const TRANSLATIONS_EN = {
     detailSectionHistory: "Version History",
     noGroup: "No group",
     groupByTemplate: "Group by template",
-    create: "Create"
+    create: "Create",
+    checkUpdates: "Check Updates",
+    checkingUpdates: "Checking for updates...",
+    noUpdatesFound: "All winget apps are up to date",
+    updatesFound: "{count} update(s) available",
+    updateToVersion: "Update to v{version}",
+    updateAll: "Update All",
+    updatingApp: "Updating...",
+    updateSuccess: "{name} updated to v{version}"
   },
   bundles: {
     title: "Bundles",
@@ -463,6 +489,8 @@ const TRANSLATIONS_EN = {
     defaultGpoHint: "Default GPO to pre-select when creating apps.",
     baseOu: "Base Search OU",
     baseOuHint: "Distinguished Name to restrict standard AD query scope.",
+    preferredDC: "Domain Controller (multi-DC)",
+    preferredDCHint: "Leave empty to auto-use the PDC emulator. Set to a DC hostname for multi-DC environments.",
     language: "Interface Language",
     languageHint: "Choose the language for the application UI.",
     exportImport: "Configuration Backup",
@@ -518,7 +546,11 @@ const TRANSLATIONS_EN = {
     cat_tools: "Tools",
     cat_connectivity: "Connectivity",
     cat_communication: "Communication",
-    cat_development: "Development"
+    cat_development: "Development",
+    updateApp: "Update",
+    updateAll: "Update All",
+    updatingApp: "Updating...",
+    noAppsToUpdate: "None of your apps need this update"
   }
 };
 
@@ -547,6 +579,8 @@ const TRANSLATIONS_ES = {
     defaultGpoHint: "Si se especifica, se pre-seleccionará al crear apps.",
     baseOu: "Unidad Organizativa (OU) Base",
     baseOuHint: "DN de la OU para limitar la carga (ej. OU=Clientes,DC=empresa,DC=com). Opcional.",
+    preferredDC: "Controlador de Dominio (multi-DC)",
+    preferredDCHint: "Deja vacío para usar automáticamente el PDC emulator. En entornos con varios DCs, especifica el DC principal para evitar problemas de replicación.",
     saveAndContinue: "Guardar y Continuar"
   },
   dashboard: {
@@ -662,6 +696,22 @@ const TRANSLATIONS_ES = {
     generatingGpo: "Construyendo GPO:",
     gpoCreatedSuccess: "GPO '{gpo}' creada e inyectada con éxito",
     gpoWarningOnlyServer: "Aviso: Archivos alojados en el Server, pero falló la auto-creación GPO:",
+    gpoConflictTitle: "GPO ya existe",
+    gpoConflictBody: "Esta GPO ya existe en Active Directory. Fue creada por este programa.",
+    gpoConflictQuestion: "¿Qué deseas hacer?",
+    gpoConflictUpdate: "Actualizar script",
+    gpoConflictReplace: "Eliminar y recrear",
+    gpoConflictSkipped: "GPO sin cambios.",
+    gpoConflictDeleting: "Eliminando GPO",
+    gpoDeleteError: "Error al eliminar GPO:",
+    bulkDeleteTitle: "Eliminar aplicaciones",
+    bulkDeleteWarning: "Estás a punto de eliminar permanentemente {count} aplicación(es). Esta acción no se puede deshacer.",
+    bulkDeleteCleanFiles: "Eliminar carpeta del share de red",
+    bulkDeleteCleanFilesHint: "Borra install.ps1, version.json e instaladores del share",
+    bulkDeleteCleanGpo: "Eliminar también las GPOs vinculadas en Active Directory",
+    bulkDeleteConfirm: "Eliminar {count} app(s)",
+    bulkDeleting: "Eliminando {count} apps...",
+    bulkDeleteSuccess: "{count} aplicación(es) eliminadas correctamente.",
     scriptCopied: "Script copiado al portapapeles",
     copyBtn: "Copiar",
     deployingLoader: "Desplegando...",
@@ -756,7 +806,15 @@ const TRANSLATIONS_ES = {
     detailSectionHistory: "Historial de Versiones",
     noGroup: "Sin grupo",
     groupByTemplate: "Agrupar por plantilla",
-    create: "Crear"
+    create: "Crear",
+    checkUpdates: "Comprobar Actualizaciones",
+    checkingUpdates: "Comprobando actualizaciones...",
+    noUpdatesFound: "Todas las apps winget están actualizadas",
+    updatesFound: "{count} actualización(es) disponible(s)",
+    updateToVersion: "Actualizar a v{version}",
+    updateAll: "Actualizar todas",
+    updatingApp: "Actualizando...",
+    updateSuccess: "{name} actualizada a v{version}"
   },
   bundles: {
     title: "Bundles",
@@ -990,6 +1048,8 @@ const TRANSLATIONS_ES = {
     defaultGpoHint: "GPO pre-seleccionada al crear nuevas aplicaciones.",
     baseOu: "OU Base de Búsqueda",
     baseOuHint: "Distinguished Name para acotar el inicio del árbol AD.",
+    preferredDC: "Controlador de Dominio (multi-DC)",
+    preferredDCHint: "Deja vacío para usar el PDC emulator automáticamente. Especifica el DC principal en entornos multi-DC.",
     language: "Idioma de la Interfaz",
     languageHint: "Elige el idioma general de la aplicación.",
     exportImport: "Respaldo y Restauración",
@@ -1045,7 +1105,11 @@ const TRANSLATIONS_ES = {
     cat_tools: "Herramientas",
     cat_connectivity: "Conectividad",
     cat_communication: "Comunicación",
-    cat_development: "Desarrollo"
+    cat_development: "Desarrollo",
+    updateApp: "Actualizar",
+    updateAll: "Actualizar todas",
+    updatingApp: "Actualizando...",
+    noAppsToUpdate: "Ninguna de tus apps necesita esta actualización"
   }
 };
 

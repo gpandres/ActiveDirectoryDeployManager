@@ -48,9 +48,9 @@ const SetupPage = {
         </div>
 
         <div class="form-group">
-          <label class="form-label">${t('setup.preferredDC') || 'Domain Controller (multi-DC)'}</label>
+          <label class="form-label">${t('setup.preferredDC')}</label>
           <input class="form-input" id="setup-dc" value="${this.esc(config.preferredDC || '')}" placeholder="dc1.empresa.local">
-          <p class="form-hint">${t('setup.preferredDCHint') || 'Deja vacío para usar automáticamente el PDC emulator. En entornos con varios DCs, especifica el DC principal para evitar problemas de replicación.'}</p>
+          <p class="form-hint">${t('setup.preferredDCHint')}</p>
         </div>
 
         <div class="form-group mb-md">

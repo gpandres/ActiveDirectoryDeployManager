@@ -218,10 +218,15 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
   const notifyBefore = '';
   const safeFilter = filter.replace(/\\/g, '\\\\');
   return [
+    '# ── Guardia $PSScriptRoot (puede estar vacío en GPO startup / PS4) ────────',
+    'if (-not $PSScriptRoot) { $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }',
+    'if (-not $PSScriptRoot) { $PSScriptRoot = $PWD.Path }',
+    '',
     '# ── Logging ────────────────────────────────────────────────────────────',
     '$LogDir = "C:\\ProgramData\\AppDeploy_Logs"',
     'if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }',
-    '$NombreApp = (Get-Item $PSScriptRoot).Name',
+    '# Split-Path es pura string — no necesita acceso de red (evita fallo si el share aún no responde)',
+    '$NombreApp = if ($PSScriptRoot) { Split-Path -Leaf $PSScriptRoot } else { "UnknownApp" }',
     '$LogFile   = "$LogDir\\Install_$($NombreApp)_$(Get-Date -Format \'yyyyMMdd_HHmmss\').log"',
     'Start-Transcript -Path $LogFile -Force -ErrorAction SilentlyContinue',
     '',
@@ -808,9 +813,14 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
     Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
 }
 
+# Guardia $PSScriptRoot (puede estar vacío en GPO startup / PS4)
+if (-not $PSScriptRoot) { $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
+if (-not $PSScriptRoot) { $PSScriptRoot = $PWD.Path }
+
 $LogDir = "C:\\ProgramData\\AppDeploy_Logs"
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
-$NombreApp = (Get-Item $PSScriptRoot).Name
+# Split-Path es pura string — no necesita acceso de red
+$NombreApp = if ($PSScriptRoot) { Split-Path -Leaf $PSScriptRoot } else { "UnknownApp" }
 $LogFile   = "$LogDir\\Install_$($NombreApp)_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 Start-Transcript -Path $LogFile -Force -ErrorAction SilentlyContinue
 
@@ -891,14 +901,24 @@ try { & $Winget source update --disable-interactivity 2>&1 | Out-Null } catch {}
 # ── Instalar ─────────────────────────────────────────────
 # Códigos de salida conocidos de winget:
 #   0            = éxito
-#   1618         = otra instalación en curso (reintentar después)
-#  -1978335212  = ya instalado en versión igual o superior (éxito)
-#  -1978335189  = ya instalado (otra variante, éxito)
-#   0x8A150109  = no se requiere actualización (éxito)
+#   1618         = otra instalación en curso (Windows Installer busy)
+#  -1978335212  = APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE (ya actualizado, éxito)
+#  -1978335189  = APPINSTALLER_CLI_ERROR_PACKAGE_ALREADY_INSTALLED (éxito)
+#  -1978335140  = APPINSTALLER_CLI_ERROR_NO_APPLICABLE_UPDATE (sin actualización, éxito)
+#  -1978335160  = APPINSTALLER_CLI_ERROR_NO_APPLICABLE_INSTALLER → reintentar sin --scope machine
+$WingetSuccess = @(0, 1618, -1978335212, -1978335189, -1978335140)
+$WingetNoScope = @(-1978335160, -1978335215, -1978335216)  # no machine-scope installer → retry sin scope
 try {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Ejecutando: winget install --id $wingetId --scope machine"
-    & $Winget install --id "$wingetId" --silent --accept-package-agreements --accept-source-agreements --scope machine
-    if ($LASTEXITCODE -notin @(0, 1618, -1978335212, -1978335189, -1978335140)) { throw "winget salio con codigo $LASTEXITCODE" }
+    & $Winget install --id "$wingetId" --silent --accept-package-agreements --accept-source-agreements --scope machine 2>&1 | Out-Null
+    $ec = $LASTEXITCODE
+    if ($ec -in $WingetNoScope) {
+        # El paquete no tiene instalador de ámbito máquina → reintentar sin --scope
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: --scope machine no soportado (codigo $ec). Reintentando sin --scope..."
+        & $Winget install --id "$wingetId" --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
+        $ec = $LASTEXITCODE
+    }
+    if ($ec -notin $WingetSuccess) { throw "winget salio con codigo $ec" }
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: $NombreApp instalado correctamente (v$CurrentVersion)"
 ${notifyAfter}
@@ -946,9 +966,13 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
     Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
 }
 
+# Guardia $PSScriptRoot (puede estar vacío en GPO startup / PS4)
+if (-not $PSScriptRoot) { $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
+if (-not $PSScriptRoot) { $PSScriptRoot = $PWD.Path }
+
 $LogDir = "C:\\ProgramData\\AppDeploy_Logs"
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
-$NombreApp = (Get-Item $PSScriptRoot).Name
+$NombreApp = if ($PSScriptRoot) { Split-Path -Leaf $PSScriptRoot } else { "UnknownApp" }
 $LogFile   = "$LogDir\\Install_$($NombreApp)_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 Start-Transcript -Path $LogFile -Force -ErrorAction SilentlyContinue
 
@@ -1002,25 +1026,47 @@ if ($OfficeInstalled -and $LastTracker -and $LastTracker.result -eq 'success' -a
 $OdtSetup = Join-Path $PSScriptRoot "setup.exe"
 
 if (-not (Test-Path $OdtSetup)) {
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Descargando Office Deployment Tool..."
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] setup.exe no encontrado en share. Descargando Office Deployment Tool..."
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] RECOMENDADO: coloca setup.exe del ODT en $PSScriptRoot para evitar esta descarga."
     $OdtTemp    = "$env:TEMP\\odt_installer_$(Get-Random).exe"
     $OdtExtract = "$env:TEMP\\odt_$(Get-Random)"
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        $wc = New-Object System.Net.WebClient
-        $wc.Headers.Add("User-Agent", "Mozilla/5.0")
-        # Intentar detectar la URL actual desde la página oficial de Microsoft
+        # Orden de intento:
+        # 1. FWLink oficial de Microsoft (siempre apunta a la versión más reciente)
+        # 2. HTML scraping de la página de descarga
+        # 3. URL de fallback conocida (puede quedar obsoleta)
         $OdtUrl = $null
+
+        # Intento 1 — FWLink oficial (el más fiable)
         try {
-            $page     = $wc.DownloadString("https://www.microsoft.com/en-us/download/confirmation.aspx?id=49117")
-            $urlMatch = [regex]::Match($page, 'https://download\\.microsoft\\.com/download/[^\\s"]+officedeploymenttool[^\\s"]+\\.exe')
-            if ($urlMatch.Success) { $OdtUrl = $urlMatch.Value }
+            $resp = Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2232433" \`
+                        -UseBasicParsing -MaximumRedirection 10 \`
+                        -UserAgent "Mozilla/5.0" -Method Head -ErrorAction Stop
+            if ($resp.StatusCode -eq 200) {
+                $OdtUrl = $resp.BaseResponse.ResponseUri.AbsoluteUri
+            }
         } catch {}
+
+        # Intento 2 — HTML scraping de la página oficial
+        if (-not $OdtUrl) {
+            try {
+                $page     = (Invoke-WebRequest -Uri "https://www.microsoft.com/en-us/download/confirmation.aspx?id=49117" \`
+                                -UseBasicParsing -UserAgent "Mozilla/5.0" -ErrorAction Stop).Content
+                $urlMatch = [regex]::Match($page, 'https://download\\.microsoft\\.com/download/[^"\\s]+officedeploymenttool[^"\\s]+\\.exe')
+                if ($urlMatch.Success) { $OdtUrl = $urlMatch.Value }
+            } catch {}
+        }
+
+        # Intento 3 — URL de fallback (versión conocida, puede quedar obsoleta)
         if (-not $OdtUrl) {
             $OdtUrl = "https://download.microsoft.com/download/2/7/A/27AF1BE6-DD20-4CB4-B154-EBAB8A7D4A7E/officedeploymenttool_17531-20046.exe"
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Usando URL de fallback del ODT"
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Usando URL de fallback del ODT (puede estar desactualizada)"
         }
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] URL: $OdtUrl"
+
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] URL ODT: $OdtUrl"
+        $wc = New-Object System.Net.WebClient
+        $wc.Headers.Add("User-Agent", "Mozilla/5.0")
         $wc.DownloadFile($OdtUrl, $OdtTemp)
         New-Item -ItemType Directory -Path $OdtExtract -Force | Out-Null
         Start-Process $OdtTemp -ArgumentList "/quiet /extract:\`"$OdtExtract\`"" -Wait -NoNewWindow
@@ -1028,6 +1074,7 @@ if (-not (Test-Path $OdtSetup)) {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ODT listo: $OdtSetup"
     } catch {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR descargando ODT: $_"
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] SOLUCION: Coloca setup.exe del ODT manualmente en $PSScriptRoot"
         Stop-Transcript -ErrorAction SilentlyContinue
         exit 1
     }

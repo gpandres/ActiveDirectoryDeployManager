@@ -132,6 +132,11 @@ app.whenReady().then(() => {
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
     return adService.deleteGPO(gpoName);
   });
+  ipcMain.handle('ad:checkGPOExists', (_, gpoName) => {
+    try { assertString(gpoName, 'gpoName'); }
+    catch (e) { return { exists: false }; }
+    return adService.checkGPOExists(gpoName);
+  });
   ipcMain.handle('ad:unlinkGPOfromOU', (_, gpoName, ouDN) => {
     try { assertString(gpoName, 'gpoName'); assertString(ouDN, 'ouDN'); }
     catch (e) { return { success: false, error: 'Invalid arguments' }; }

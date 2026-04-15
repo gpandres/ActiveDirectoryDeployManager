@@ -27,7 +27,8 @@ contextBridge.exposeInMainWorld('api', {
     deleteGPO: (gpoName) => ipcRenderer.invoke('ad:deleteGPO', gpoName),
     unlinkGPOfromOU: (gpoName, ouDN) => ipcRenderer.invoke('ad:unlinkGPOfromOU', gpoName, ouDN),
     removeGPOStartupScript: (gpoName) => ipcRenderer.invoke('ad:removeGPOStartupScript', gpoName),
-    checkGPOConflicts: (ouDN) => ipcRenderer.invoke('ad:checkGPOConflicts', ouDN)
+    checkGPOConflicts: (ouDN) => ipcRenderer.invoke('ad:checkGPOConflicts', ouDN),
+    checkGPOExists: (gpoName) => ipcRenderer.invoke('ad:checkGPOExists', gpoName)
   },
 
   // Apps

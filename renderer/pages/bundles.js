@@ -175,16 +175,13 @@ const BundlesPage = {
             <div class="bundle-card-name">${this.esc(bundle.name)}</div>
             <div class="bundle-card-desc">${this.esc(bundle.description || '')}</div>
           </div>
-          <div class="app-card-status">
-            <span class="app-status-dot ${statusClass}" title="${statusText}"></span>
-          </div>
         </div>
         <div class="app-card-badges">
           <span class="badge badge-info">v${this.esc(bundle.version)}</span>
           <span class="badge badge-primary">${bundle.apps.length} ${t('bundles.appsIncluded')}</span>
           ${bundle.gpoName ? `<span class="badge badge-info">${this.esc(bundle.gpoName)}</span>` : ''}
-          ${bundle.createGPO ? `<span class="badge badge-success">${t('bundles.autoGpo')}</span>` : ''}
-          ${bundle.notifyUser ? '<span class="badge badge-warning">🔔</span>' : ''}
+          ${bundle.createGPO ? `<span class="badge badge-info">${t('bundles.autoGpo')}</span>` : ''}
+          ${bundle.notifyUser ? '<span class="badge badge-info">🔔</span>' : ''}
         </div>
         <div class="bundle-card-apps">
           ${bundle.apps.map(a => `<span class="app-chip">${this.esc(a.name)}</span>`).join('')}

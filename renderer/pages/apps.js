@@ -11,6 +11,8 @@ const AppsPage = {
   _wizardOpening: false,
   _viewMode: 'grid', // 'grid' | 'list'
   _groupBy: 'none',  // 'none' | 'template'
+  _updateCheckResults: [],  // { appId, appName, wingetId, currentVersion, latestVersion }
+  _checkingUpdates: false,
 
   async render(container) {
     const apps = await window.api.apps.getAll();
@@ -30,10 +32,16 @@ const AppsPage = {
           </h1>
           <p class="page-subtitle">${t('apps.subtitle')}</p>
         </div>
-        <button class="btn btn-primary" id="btn-new-app">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          ${t('apps.newApp')}
-        </button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-secondary" id="btn-check-updates">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg>
+            ${t('apps.checkUpdates')}
+          </button>
+          <button class="btn btn-primary" id="btn-new-app">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            ${t('apps.newApp')}
+          </button>
+        </div>
       </div>
 
       <!-- Status Counters + Search + View Toggle -->
@@ -95,6 +103,9 @@ const AppsPage = {
         </div>
       </div>
 
+      <!-- Updates Panel -->
+      <div id="apps-updates-panel" style="display:none;margin-bottom:var(--space-md);"></div>
+
       <!-- Apps Grid -->
       <div class="app-grid ${this._viewMode === 'list' ? 'list-view' : ''}" id="apps-grid">
         ${apps.length === 0 ? `
@@ -114,6 +125,7 @@ const AppsPage = {
     this._currentFilter = 'all';
 
     document.getElementById('btn-new-app').addEventListener('click', () => this.openWizard());
+    document.getElementById('btn-check-updates')?.addEventListener('click', () => this.checkUpdates());
     document.getElementById('btn-bulk-gpo').addEventListener('click', () => this.bulkAssignGPO());
     document.getElementById('btn-bulk-delete')?.addEventListener('click', () => this.bulkDelete());
     document.getElementById('btn-bulk-disable')?.addEventListener('click', () => this.bulkDisable());
@@ -204,9 +216,6 @@ const AppsPage = {
           <div class="app-card-info">
             <div class="app-card-name">${this.esc(app.name)}</div>
             <div class="app-card-template">${this.esc(templateInfo.name)}</div>
-          </div>
-          <div class="app-card-status">
-            <span class="app-status-dot ${statusClass}" title="${statusText}"></span>
           </div>
         </div>
         <div class="app-card-badges">
@@ -416,7 +425,7 @@ const AppsPage = {
 
         <!-- Status badges -->
         <div style="display:flex; flex-wrap:wrap; gap:6px;">
-          <span class="badge badge-primary">${this.esc(app.installerType?.toUpperCase() || 'EXE')}</span>
+          <span class="badge badge-primary">${this.esc((app.installerType || 'exe').toUpperCase())}</span>
           <span class="badge badge-info">v${this.esc(app.version || '1.0.0')}</span>
           ${isDeployed ? `<span class="badge badge-success">${t('apps.deployedBadge')}</span>` : `<span class="badge badge-neutral">${t('apps.detailNotDeployed')}</span>`}
           ${app.gpoName ? `<span class="badge badge-info">${this.esc(app.gpoName)}</span>` : `<span class="badge badge-neutral">${t('apps.noGpoBadge')}</span>`}
@@ -427,8 +436,13 @@ const AppsPage = {
         <div class="card" style="padding:12px 16px; margin:0;">
           <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionGeneral')}</div>
           ${row(t('apps.detailTemplate'), this.esc(templateInfo.name))}
-          ${row(t('apps.detailInstallerType'), this.esc(app.installerType?.toUpperCase() || 'EXE'))}
-          ${row(t('apps.detailSilentArgs'), app.silentArgs ? '<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">' + this.esc(app.silentArgs) + '</code>' : '-')}
+          ${app.template === 'winget'
+            ? row('Winget ID', `<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">${this.esc(app.wingetId || '-')}</code>`)
+            : app.template === 'odt'
+              ? row('Producto ODT', `<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">${this.esc((app.odtConfig?.product || 'O365BusinessRetail') + ' · ' + (app.odtConfig?.channel || 'MonthlyEnterprise') + ' · ' + (app.odtConfig?.language || 'es-es'))}</code>`)
+              : row(t('apps.detailInstallerType'), this.esc((app.installerType || 'exe').toUpperCase()))
+          }
+          ${(app.template !== 'winget' && app.template !== 'odt') ? row(t('apps.detailSilentArgs'), app.silentArgs ? '<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">' + this.esc(app.silentArgs) + '</code>' : '-') : ''}
           ${row(t('apps.detailVersion'), this.esc(app.version || '1.0.0'))}
           ${row(t('apps.detailNotifyUser'), app.notifyUser ? '&#10003;' : '&#10007;')}
         </div>
@@ -436,7 +450,7 @@ const AppsPage = {
         <!-- Paths -->
         <div class="card" style="padding:12px 16px; margin:0;">
           <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionPaths')}</div>
-          ${row(t('apps.detailInstaller'), displayInstallerPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(displayInstallerPath) + '</span>' : '-')}
+          ${(app.template !== 'winget' && app.template !== 'odt') ? row(t('apps.detailInstaller'), displayInstallerPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(displayInstallerPath) + '</span>' : '-') : ''}
           ${app.configXmlPath ? row(t('apps.detailConfigXml'), '<span style="font-family:monospace; font-size:12px;">' + this.esc(app.configXmlPath) + '</span>') : ''}
           ${row(t('apps.detailDeployPath'), app.deployedPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(app.deployedPath) + '</span>' : '-')}
           ${app.lastDeployHash ? row(t('apps.detailHash'), '<span style="font-family:monospace; font-size:11px;">' + this.esc(app.lastDeployHash.substring(0, 16)) + '...</span>') : ''}
@@ -693,7 +707,9 @@ const AppsPage = {
       });
 
       // 2. Build updated app data
-      const newInstallerType = state.newInstallerPath.toLowerCase().endsWith('.msi') ? 'msi' : 'exe';
+      const newInstallerType = app.template === 'winget' ? 'winget'
+        : app.template === 'odt' ? 'odt'
+        : state.newInstallerPath.toLowerCase().endsWith('.msi') ? 'msi' : 'exe';
       const updatedData = {
         installerPath: state.newInstallerPath,
         installerType: newInstallerType,
@@ -732,6 +748,195 @@ const AppsPage = {
       App.navigate('apps');
     } catch (err) {
       App.toast('Error: ' + err.message, 'error');
+    }
+  },
+
+  // ─── Winget Update Check ────────────────────────────
+  async checkUpdates() {
+    const panel = document.getElementById('apps-updates-panel');
+    if (!panel) return;
+
+    panel.style.display = '';
+    this._checkingUpdates = true;
+    this._updateCheckResults = [];
+    panel.innerHTML = this._renderUpdatesPanelHTML();
+
+    try {
+      const apps = await window.api.apps.getAll();
+      const wingetApps = apps.filter(a => a.wingetId && a.template === 'winget');
+
+      if (wingetApps.length === 0) {
+        this._checkingUpdates = false;
+        this._updateCheckResults = [];
+        panel.innerHTML = this._renderUpdatesPanelHTML();
+        return;
+      }
+
+      // Check each winget app's latest version in parallel
+      const checks = await Promise.allSettled(
+        wingetApps.map(async (app) => {
+          const r = await window.api.catalog.checkSingle(app.wingetId);
+          return { app, latestVersion: r.latestVersion };
+        })
+      );
+
+      this._updateCheckResults = checks
+        .filter(c => c.status === 'fulfilled')
+        .map(c => c.value)
+        .filter(({ app, latestVersion }) => {
+          if (!latestVersion) return false;
+          // Only show if latest version is different from current
+          return latestVersion !== (app.version || '1.0.0');
+        })
+        .map(({ app, latestVersion }) => ({
+          appId: app.id,
+          appName: app.name,
+          wingetId: app.wingetId,
+          currentVersion: app.version || '1.0.0',
+          latestVersion
+        }));
+
+    } catch (err) {
+      this._updateCheckResults = [];
+    }
+
+    this._checkingUpdates = false;
+    panel.innerHTML = this._renderUpdatesPanelHTML();
+    this._bindUpdatesPanelEvents(panel);
+  },
+
+  _renderUpdatesPanelHTML() {
+    if (this._checkingUpdates) {
+      return `
+        <div class="card" style="padding:20px;display:flex;align-items:center;gap:12px;">
+          <span class="spinner" style="width:18px;height:18px;border-width:2px;display:inline-block;flex-shrink:0;"></span>
+          <span style="color:var(--text-secondary);font-size:var(--font-sm);">${t('apps.checkingUpdates')}</span>
+        </div>`;
+    }
+
+    const results = this._updateCheckResults;
+    if (results.length === 0) {
+      return `
+        <div class="card" style="padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-secondary)" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            <span style="font-size:var(--font-sm);color:var(--text-secondary);">${t('apps.noUpdatesFound')}</span>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('apps-updates-panel').style.display='none'">✕</button>
+        </div>`;
+    }
+
+    const rows = results.map((r, i) => `
+      <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--bg-input);border-radius:var(--radius-sm);">
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:600;color:var(--text-primary);font-size:var(--font-sm);">${this.esc(r.appName)}</div>
+          <div style="font-size:var(--font-xs);color:var(--text-muted);font-family:monospace;">${this.esc(r.wingetId)}</div>
+        </div>
+        <div style="font-size:var(--font-sm);white-space:nowrap;">
+          <span style="color:var(--text-muted);">v${this.esc(r.currentVersion)}</span>
+          <span style="color:var(--accent-primary);margin:0 6px;">→</span>
+          <span style="color:var(--accent-secondary);font-weight:600;">v${this.esc(r.latestVersion)}</span>
+        </div>
+        <button class="btn btn-primary btn-sm update-app-btn" data-idx="${i}" style="white-space:nowrap;min-width:90px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg>
+          ${t('apps.updateToVersion').replace('{version}', r.latestVersion)}
+        </button>
+      </div>
+    `).join('');
+
+    return `
+      <div class="card" style="padding:16px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg>
+          <span style="font-weight:600;font-size:var(--font-sm);">${t('apps.updatesFound').replace('{count}', results.length)}</span>
+          <div style="flex:1"></div>
+          ${results.length > 1 ? `<button class="btn btn-success btn-sm" id="btn-update-all-apps">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg>
+            ${t('apps.updateAll')}
+          </button>` : ''}
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('apps-updates-panel').style.display='none'" style="margin-left:4px;">✕</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          ${rows}
+        </div>
+      </div>`;
+  },
+
+  _bindUpdatesPanelEvents(panel) {
+    panel.querySelectorAll('.update-app-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.idx);
+        const r = this._updateCheckResults[idx];
+        if (r) this.performWingetAutoUpdate(r.appId, r.latestVersion, r.appName, btn);
+      });
+    });
+
+    document.getElementById('btn-update-all-apps')?.addEventListener('click', () => {
+      this.bulkWingetUpdate();
+    });
+  },
+
+  async performWingetAutoUpdate(appId, newVersion, appName, btnEl) {
+    if (btnEl) {
+      btnEl.disabled = true;
+      btnEl.innerHTML = `<span class="spinner" style="width:12px;height:12px;display:inline-block;border-width:2px;"></span> ${t('apps.updatingApp')}`;
+    }
+
+    try {
+      const app = await window.api.apps.get(appId);
+      if (!app) throw new Error('App not found');
+
+      const history = Array.isArray(app.versionHistory) ? [...app.versionHistory] : [];
+      history.push({
+        version: app.version || '1.0.0',
+        hash: app.lastDeployHash || '',
+        replacedAt: new Date().toISOString(),
+        replacedBy: 'auto-update'
+      });
+
+      const updatedData = { version: newVersion, versionHistory: history };
+      await window.api.apps.update(appId, updatedData);
+
+      const fullApp = { ...app, ...updatedData, id: appId };
+      const deployResult = await window.api.scripts.deploy(fullApp);
+
+      if (!deployResult.success) {
+        throw new Error(deployResult.error);
+      }
+
+      await window.api.apps.update(appId, { deployed: true, deployedPath: deployResult.path });
+      await window.api.activity.add('app_auto_update', { appName, newVersion });
+
+      App.toast(t('apps.updateSuccess').replace('{name}', appName).replace('{version}', newVersion), 'success');
+
+      // Remove from results list
+      this._updateCheckResults = this._updateCheckResults.filter(r => r.appId !== appId);
+      const panel = document.getElementById('apps-updates-panel');
+      if (panel) {
+        panel.innerHTML = this._renderUpdatesPanelHTML();
+        this._bindUpdatesPanelEvents(panel);
+      }
+    } catch (err) {
+      App.toast(`Error actualizando ${appName}: ${err.message}`, 'error');
+      if (btnEl) {
+        btnEl.disabled = false;
+        btnEl.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg> ${t('apps.updateToVersion').replace('{version}', this._updateCheckResults.find(r => r.appId === appId)?.latestVersion || '')}`;
+      }
+    }
+  },
+
+  async bulkWingetUpdate() {
+    const results = [...this._updateCheckResults];
+    if (results.length === 0) return;
+
+    const updateAllBtn = document.getElementById('btn-update-all-apps');
+    if (updateAllBtn) {
+      updateAllBtn.disabled = true;
+      updateAllBtn.innerHTML = `<span class="spinner" style="width:12px;height:12px;display:inline-block;border-width:2px;"></span> ${t('apps.updatingApp')}`;
+    }
+
+    for (const r of results) {
+      await this.performWingetAutoUpdate(r.appId, r.latestVersion, r.appName, null);
     }
   },
 
@@ -862,25 +1067,78 @@ const AppsPage = {
   async bulkDelete() {
     if (this.selectedIds.size === 0) return;
     const ids = Array.from(this.selectedIds);
-    
-    // Single prompt for AD cleanup
-    const adCleanup = confirm(t('apps.bulkDeletePrompt') || `¿Eliminar ${ids.length} apps?\n\n¿Quieres intentar limpiar también las GPOs y scripts de las apps seleccionadas en Active Directory si existen?`);
-    
-    App.toast(t('apps.bulkDeleting') || `Eliminando ${ids.length} apps...`, 'info');
-    
+
+    // Load app names for the list
+    const apps = await Promise.all(ids.map(id => window.api.apps.get(id)));
+    const validApps = apps.filter(Boolean);
+    const appsWithGPO = validApps.filter(a => a.gpoName);
+
+    // Build app list HTML
+    const listHtml = validApps.map(a => `
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-tertiary);border-radius:6px;">
+        <span style="font-size:18px;">${this.templateIcon(a.template)}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.esc(a.name)}</div>
+          ${a.gpoName ? `<div style="font-size:11px;color:var(--text-muted);">GPO: ${this.esc(a.gpoName)}</div>` : ''}
+        </div>
+      </div>`).join('');
+
+    const { confirmed, adCleanup, deleteFiles } = await new Promise(resolve => {
+      App.openModal(
+        t('apps.bulkDeleteTitle'),
+        `<div style="display:flex;flex-direction:column;gap:12px;">
+          <div style="padding:10px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;font-size:13px;color:var(--text-secondary);">
+            <strong style="color:var(--accent-danger);">⚠ ${t('apps.bulkDeleteWarning').replace('{count}', validApps.length)}</strong>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto;">
+            ${listHtml}
+          </div>
+          <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;background:var(--bg-secondary);border-radius:8px;cursor:pointer;border:1px solid var(--border-color);">
+            <input type="checkbox" id="_bulk-del-files" style="margin-top:2px;flex-shrink:0;" checked>
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${t('apps.bulkDeleteCleanFiles') || 'Eliminar carpeta del share de red'}</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${t('apps.bulkDeleteCleanFilesHint') || 'Borra install.ps1, version.json e instaladores del share'}</div>
+            </div>
+          </label>
+          ${appsWithGPO.length > 0 ? `
+          <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;background:var(--bg-secondary);border-radius:8px;cursor:pointer;border:1px solid var(--border-color);">
+            <input type="checkbox" id="_bulk-del-gpo" style="margin-top:2px;flex-shrink:0;" checked>
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${t('apps.bulkDeleteCleanGpo')}</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${appsWithGPO.map(a => this.esc(a.gpoName)).join(', ')}</div>
+            </div>
+          </label>` : ''}
+        </div>`,
+        `<div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button class="btn btn-secondary" id="_bulk-del-cancel">${t('common.cancel')}</button>
+          <button class="btn btn-danger" id="_bulk-del-confirm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            ${t('apps.bulkDeleteConfirm').replace('{count}', validApps.length)}
+          </button>
+        </div>`
+      );
+      document.getElementById('_bulk-del-cancel').onclick  = () => { App.closeModal(); resolve({ confirmed: false }); };
+      document.getElementById('_bulk-del-confirm').onclick = () => {
+        const cbGpo   = document.getElementById('_bulk-del-gpo');
+        const cbFiles = document.getElementById('_bulk-del-files');
+        App.closeModal();
+        resolve({ confirmed: true, adCleanup: cbGpo ? cbGpo.checked : false, deleteFiles: cbFiles ? cbFiles.checked : true });
+      };
+    });
+
+    if (!confirmed) return;
+
+    App.toast(t('apps.bulkDeleting').replace('{count}', validApps.length), 'info');
     try {
       let successCount = 0;
-      for (const id of ids) {
-        const app = await window.api.apps.get(id);
-        if (!app) continue;
-        
+      for (const app of validApps) {
         if (adCleanup && app.gpoName) {
           try { await window.api.ad.deleteGPO(app.gpoName); } catch (e) { console.warn('GPO cleanup failed for', app.gpoName); }
         }
-        await window.api.apps.delete(id);
+        await window.api.apps.delete(app.id, deleteFiles);
         successCount++;
       }
-      App.toast(t('apps.bulkDeleteSuccess') || `Se eliminaron ${successCount} apps.`, 'success');
+      App.toast(t('apps.bulkDeleteSuccess').replace('{count}', successCount), 'success');
       this.clearSelection();
       App.navigate('apps');
     } catch (err) {
@@ -2024,7 +2282,9 @@ const AppsPage = {
       return match ? match[1] : dn;
     };
 
-    const installerType = (state.installerPath && state.installerPath.toLowerCase().endsWith('.msi')) ? 'MSI' : 'EXE';
+    const installerType = state.template === 'winget' ? 'WINGET'
+      : state.template === 'odt' ? 'ODT'
+      : (state.installerPath && state.installerPath.toLowerCase().endsWith('.msi')) ? 'MSI' : 'EXE';
     const gpoDisplay = state.createGPO
       ? `<span style="color:var(--primary-color);">✨ ${t('apps.confirmAutoGpo')}: Deploy_${this.esc(state.name.trim().replace(/\s/g, '_'))}</span>`
       : (state.gpoName ? this.esc(state.gpoName) : `<span style="color:var(--text-muted);">${t('apps.confirmNoGpo')}</span>`);
@@ -2058,8 +2318,13 @@ const AppsPage = {
         <div class="card" style="padding:12px 16px; margin:0;">
           <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionGeneral')}</div>
           ${row(t('apps.detailTemplate'), this.esc(templateInfo.name))}
-          ${row(t('apps.detailInstallerType'), installerType)}
-          ${row(t('apps.detailSilentArgs'), state.silentArgs ? '<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">' + this.esc(state.silentArgs) + '</code>' : '-')}
+          ${state.template === 'winget'
+            ? row('Winget ID', `<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">${this.esc(state.wingetId || '-')}</code>`)
+            : state.template === 'odt'
+              ? row('Producto ODT', `<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">${this.esc((state.odtConfig?.product || 'O365BusinessRetail') + ' · ' + (state.odtConfig?.channel || 'MonthlyEnterprise'))}</code>`)
+              : row(t('apps.detailInstallerType'), installerType)
+          }
+          ${(state.template !== 'winget' && state.template !== 'odt') ? row(t('apps.detailSilentArgs'), state.silentArgs ? '<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">' + this.esc(state.silentArgs) + '</code>' : '-') : ''}
           ${row(t('apps.detailVersion'), this.esc(state.version || '1.0.0'))}
           ${row(t('apps.detailNotifyUser'), state.notifyUser ? '&#10003;' : '&#10007;')}
         </div>
@@ -2127,7 +2392,7 @@ const AppsPage = {
       const appData = {
         name: state.name.trim(),
         template: state.template,
-        installerType: (state.installerPath && state.installerPath.toLowerCase().endsWith('.msi')) ? 'msi' : 'exe',
+        installerType: state.template === 'winget' ? 'winget' : state.template === 'odt' ? 'odt' : (state.installerPath && state.installerPath.toLowerCase().endsWith('.msi')) ? 'msi' : 'exe',
         silentArgs: state.silentArgs,
         installerPath: state.installerPath,
         configXmlPath: state.configXmlPath,
@@ -2183,16 +2448,7 @@ const AppsPage = {
         // Create GPO automatically if chosen
         if (state.createGPO) {
           const newGpoName = `Deploy_${state.name.replace(/\s/g, "_")}`;
-          App.toast(`${t('apps.generatingGpo')} ${newGpoName}...`, 'info');
-          const gpoResult = await window.api.ad.createGPO(newGpoName, deployResult.path, state.ouDN);
-          
-          if (gpoResult.success) {
-            await window.api.apps.update(app.id, { gpoName: newGpoName });
-            App.toast(t('apps.gpoCreatedSuccess').replace('{gpo}', newGpoName), 'success');
-            this.gposCache = null; // Invalidate cache
-          } else {
-            App.toast(`${t('apps.gpoWarningOnlyServer')} ${gpoResult.error}`, 'warning');
-          }
+          await this._handleAutoGPO(newGpoName, deployResult.path, state.ouDN, app.id);
         }
       } else {
         App.toast(`${t('apps.appSavedDeployError')} ${deployResult.error}`, 'error');
@@ -2210,6 +2466,68 @@ const AppsPage = {
     if (preview) {
       navigator.clipboard.writeText(preview.textContent);
       App.toast(t('apps.scriptCopied'), 'success');
+    }
+  },
+
+  // ─── GPO conflict handler ──────────────────────────
+  // Called when "Create GPO automatically" is checked. If the GPO name already
+  // exists in AD (and follows the program's naming convention), asks the user
+  // what to do before proceeding.
+  async _handleAutoGPO(gpoName, scriptPath, ouDN, appId) {
+    const isOwnGPO = /^(Deploy_|ADDM_)/.test(gpoName);
+
+    // Check existence only for GPOs the program creates
+    if (isOwnGPO && App.rsatAvailable) {
+      let existsResult = { exists: false };
+      try { existsResult = await window.api.ad.checkGPOExists(gpoName); } catch (e) {}
+
+      if (existsResult.exists) {
+        const choice = await new Promise(resolve => {
+          App.openModal(
+            t('apps.gpoConflictTitle') || 'GPO ya existe',
+            `<div style="display:flex;flex-direction:column;gap:12px;">
+              <div style="padding:12px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;font-size:13px;color:var(--text-secondary);">
+                <strong style="color:var(--accent-warning);">⚠ ${this.esc(gpoName)}</strong><br>
+                ${t('apps.gpoConflictBody') || 'Esta GPO ya existe en Active Directory. Fue creada por este programa.'}
+              </div>
+              <p style="font-size:13px;color:var(--text-muted);margin:0;">${t('apps.gpoConflictQuestion') || '¿Qué deseas hacer?'}</p>
+            </div>`,
+            `<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
+              <button class="btn btn-secondary" id="_gpo-conflict-cancel">${t('common.cancel')}</button>
+              <button class="btn btn-secondary" id="_gpo-conflict-update">${t('apps.gpoConflictUpdate') || 'Actualizar script'}</button>
+              <button class="btn btn-danger" id="_gpo-conflict-replace">${t('apps.gpoConflictReplace') || 'Eliminar y recrear'}</button>
+            </div>`
+          );
+          const pick = (val) => { App.closeModal(); resolve(val); };
+          document.getElementById('_gpo-conflict-cancel').onclick  = () => pick('cancel');
+          document.getElementById('_gpo-conflict-update').onclick  = () => pick('update');
+          document.getElementById('_gpo-conflict-replace').onclick = () => pick('replace');
+        });
+
+        if (choice === 'cancel') {
+          App.toast(t('apps.gpoConflictSkipped') || 'GPO sin cambios.', 'info');
+          return;
+        }
+        if (choice === 'replace') {
+          App.toast(`${t('apps.gpoConflictDeleting') || 'Eliminando GPO'} ${gpoName}...`, 'info');
+          const delResult = await window.api.ad.deleteGPO(gpoName);
+          if (!delResult.success) {
+            App.toast(`${t('apps.gpoDeleteError') || 'Error al eliminar GPO:'} ${delResult.error}`, 'error');
+            return;
+          }
+        }
+        // 'update' or post-'replace' → fall through to createGPO
+      }
+    }
+
+    App.toast(`${t('apps.generatingGpo')} ${gpoName}...`, 'info');
+    const gpoResult = await window.api.ad.createGPO(gpoName, scriptPath, ouDN);
+    if (gpoResult.success) {
+      await window.api.apps.update(appId, { gpoName });
+      App.toast(t('apps.gpoCreatedSuccess').replace('{gpo}', gpoName), 'success');
+      this.gposCache = null;
+    } else {
+      App.toast(`${t('apps.gpoWarningOnlyServer')} ${gpoResult.error}`, 'warning');
     }
   },
 

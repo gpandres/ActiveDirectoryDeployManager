@@ -60,6 +60,12 @@ const SettingsPage = {
           <p class="form-hint">${t('settings.defaultGpoHint')}</p>
         </div>
 
+        <div class="form-group">
+          <label class="form-label">${t('settings.preferredDC')}</label>
+          <input class="form-input" id="cfg-preferred-dc" value="${this.esc(config.preferredDC || '')}" placeholder="dc1.empresa.local">
+          <p class="form-hint">${t('settings.preferredDCHint')}</p>
+        </div>
+
         <div class="form-group mb-md">
           <label class="form-label">${t('settings.baseOu')}</label>
           <div style="position:relative;margin-bottom:8px;">
@@ -254,6 +260,7 @@ const SettingsPage = {
       networkSharePath: document.getElementById('cfg-share-path').value.trim(),
       logDirectory: document.getElementById('cfg-log-dir').value.trim(),
       defaultGPO: document.getElementById('cfg-default-gpo').value,
+      preferredDC: document.getElementById('cfg-preferred-dc').value.trim(),
       baseOU: document.getElementById('cfg-base-ou').value.trim(),
       language: document.getElementById('cfg-language').value
     };
