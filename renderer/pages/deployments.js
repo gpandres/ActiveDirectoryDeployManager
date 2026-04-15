@@ -117,10 +117,19 @@ const DeploymentsPage = {
                         : '<span class="text-muted">—</span>'}
                     </td>
                     <td>
-                      <span class="status-dot ${app.status}"></span>
-                      ${app.status === 'ready' ? t('deployments.ready') : app.status === 'missing-installer' ? t('deployments.missingInstaller') : t('deployments.missingScript')}
+                      ${(() => {
+                        const isNoInstaller = configuredApp?.template === 'winget' || configuredApp?.template === 'odt';
+                        const effectiveStatus = (app.status === 'missing-installer' && isNoInstaller) ? 'ready' : app.status;
+                        const label = effectiveStatus === 'ready' ? t('deployments.ready') : effectiveStatus === 'missing-installer' ? t('deployments.missingInstaller') : t('deployments.missingScript');
+                        return `<span class="status-dot ${effectiveStatus}"></span>${label}`;
+                      })()}
                     </td>
-                    <td>${gpoName ? `<span class="badge badge-info">${this.esc(gpoName)}</span>` : '<span class="text-muted">—</span>'}</td>
+                    <td>${gpoName
+                      ? `<span class="badge badge-info">${this.esc(gpoName)}</span>`
+                      : configuredApp
+                        ? `<span class="badge badge-warning" title="App configurada sin GPO asignada">⚠ Sin GPO</span>`
+                        : '<span class="text-muted" style="font-size:11px;">No configurada</span>'
+                    }</td>
                     <td>${app.files.length}</td>
                     <td class="text-muted">${App.formatDate(latestMod)}</td>
                     <td style="text-align:right;">

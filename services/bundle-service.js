@@ -45,6 +45,22 @@ function generateId() {
   return 'b_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 }
 
+function normalizeDNArray(value) {
+  const raw = Array.isArray(value)
+    ? value
+    : (typeof value === 'string' && value.trim() ? [value.trim()] : []);
+  const seen = new Set();
+  return raw
+    .filter(item => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .filter(item => {
+      if (seen.has(item)) return false;
+      seen.add(item);
+      return true;
+    });
+}
+
 const bundleService = {
   getAll() {
     return loadBundles();
@@ -57,6 +73,7 @@ const bundleService = {
 
   create(data) {
     const bundles = loadBundles();
+    const ouDNs = normalizeDNArray(data.ouDNs || data.ouDN);
     const newBundle = {
       id: generateId(),
       name: data.name || 'Nuevo Bundle',
@@ -65,7 +82,8 @@ const bundleService = {
       notifyUser: data.notifyUser || false,
       gpoName: data.gpoName || '',
       createGPO: data.createGPO || false,
-      ouDN: data.ouDN || '',
+      ouDN: ouDNs[0] || '',
+      ouDNs,
       version: data.version || '1.0.0',
       deployed: false,
       deployedPath: '',
@@ -81,7 +99,10 @@ const bundleService = {
     const bundles = loadBundles();
     const idx = bundles.findIndex(b => b.id === id);
     if (idx === -1) return null;
-    bundles[idx] = { ...bundles[idx], ...data, updatedAt: new Date().toISOString() };
+    const ouDNs = normalizeDNArray(
+      data.ouDNs !== undefined ? data.ouDNs : (data.ouDN !== undefined ? data.ouDN : bundles[idx].ouDNs || bundles[idx].ouDN)
+    );
+    bundles[idx] = { ...bundles[idx], ...data, ouDN: ouDNs[0] || '', ouDNs, updatedAt: new Date().toISOString() };
     saveBundles(bundles);
     return bundles[idx];
   },

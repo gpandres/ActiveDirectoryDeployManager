@@ -47,6 +47,12 @@ const fileService = {
             return null;
           }
 
+          const isNoInstallerApp = manifest?.template === 'winget' || manifest?.template === 'odt'
+            || (manifest && manifest.hash === '' && hasScript);
+          const status = hasScript && (hasInstaller || isNoInstallerApp) ? 'ready'
+            : hasScript ? 'missing-installer'
+            : 'missing-script';
+
           return {
             name: dir.name,
             path: dirPath,
@@ -55,11 +61,12 @@ const fileService = {
             hasInstaller,
             version: manifest?.version || null,
             hash: manifest?.hash || null,
+            template: manifest?.template || null,
             deployedAt: manifest?.deployedAt || null,
             shareId: manifest?.shareId || null,
-            status: hasScript && hasInstaller ? 'ready' : hasScript ? 'missing-installer' : 'missing-script'
+            status
           };
-        }).filter(Boolean);
+        }).filter(app => app && app.hasScript);
 
       return { success: true, data: apps };
     } catch (err) {

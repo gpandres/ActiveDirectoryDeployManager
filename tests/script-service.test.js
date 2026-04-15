@@ -108,6 +108,25 @@ describe('generateScript — winget template', () => {
     }));
     expect(script).toContain('8.6.0');
   });
+
+  it('creates a hidden interactive user task that self-cleans when the app is already installed', () => {
+    const script = svc.generateScript(base({
+      template: 'winget',
+      wingetId: 'Spotify.Spotify'
+    }));
+    expect(script).toContain('NT AUTHORITY\\INTERACTIVE');
+    expect(script).toContain('-LogonType Interactive');
+    expect(script).toContain('LOCALAPPDATA');
+    expect(script).toContain('wscript.exe');
+    expect(script).toContain('Test-WingetPackageInstalled');
+    expect(script).toContain('list --id "$PackageId" --exact');
+    expect(script).toContain('Complete-UserWingetTask');
+    expect(script).toContain('Unregister-ScheduledTask');
+    expect(script).toContain('Clear-UserWingetArtifacts');
+    expect(script).toContain('WingetUserInstall_');
+    expect(script).toContain('Register-ScheduledTask');
+    expect(script).toContain('-ErrorAction Stop');
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

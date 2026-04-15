@@ -185,6 +185,7 @@ const scriptService = {
         app: appConfig.name,
         version: appConfig.version || '1.0.0',
         hash: installerHash,
+        template: appConfig.template || 'generic',
         notifyUser: appConfig.notifyUser || false,
         deployedAt: new Date().toISOString(),
         shareId: cfgForManifest.shareId || ''
@@ -225,6 +226,9 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
     '# ── Logging ────────────────────────────────────────────────────────────',
     '$LogDir = "C:\\ProgramData\\AppDeploy_Logs"',
     'if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }',
+    '# ── Limpieza de logs antiguos (>7 días) ─────────────────────────────────',
+    'Get-ChildItem "$LogDir\\*.log" -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item -Force -ErrorAction SilentlyContinue',
+    '',
     '# Split-Path es pura string — no necesita acceso de red (evita fallo si el share aún no responde)',
     '$NombreApp = if ($PSScriptRoot) { Split-Path -Leaf $PSScriptRoot } else { "UnknownApp" }',
     '$LogFile   = "$LogDir\\Install_$($NombreApp)_$(Get-Date -Format \'yyyyMMdd_HHmmss\').log"',
@@ -819,6 +823,7 @@ if (-not $PSScriptRoot) { $PSScriptRoot = $PWD.Path }
 
 $LogDir = "C:\\ProgramData\\AppDeploy_Logs"
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+Get-ChildItem "$LogDir\\*.log" -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item -Force -ErrorAction SilentlyContinue
 # Split-Path es pura string — no necesita acceso de red
 $NombreApp = if ($PSScriptRoot) { Split-Path -Leaf $PSScriptRoot } else { "UnknownApp" }
 $LogFile   = "$LogDir\\Install_$($NombreApp)_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
@@ -831,6 +836,25 @@ Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Usuario : $env:USERNAME"
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ====================================================="
 
 $TrackerFile = "$LogDir\\Tracker_$NombreApp.json"
+$UserTaskName = "ADDM_Install_$NombreApp"
+$UserTaskPs1  = Join-Path $LogDir ("WingetUserInstall_" + $NombreApp + ".ps1")
+$UserTaskVbs  = Join-Path $LogDir ("WingetUserInstall_" + $NombreApp + ".vbs")
+
+function Clear-UserWingetArtifacts {
+    param(
+        [switch]$Quiet
+    )
+
+    try { Unregister-ScheduledTask -TaskName $UserTaskName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
+    foreach ($artifact in @($UserTaskPs1, $UserTaskVbs)) {
+        try {
+            if (Test-Path $artifact) { Remove-Item -Path $artifact -Force -ErrorAction SilentlyContinue }
+        } catch {}
+    }
+    if (-not $Quiet) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] INFO: Artefactos user-scope limpiados para $NombreApp"
+    }
+}
 
 # ── Leer version desde manifiesto de red ─────────────────
 $CurrentVersion = "$version"
@@ -844,8 +868,9 @@ Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Version : $CurrentVersion"
 if (Test-Path $TrackerFile) {
     try {
         $t = Get-Content $TrackerFile -Raw | ConvertFrom-Json
-        if ($t.version -eq $CurrentVersion -and $t.result -eq 'success') {
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Ya instalado (v$CurrentVersion)"
+        if ($t.version -eq $CurrentVersion -and $t.result -in @('success', 'scheduled')) {
+            if ($t.result -eq 'success') { Clear-UserWingetArtifacts -Quiet }
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Ya instalado/programado (v$CurrentVersion, estado: $($t.result))"
             Stop-Transcript -ErrorAction SilentlyContinue
             exit 0
         }
@@ -908,19 +933,139 @@ try { & $Winget source update --disable-interactivity 2>&1 | Out-Null } catch {}
 #  -1978335160  = APPINSTALLER_CLI_ERROR_NO_APPLICABLE_INSTALLER → reintentar sin --scope machine
 $WingetSuccess = @(0, 1618, -1978335212, -1978335189, -1978335140)
 $WingetNoScope = @(-1978335160, -1978335215, -1978335216)  # no machine-scope installer → retry sin scope
+$WingetUserOnly = @(-1978335146, -1978335215, -1978335216) # app solo usuario → instalar via tarea programada
 try {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Ejecutando: winget install --id $wingetId --scope machine"
     & $Winget install --id "$wingetId" --silent --accept-package-agreements --accept-source-agreements --scope machine 2>&1 | Out-Null
     $ec = $LASTEXITCODE
     if ($ec -in $WingetNoScope) {
-        # El paquete no tiene instalador de ámbito máquina → reintentar sin --scope
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: --scope machine no soportado (codigo $ec). Reintentando sin --scope..."
         & $Winget install --id "$wingetId" --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
         $ec = $LASTEXITCODE
     }
-    if ($ec -notin $WingetSuccess) { throw "winget salio con codigo $ec" }
+    if ($ec -notin $WingetSuccess) {
+        # Último intento: --scope user (apps solo usuario)
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Reintentando con --scope user (app solo usuario, codigo $ec)..."
+        & $Winget install --id "$wingetId" --silent --accept-package-agreements --accept-source-agreements --scope user 2>&1 | Out-Null
+        $ec = $LASTEXITCODE
+    }
+    if ($ec -notin $WingetSuccess) {
+        # App solo usuario que no puede instalarse en contexto SYSTEM → programar tarea de usuario
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: App de usuario ($wingetId). Creando tarea programada para instalacion en proximo inicio de sesion..."
+        $taskName = $UserTaskName
+        try {
+            Clear-UserWingetArtifacts -Quiet
+            $userInstallPs1 = $UserTaskPs1
+            $userInstallVbs = $UserTaskVbs
+            $userInstallScript = @'
+$taskName = '__TASKNAME__'
+$wingetId = '__WINGET_ID__'
+$trackerFile = '__TRACKER_FILE__'
+$currentVersion = '__CURRENT_VERSION__'
+$helperPs1 = '__HELPER_PS1__'
+$helperVbs = '__HELPER_VBS__'
+$appName = '__APP_NAME__'
+$successCodes = @(0, 1618, -1978335212, -1978335189, -1978335140)
+
+function Complete-UserWingetTask {
+    param(
+        [string]$Method = 'winget-usertask'
+    )
+
+    try {
+        @{
+            version = $currentVersion
+            installedAt = (Get-Date).ToString('o')
+            computer = $env:COMPUTERNAME
+            user = $env:USERNAME
+            result = 'success'
+            method = $Method
+            wingetId = $wingetId
+        } | ConvertTo-Json | Set-Content -Path $trackerFile -Force -Encoding UTF8
+    } catch {}
+
+    try { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
+    foreach ($file in @($helperPs1, $helperVbs)) {
+        try { Remove-Item -Path $file -Force -ErrorAction SilentlyContinue } catch {}
+    }
+    exit 0
+}
+
+function Test-WingetPackageInstalled {
+    param(
+        [string]$WingetPath,
+        [string]$PackageId
+    )
+
+    try {
+        $output = & $WingetPath list --id "$PackageId" --exact --accept-source-agreements --disable-interactivity 2>&1 | Out-String
+        return ($LASTEXITCODE -eq 0 -and $output -match [regex]::Escape($PackageId))
+    } catch {
+        return $false
+    }
+}
+
+$WingetUser = (Get-Command winget.exe -ErrorAction SilentlyContinue).Source
+if (-not $WingetUser -or -not (Test-Path $WingetUser)) {
+    $candidate = Join-Path $env:LOCALAPPDATA 'Microsoft\\WindowsApps\\winget.exe'
+    if (Test-Path $candidate) { $WingetUser = $candidate }
+}
+if (-not $WingetUser) {
+    $candidate = "$env:SystemRoot\\System32\\winget.exe"
+    if (Test-Path $candidate) { $WingetUser = $candidate }
+}
+if (-not $WingetUser) { exit 1 }
+
+if (Test-WingetPackageInstalled -WingetPath $WingetUser -PackageId $wingetId) {
+    Complete-UserWingetTask -Method 'winget-usertask-detected'
+}
+
+& $WingetUser install --id "$wingetId" --silent --accept-package-agreements --accept-source-agreements --scope user 2>&1 | Out-Null
+$ec = $LASTEXITCODE
+if ($ec -in $successCodes -or (Test-WingetPackageInstalled -WingetPath $WingetUser -PackageId $wingetId)) {
+    Complete-UserWingetTask
+}
+exit $ec
+'@
+            $userInstallScript = $userInstallScript.Replace('__TASKNAME__', $taskName)
+            $userInstallScript = $userInstallScript.Replace('__WINGET_ID__', $wingetId)
+            $userInstallScript = $userInstallScript.Replace('__TRACKER_FILE__', $TrackerFile)
+            $userInstallScript = $userInstallScript.Replace('__CURRENT_VERSION__', $CurrentVersion)
+            $userInstallScript = $userInstallScript.Replace('__HELPER_PS1__', $userInstallPs1)
+            $userInstallScript = $userInstallScript.Replace('__HELPER_VBS__', $userInstallVbs)
+            $userInstallScript = $userInstallScript.Replace('__APP_NAME__', $NombreApp)
+            Set-Content -Path $userInstallPs1 -Value $userInstallScript -Encoding UTF8 -Force
+
+            $userInstallVbsContent = @'
+Dim shell
+Set shell = CreateObject("WScript.Shell")
+shell.Run "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""__HELPER_PS1__""", 0, False
+'@
+            $userInstallVbsContent = $userInstallVbsContent.Replace('__HELPER_PS1__', $userInstallPs1)
+            Set-Content -Path $userInstallVbs -Value $userInstallVbsContent -Encoding ASCII -Force
+
+            $action   = New-ScheduledTaskAction -Execute "wscript.exe" \`
+                          -Argument "//B //NoLogo \`"$userInstallVbs\`""
+            $trigger  = New-ScheduledTaskTrigger -AtLogOn
+            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries \`
+                          -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -StartWhenAvailable
+            # Ejecutar como usuario interactivo que inicie sesion; evita depender de GroupId/idioma del SO
+            $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\\INTERACTIVE" -LogonType Interactive -RunLevel Limited
+            Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger \`
+                -Settings $settings -Principal $principal \`
+                -Description "Instalacion de $NombreApp vía AD Deploy Manager" -Force -ErrorAction Stop | Out-Null
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: Tarea programada '$taskName' creada - se instalara en el proximo inicio de sesion del usuario"
+            @{ version = $CurrentVersion; scheduledAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'scheduled'; method = 'winget-usertask'; wingetId = "$wingetId" } |
+                ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+            Stop-Transcript -ErrorAction SilentlyContinue
+            exit 0
+        } catch {
+            throw "No se pudo crear la tarea programada '$taskName': $($_.Exception.Message)"
+        }
+    }
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: $NombreApp instalado correctamente (v$CurrentVersion)"
+    Clear-UserWingetArtifacts -Quiet
 ${notifyAfter}
     @{ version = $CurrentVersion; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success'; method = 'winget'; wingetId = "$wingetId" } |
         ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
@@ -951,9 +1096,17 @@ function generateODT(cfg) {
   const notifyBefore = notify ? `Send-UserToast -ToastTitle "${ToastTitleProcess}" -ToastMessage "${ToastMsgProcess}" -IconType "Warning"` : '';
   const notifyAfter  = notify ? `    Send-UserToast -ToastTitle "${ToastTitleDone}" -ToastMessage "${ToastMsgDone}" -IconType "Information"` : '';
 
-  // Always exclude Groove (OneDrive Music) and Lync (old Skype for Business)
+  // All known ODT apps that can be excluded
+  const ALL_ODT_APPS = ['Access', 'Excel', 'Groove', 'InfoPath', 'Lync', 'OneNote', 'OneDrive', 'Outlook', 'PowerPoint', 'Publisher', 'SharePointDesigner', 'Teams', 'Word'];
   const alwaysExclude = ['Groove', 'Lync'];
-  const allExcluded   = [...new Set([...alwaysExclude, ...(odtConfig.excludeApps || [])])];
+
+  // If user selected specific apps, exclude everything else
+  let userExclude = odtConfig.excludeApps || [];
+  if (Array.isArray(odtConfig.apps) && odtConfig.apps.length > 0) {
+    // apps contains the IDs to INCLUDE; exclude everything not in the list
+    userExclude = ALL_ODT_APPS.filter(a => !odtConfig.apps.includes(a));
+  }
+  const allExcluded   = [...new Set([...alwaysExclude, ...userExclude])];
   const excludeLines  = allExcluded.map(a => `      <ExcludeApp ID="${a}" />`).join('\n');
 
   return `# =========================================================================
@@ -972,6 +1125,7 @@ if (-not $PSScriptRoot) { $PSScriptRoot = $PWD.Path }
 
 $LogDir = "C:\\ProgramData\\AppDeploy_Logs"
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+Get-ChildItem "$LogDir\\*.log" -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item -Force -ErrorAction SilentlyContinue
 $NombreApp = if ($PSScriptRoot) { Split-Path -Leaf $PSScriptRoot } else { "UnknownApp" }
 $LogFile   = "$LogDir\\Install_$($NombreApp)_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 Start-Transcript -Path $LogFile -Force -ErrorAction SilentlyContinue
@@ -1030,60 +1184,47 @@ if (-not (Test-Path $OdtSetup)) {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] RECOMENDADO: coloca setup.exe del ODT en $PSScriptRoot para evitar esta descarga."
     $OdtTemp    = "$env:TEMP\\odt_installer_$(Get-Random).exe"
     $OdtExtract = "$env:TEMP\\odt_$(Get-Random)"
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        # Orden de intento:
-        # 1. FWLink oficial de Microsoft (siempre apunta a la versión más reciente)
-        # 2. HTML scraping de la página de descarga
-        # 3. URL de fallback conocida (puede quedar obsoleta)
-        $OdtUrl = $null
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-        # Intento 1 — FWLink oficial (el más fiable)
+    # ── Intento 1: FWLink oficial (descarga directa sin HEAD) ──
+    if (-not (Test-Path $OdtSetup -ErrorAction SilentlyContinue)) {
         try {
-            $resp = Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2232433" \`
-                        -UseBasicParsing -MaximumRedirection 10 \`
-                        -UserAgent "Mozilla/5.0" -Method Head -ErrorAction Stop
-            if ($resp.StatusCode -eq 200) {
-                $OdtUrl = $resp.BaseResponse.ResponseUri.AbsoluteUri
+            $wc1 = New-Object System.Net.WebClient
+            $wc1.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+            $wc1.DownloadFile("https://go.microsoft.com/fwlink/?linkid=2232433", $OdtTemp)
+            if ((Get-Item $OdtTemp -ErrorAction SilentlyContinue).Length -gt 512KB) {
+                New-Item -ItemType Directory -Path $OdtExtract -Force | Out-Null
+                Start-Process $OdtTemp -ArgumentList "/quiet /extract:\`"$OdtExtract\`"" -Wait -NoNewWindow
+                $candidate = Join-Path $OdtExtract "setup.exe"
+                if (Test-Path $candidate) { $OdtSetup = $candidate; Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ODT listo via FWLink: $OdtSetup" }
+            } else { Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: FWLink devolvio archivo invalido (probablemente redireccion)" }
+        } catch { Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Intento FWLink fallido: $_" }
+    }
+
+    # ── Intento 2: URL de fallback conocida ──
+    if (-not (Test-Path $OdtSetup -ErrorAction SilentlyContinue)) {
+        try {
+            $OdtUrl2 = "https://download.microsoft.com/download/2/7/A/27AF1BE6-DD20-4CB4-B154-EBAB8A7D4A7E/officedeploymenttool_17531-20046.exe"
+            $OdtTemp2 = "$env:TEMP\\odt2_$(Get-Random).exe"
+            $OdtExtract2 = "$env:TEMP\\odt2_$(Get-Random)"
+            $wc2 = New-Object System.Net.WebClient
+            $wc2.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+            $wc2.DownloadFile($OdtUrl2, $OdtTemp2)
+            if ((Get-Item $OdtTemp2 -ErrorAction SilentlyContinue).Length -gt 512KB) {
+                New-Item -ItemType Directory -Path $OdtExtract2 -Force | Out-Null
+                Start-Process $OdtTemp2 -ArgumentList "/quiet /extract:\`"$OdtExtract2\`"" -Wait -NoNewWindow
+                $candidate2 = Join-Path $OdtExtract2 "setup.exe"
+                if (Test-Path $candidate2) { $OdtSetup = $candidate2; Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ODT listo via URL fallback: $OdtSetup" }
             }
-        } catch {}
+        } catch { Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Intento URL fallback fallido: $_" }
+    }
 
-        # Intento 2 — HTML scraping de la página oficial
-        if (-not $OdtUrl) {
-            try {
-                $page     = (Invoke-WebRequest -Uri "https://www.microsoft.com/en-us/download/confirmation.aspx?id=49117" \`
-                                -UseBasicParsing -UserAgent "Mozilla/5.0" -ErrorAction Stop).Content
-                $urlMatch = [regex]::Match($page, 'https://download\\.microsoft\\.com/download/[^"\\s]+officedeploymenttool[^"\\s]+\\.exe')
-                if ($urlMatch.Success) { $OdtUrl = $urlMatch.Value }
-            } catch {}
-        }
-
-        # Intento 3 — URL de fallback (versión conocida, puede quedar obsoleta)
-        if (-not $OdtUrl) {
-            $OdtUrl = "https://download.microsoft.com/download/2/7/A/27AF1BE6-DD20-4CB4-B154-EBAB8A7D4A7E/officedeploymenttool_17531-20046.exe"
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Usando URL de fallback del ODT (puede estar desactualizada)"
-        }
-
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] URL ODT: $OdtUrl"
-        $wc = New-Object System.Net.WebClient
-        $wc.Headers.Add("User-Agent", "Mozilla/5.0")
-        $wc.DownloadFile($OdtUrl, $OdtTemp)
-        New-Item -ItemType Directory -Path $OdtExtract -Force | Out-Null
-        Start-Process $OdtTemp -ArgumentList "/quiet /extract:\`"$OdtExtract\`"" -Wait -NoNewWindow
-        $OdtSetup = Join-Path $OdtExtract "setup.exe"
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ODT listo: $OdtSetup"
-    } catch {
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR descargando ODT: $_"
+    if (-not (Test-Path $OdtSetup -ErrorAction SilentlyContinue)) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: No se pudo descargar el ODT por ninguna via"
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] SOLUCION: Coloca setup.exe del ODT manualmente en $PSScriptRoot"
         Stop-Transcript -ErrorAction SilentlyContinue
         exit 1
     }
-}
-
-if (-not (Test-Path $OdtSetup)) {
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: setup.exe no encontrado"
-    Stop-Transcript -ErrorAction SilentlyContinue
-    exit 1
 }
 
 # ── Generar XML de configuración ─────────────────────────

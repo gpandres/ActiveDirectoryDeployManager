@@ -51,6 +51,22 @@ function generateId() {
   return crypto.randomUUID();
 }
 
+function normalizeDNArray(value) {
+  const raw = Array.isArray(value)
+    ? value
+    : (typeof value === 'string' && value.trim() ? [value.trim()] : []);
+  const seen = new Set();
+  return raw
+    .filter(item => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .filter(item => {
+      if (seen.has(item)) return false;
+      seen.add(item);
+      return true;
+    });
+}
+
 const appService = {
   getAll() {
     return loadApps();
@@ -63,6 +79,7 @@ const appService = {
 
   create(data) {
     const apps = loadApps();
+    const assignedOUs = normalizeDNArray(data.assignedOUs || data.ouDN);
     const newApp = {
       id: generateId(),
       name: data.name || 'Nueva App',
@@ -74,7 +91,8 @@ const appService = {
       wingetId: data.wingetId || '',
       odtConfig: data.odtConfig || null,
       customParams: data.customParams || {},
-      assignedOUs: data.assignedOUs || [],
+      ouDN: assignedOUs[0] || '',
+      assignedOUs,
       gpoName: data.gpoName || '',
       createGPO: data.createGPO || false,
       version: data.version || '1.0.0',
@@ -95,7 +113,16 @@ const appService = {
     const apps = loadApps();
     const idx = apps.findIndex(a => a.id === id);
     if (idx === -1) return null;
-    apps[idx] = { ...apps[idx], ...data, updatedAt: new Date().toISOString() };
+    const assignedOUs = normalizeDNArray(
+      data.assignedOUs !== undefined ? data.assignedOUs : (data.ouDN !== undefined ? data.ouDN : apps[idx].assignedOUs || apps[idx].ouDN)
+    );
+    apps[idx] = {
+      ...apps[idx],
+      ...data,
+      ouDN: assignedOUs[0] || '',
+      assignedOUs,
+      updatedAt: new Date().toISOString()
+    };
     saveApps(apps);
     return apps[idx];
   },

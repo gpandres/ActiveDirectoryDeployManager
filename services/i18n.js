@@ -100,7 +100,7 @@ const TRANSLATIONS_EN = {
     appName: "Application Name",
     installer: "Installer (EXE/MSI)",
     browse: "Browse...",
-    silentArgs: "Silent Arguments (Optional)",
+    silentArgs: "Arguments (Optional)",
     commonArgs: "Common args",
     version: "Version",
     notifyUser: "Notify user during installation",
@@ -524,7 +524,8 @@ const TRANSLATIONS_EN = {
     rsatWarningMsg: "Although AD is active, GPOs are disabled without this module. Run as Administrator in PowerShell:",
     rsatNotInstalledTitle: "RSAT is not installed",
     rsatNotInstalledMsg: "Active Directory features are disabled. Run as Administrator in PowerShell:",
-    details: "Details"
+    details: "Details",
+    clear: "Clear"
   },
   catalog: {
     title: "App Catalog",
@@ -652,7 +653,7 @@ const TRANSLATIONS_ES = {
     appName: "Nombre de la Aplicación",
     installer: "Instalador (EXE/MSI)",
     browse: "Examinar...",
-    silentArgs: "Argumentos silenciosos (opcionales)",
+    silentArgs: "Argumentos (opcionales)",
     commonArgs: "Argumentos comunes",
     version: "Versión",
     notifyUser: "Notificar al usuario durante instalación",
@@ -770,7 +771,7 @@ const TRANSLATIONS_ES = {
     detailSectionParams: "Parámetros Personalizados",
     detailTemplate: "Plantilla",
     detailInstallerType: "Tipo de Instalador",
-    detailSilentArgs: "Args. Silenciosos",
+    detailSilentArgs: "Argumentos",
     detailVersion: "Versión",
     detailNotifyUser: "Notificar Usuario",
     detailInstaller: "Instalador",
@@ -1083,7 +1084,8 @@ const TRANSLATIONS_ES = {
     rsatWarningMsg: "Aunque AD está activo, las GPOs están deshabilitadas sin este módulo. Ejecuta como Administrador en PowerShell:",
     rsatNotInstalledTitle: "RSAT no está instalado",
     rsatNotInstalledMsg: "Las funciones de Active Directory están deshabilitadas. Ejecuta como Administrador en PowerShell:",
-    details: "Detalles"
+    details: "Detalles",
+    clear: "Borrar selección"
   },
   catalog: {
     title: "Catálogo de Apps",

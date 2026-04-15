@@ -113,7 +113,10 @@ app.whenReady().then(() => {
   ipcMain.handle('ad:getGPOs', () => adService.getGPOs());
   ipcMain.handle('ad:createGPO', (_, name, scriptPath, ouDN) => {
     try {
-      assertString(name, 'name'); assertString(scriptPath, 'scriptPath'); assertStringOrNull(ouDN, 'ouDN');
+      assertString(name, 'name');
+      assertString(scriptPath, 'scriptPath');
+      if (Array.isArray(ouDN)) ouDN.forEach((dn, idx) => assertString(dn, `ouDN[${idx}]`));
+      else assertStringOrNull(ouDN, 'ouDN');
     } catch (e) { return { success: false, error: 'Invalid arguments' }; }
     return adService.createGPO(name, scriptPath, ouDN);
   });

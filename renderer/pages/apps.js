@@ -240,10 +240,17 @@ const AppsPage = {
                 ${t('apps.script')}
               </button>
               ${isDeployed ? `
+                ${app.template === 'winget' ? `
+                <button class="dropdown-item" onclick="AppsPage.wingetUpdateDialog('${app.id}')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg>
+                  ${t('apps.checkUpdates')}
+                </button>
+                ` : `
                 <button class="dropdown-item" onclick="AppsPage.quickUpdate('${app.id}')">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg>
                   ${t('apps.quickUpdate')}
                 </button>
+                `}
                 <button class="dropdown-item dropdown-item--warning" onclick="AppsPage.disableDeploy('${app.id}')">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
                   ${t('apps.disable')}
@@ -751,6 +758,76 @@ const AppsPage = {
     }
   },
 
+  // ─── Winget Single-App Update Dialog ───────────────
+  async wingetUpdateDialog(id) {
+    const app = await window.api.apps.get(id);
+    if (!app || !app.wingetId) return;
+
+    const body = `
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="width:44px;height:44px;border-radius:10px;background:var(--accent-primary-dim);display:flex;align-items:center;justify-content:center;font-size:24px;">🪟</div>
+          <div>
+            <div style="font-size:17px;font-weight:700;color:var(--text-primary);">${this.esc(app.name)}</div>
+            <div style="font-size:12px;color:var(--text-muted);font-family:monospace;">${this.esc(app.wingetId)}</div>
+          </div>
+        </div>
+        <div style="padding:10px 14px;background:var(--bg-input);border-radius:8px;display:flex;justify-content:space-between;font-size:13px;">
+          <span style="color:var(--text-muted);">Versión actual</span>
+          <span style="font-weight:600;">v${this.esc(app.version || '1.0.0')}</span>
+        </div>
+        <div id="wud-status" style="text-align:center;padding:16px;">
+          <span class="spinner" style="width:18px;height:18px;display:inline-block;border-width:2px;margin-right:8px;"></span>
+          <span style="color:var(--text-secondary);font-size:13px;">${t('apps.checkingUpdates')}</span>
+        </div>
+      </div>`;
+
+    App.openModal(t('apps.checkUpdates'), body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('common.cancel')}</button><div style="flex:1"></div><button class="btn btn-success" id="wud-update-btn" style="display:none;"></button>`
+    );
+
+    try {
+      const r = await window.api.catalog.checkSingle(app.wingetId);
+      const latestVersion = r?.latestVersion;
+      const statusEl = document.getElementById('wud-status');
+      const updateBtn = document.getElementById('wud-update-btn');
+
+      if (!latestVersion) {
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted);font-size:13px;">No se pudo verificar la versión más reciente</span>';
+        return;
+      }
+
+      if (latestVersion === (app.version || '1.0.0')) {
+        if (statusEl) statusEl.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-secondary)" stroke-width="2" style="margin-right:8px;vertical-align:middle;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><span style="color:var(--text-secondary);font-size:13px;">${t('apps.noUpdatesFound')}</span>`;
+        return;
+      }
+
+      if (statusEl) statusEl.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:center;gap:12px;padding:10px;background:var(--bg-tertiary);border-radius:8px;">
+          <div style="text-align:center;">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">Actual</div>
+            <div style="font-weight:700;color:var(--text-primary);">v${this.esc(app.version || '1.0.0')}</div>
+          </div>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          <div style="text-align:center;">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">Disponible</div>
+            <div style="font-weight:700;color:var(--accent-secondary);">v${this.esc(latestVersion)}</div>
+          </div>
+        </div>`;
+
+      if (updateBtn) {
+        updateBtn.style.display = '';
+        updateBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg> ${t('apps.updateToVersion').replace('{version}', latestVersion)}`;
+        updateBtn.addEventListener('click', () => {
+          this.performWingetAutoUpdate(app.id, latestVersion, app.name, updateBtn);
+        });
+      }
+    } catch (e) {
+      const statusEl = document.getElementById('wud-status');
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--danger-color);font-size:13px;">Error: ${this.esc(e.message)}</span>`;
+    }
+  },
+
   // ─── Winget Update Check ────────────────────────────
   async checkUpdates() {
     const panel = document.getElementById('apps-updates-panel');
@@ -1215,6 +1292,9 @@ const AppsPage = {
       installerPath: initialInstallerPath,
       configXmlPath: existingApp?.configXmlPath || '',
       customParams: existingApp?.customParams || {},
+      selectedOUs: (existingApp?.assignedOUs && existingApp.assignedOUs.length > 0)
+        ? [...existingApp.assignedOUs]
+        : (existingApp?.ouDN ? [existingApp.ouDN] : []),
       ouDN: existingApp?.ouDN || (existingApp?.assignedOUs && existingApp.assignedOUs[0]) || '',
       gpoName: isEdit ? (existingApp?.gpoName || '') : (config.defaultGPO || ''),
       createGPO: false,
@@ -1640,9 +1720,7 @@ const AppsPage = {
           }).join('') : ''}
         `;
       } else if (state.step === 3) {
-        const selectedOUName = state.ouDN && this.ousCache
-          ? (this.ousCache.find(o => o.dn === state.ouDN) || {}).name || state.ouDN
-          : '';
+        const selectedOUs = Array.isArray(state.selectedOUs) ? state.selectedOUs : [];
         body += `
           <div class="form-group mb-md">
             <label class="form-label">${t('apps.selectOus')}</label>
@@ -1651,14 +1729,22 @@ const AppsPage = {
               <input type="text" class="form-input" id="wiz-ou-search" placeholder="${t('ous.searchOUs')}" autocomplete="off" style="padding-left:32px;">
             </div>
             <div id="wiz-ou-tree" style="max-height:190px;overflow-y:auto;border:1px solid var(--border-color);border-radius:6px;padding:4px 6px;background:var(--bg-secondary);">
-              ${this.ousTreeCache ? App.ouPickerTreeHTML(this.ousTreeCache, '', state.ouDN) : `<p style="padding:8px;font-size:13px;color:var(--text-muted);">${t('ous.noOusFound')}</p>`}
+              ${this.ousTreeCache ? App.ouPickerTreeHTML(this.ousTreeCache, '', selectedOUs) : `<p style="padding:8px;font-size:13px;color:var(--text-muted);">${t('ous.noOusFound')}</p>`}
             </div>
-            <div id="wiz-ou-selected" style="margin-top:6px;min-height:22px;">
-              ${state.ouDN
-                ? `<span style="background:rgba(30,144,255,0.15);color:var(--primary-color);padding:2px 10px;border-radius:4px;font-size:12px;">📁 ${this.esc(selectedOUName)}</span>`
+            <div id="wiz-ou-selected" style="margin-top:6px;min-height:22px;display:flex;align-items:center;gap:8px;">
+              ${selectedOUs.length > 0
+                ? selectedOUs.map(dn => {
+                    const selectedOUName = this.ousCache
+                      ? (this.ousCache.find(o => o.dn === dn) || {}).name || dn
+                      : dn;
+                    return `<span style="display:inline-flex;align-items:center;gap:6px;background:rgba(30,144,255,0.15);color:var(--primary-color);padding:2px 10px;border-radius:4px;font-size:12px;">
+                      📁 ${this.esc(selectedOUName)}
+                      <button class="btn btn-ghost btn-sm btn-remove-ou" data-dn="${this.esc(dn)}" style="font-size:11px;padding:0 4px;min-height:auto;">✕</button>
+                    </span>`;
+                  }).join('')
                 : `<span style="font-size:12px;color:var(--text-muted);">${t('apps.selectOuRecommended')}</span>`}
             </div>
-            <input type="hidden" id="wiz-ou-dn" value="${this.esc(state.ouDN)}">
+            <input type="hidden" id="wiz-ou-dn" value="${this.esc(JSON.stringify(selectedOUs))}">
           </div>
 
           <div class="form-group mb-md">
@@ -2054,7 +2140,15 @@ const AppsPage = {
     const gpoSelect = document.getElementById('wiz-gpo');
     if (gpoSelect) state.gpoName = gpoSelect.value;
     const ouDnInput = document.getElementById('wiz-ou-dn');
-    if (ouDnInput) state.ouDN = ouDnInput.value;
+    if (ouDnInput) {
+      try {
+        const parsed = JSON.parse(ouDnInput.value || '[]');
+        state.selectedOUs = Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+      } catch {
+        state.selectedOUs = ouDnInput.value ? [ouDnInput.value] : [];
+      }
+      state.ouDN = state.selectedOUs[0] || '';
+    }
 
     const versionInput = document.getElementById('wiz-version');
     if (versionInput) state.version = versionInput.value;
@@ -2161,7 +2255,7 @@ const AppsPage = {
       }
       const treeContainer = document.getElementById('wiz-ou-tree');
       if (treeContainer && this.ousTreeCache) {
-        treeContainer.innerHTML = App.ouPickerTreeHTML(this.ousTreeCache, '', state.ouDN);
+        treeContainer.innerHTML = App.ouPickerTreeHTML(this.ousTreeCache, '', state.selectedOUs || []);
       }
       this.bindOUPickerEvents(state);
     } catch (e) {}
@@ -2175,6 +2269,51 @@ const AppsPage = {
     const dnInput = document.getElementById('wiz-ou-dn');
     const selectedDisplay = document.getElementById('wiz-ou-selected');
     if (!treeContainer) return;
+
+    const renderSelectedDisplay = () => {
+      if (!selectedDisplay) return;
+      const selectedOUs = Array.isArray(state.selectedOUs) ? state.selectedOUs : [];
+      if (selectedOUs.length === 0) {
+        selectedDisplay.innerHTML = `<span style="font-size:12px;color:var(--text-muted);">${t('apps.selectOuRecommended')}</span>`;
+        return;
+      }
+
+      selectedDisplay.innerHTML = selectedOUs.map(dn => {
+        const name = this.ousCache
+          ? (this.ousCache.find(o => o.dn === dn) || {}).name || dn
+          : dn;
+        return `<span style="display:inline-flex;align-items:center;gap:6px;background:rgba(30,144,255,0.15);color:var(--primary-color);padding:2px 10px;border-radius:4px;font-size:12px;">
+          📁 ${this.esc(name)}
+          <button class="btn btn-ghost btn-sm btn-remove-ou" data-dn="${this.esc(dn)}" style="font-size:11px;padding:0 4px;min-height:auto;">✕</button>
+        </span>`;
+      }).join('');
+
+      selectedDisplay.querySelectorAll('.btn-remove-ou').forEach(btn => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const dn = btn.dataset.dn;
+          state.selectedOUs = (state.selectedOUs || []).filter(item => item !== dn);
+          state.ouDN = state.selectedOUs[0] || '';
+          if (dnInput) dnInput.value = JSON.stringify(state.selectedOUs);
+          treeContainer.innerHTML = App.ouPickerTreeHTML(
+            this.ousTreeCache, searchInput?.value || '', state.selectedOUs
+          );
+          bindNodes();
+          renderSelectedDisplay();
+        });
+      });
+    };
+
+    const bindClearButton = () => {
+      document.getElementById('btn-clear-ou')?.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (dnInput) dnInput.value = '[]';
+        state.selectedOUs = [];
+        state.ouDN = '';
+        renderSelectedDisplay();
+        treeContainer.querySelectorAll('.tree-node.selected').forEach(n => n.classList.remove('selected'));
+      });
+    };
 
     const bindNodes = () => {
       // Toggle expand/collapse
@@ -2190,31 +2329,34 @@ const AppsPage = {
         });
       });
 
-      // Click to select
+      // Click to select (toggle: clicking already-selected OU deselects it)
       treeContainer.querySelectorAll('.tree-node').forEach(node => {
         node.addEventListener('click', (e) => {
           if (e.target.closest('.tree-toggle')) return;
           const dn = node.dataset.dn;
-          const name = node.dataset.name;
-          if (dnInput) dnInput.value = dn;
-          state.ouDN = dn;
-          if (selectedDisplay) {
-            selectedDisplay.innerHTML = dn
-              ? `<span style="background:rgba(30,144,255,0.15);color:var(--primary-color);padding:2px 10px;border-radius:4px;font-size:12px;">📁 ${this.esc(name)}</span>`
-              : `<span style="font-size:12px;color:var(--text-muted);">${t('apps.selectOuRecommended')}</span>`;
-          }
-          treeContainer.querySelectorAll('.tree-node.selected').forEach(n => n.classList.remove('selected'));
-          node.classList.add('selected');
+          const current = Array.isArray(state.selectedOUs) ? state.selectedOUs : [];
+          state.selectedOUs = current.includes(dn)
+            ? current.filter(item => item !== dn)
+            : [...current, dn];
+          state.ouDN = state.selectedOUs[0] || '';
+          if (dnInput) dnInput.value = JSON.stringify(state.selectedOUs);
+          treeContainer.innerHTML = App.ouPickerTreeHTML(
+            this.ousTreeCache, searchInput?.value || '', state.selectedOUs
+          );
+          bindNodes();
+          renderSelectedDisplay();
         });
       });
     };
 
     bindNodes();
+    bindClearButton();
+    renderSelectedDisplay();
 
     if (searchInput) {
       searchInput.addEventListener('input', () => {
         treeContainer.innerHTML = App.ouPickerTreeHTML(
-          this.ousTreeCache, searchInput.value, dnInput?.value || state.ouDN
+          this.ousTreeCache, searchInput.value, state.selectedOUs || []
         );
         bindNodes();
       });
@@ -2340,7 +2482,12 @@ const AppsPage = {
         <div class="card" style="padding:12px 16px; margin:0;">
           <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionTargeting')}</div>
           ${row(t('apps.detailGpo'), gpoDisplay)}
-          ${row(t('apps.detailAssignedOUs'), state.ouDN ? '<span title="' + this.esc(state.ouDN) + '">' + this.esc(ouNameFromDN(state.ouDN)) + '</span>' : '<span style="color:var(--text-muted);">' + t('apps.detailNoOUs') + '</span>')}
+          ${row(
+            t('apps.detailAssignedOUs'),
+            (state.selectedOUs && state.selectedOUs.length > 0)
+              ? state.selectedOUs.map(dn => '<div title="' + this.esc(dn) + '" style="margin:2px 0;">' + this.esc(ouNameFromDN(dn)) + '</div>').join('')
+              : '<span style="color:var(--text-muted);">' + t('apps.detailNoOUs') + '</span>'
+          )}
         </div>
 
         ${paramsHtml ? `
@@ -2398,8 +2545,8 @@ const AppsPage = {
         configXmlPath: state.configXmlPath,
         customParams: state.customParams,
         gpoName: state.gpoName,
-        ouDN: state.ouDN,
-        assignedOUs: state.ouDN ? [state.ouDN] : [],
+        ouDN: state.selectedOUs?.[0] || '',
+        assignedOUs: Array.isArray(state.selectedOUs) ? state.selectedOUs : [],
         version: state.version || '1.0.0',
         notifyUser: state.notifyUser || false
       };
@@ -2448,7 +2595,7 @@ const AppsPage = {
         // Create GPO automatically if chosen
         if (state.createGPO) {
           const newGpoName = `Deploy_${state.name.replace(/\s/g, "_")}`;
-          await this._handleAutoGPO(newGpoName, deployResult.path, state.ouDN, app.id);
+          await this._handleAutoGPO(newGpoName, deployResult.path, state.selectedOUs || [], app.id);
         }
       } else {
         App.toast(`${t('apps.appSavedDeployError')} ${deployResult.error}`, 'error');
@@ -2473,7 +2620,7 @@ const AppsPage = {
   // Called when "Create GPO automatically" is checked. If the GPO name already
   // exists in AD (and follows the program's naming convention), asks the user
   // what to do before proceeding.
-  async _handleAutoGPO(gpoName, scriptPath, ouDN, appId) {
+  async _handleAutoGPO(gpoName, scriptPath, ouDNs, appId) {
     const isOwnGPO = /^(Deploy_|ADDM_)/.test(gpoName);
 
     // Check existence only for GPOs the program creates
@@ -2521,7 +2668,7 @@ const AppsPage = {
     }
 
     App.toast(`${t('apps.generatingGpo')} ${gpoName}...`, 'info');
-    const gpoResult = await window.api.ad.createGPO(gpoName, scriptPath, ouDN);
+    const gpoResult = await window.api.ad.createGPO(gpoName, scriptPath, ouDNs);
     if (gpoResult.success) {
       await window.api.apps.update(appId, { gpoName });
       App.toast(t('apps.gpoCreatedSuccess').replace('{gpo}', gpoName), 'success');

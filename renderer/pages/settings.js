@@ -75,8 +75,9 @@ const SettingsPage = {
           <div id="cfg-baseou-tree" style="max-height:190px;overflow-y:auto;border:1px solid var(--border-color);border-radius:6px;padding:4px 6px;background:var(--bg-secondary);">
             <div class="spinner"></div>
           </div>
+          <div id="cfg-baseou-selected" style="margin-top:6px;min-height:22px;display:flex;align-items:center;gap:8px;"></div>
           <p class="form-hint" style="margin-top:6px;">${t('settings.baseOuHint')}</p>
-          <input type="hidden" id="cfg-base-ou" value="${this.esc(config.baseOU || '')}">
+          <input type="hidden" id="cfg-base-ou" value="${this.esc(JSON.stringify(config.baseOUs || (config.baseOU ? [config.baseOU] : [])))}">
         </div>
       </div>
 
@@ -160,7 +161,7 @@ const SettingsPage = {
     this.bindEvents(config);
     this.loadGPOs(config);
     if (App.rsatAvailable) {
-      this.loadOUs(config.baseOU);
+      this.loadOUs(config.baseOUs || (config.baseOU ? [config.baseOU] : []));
     } else {
       document.getElementById('cfg-baseou-tree').innerHTML = `<p style="padding:8px;font-size:13px;color:var(--text-muted);">RSAT requerido para listar OUs</p>`;
     }
@@ -261,7 +262,7 @@ const SettingsPage = {
       logDirectory: document.getElementById('cfg-log-dir').value.trim(),
       defaultGPO: document.getElementById('cfg-default-gpo').value,
       preferredDC: document.getElementById('cfg-preferred-dc').value.trim(),
-      baseOU: document.getElementById('cfg-base-ou').value.trim(),
+      baseOUs: this.getSelectedDNs(),
       language: document.getElementById('cfg-language').value
     };
 
@@ -294,28 +295,40 @@ const SettingsPage = {
     return div.innerHTML;
   },
 
-  async loadOUs(selectedDN) {
+  getSelectedDNs() {
+    try {
+      const raw = document.getElementById('cfg-base-ou')?.value || '[]';
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  async loadOUs(selectedDNs) {
     try {
       const result = await window.api.ad.getOUs(true); // ignoreBaseOU = true!
       if (result.success && result.data) {
         this.ousTreeCache = result.data;
-        this.renderOUTree(selectedDN);
+        this.renderOUTree(selectedDNs);
         
         const searchInput = document.getElementById('cfg-baseou-search');
         if (searchInput) {
           searchInput.addEventListener('input', () => {
-            this.renderOUTree(document.getElementById('cfg-base-ou')?.value || selectedDN, searchInput.value);
+            this.renderOUTree(this.getSelectedDNs(), searchInput.value);
           });
         }
       }
     } catch(err) {}
   },
 
-  renderOUTree(selectedDN, query = '') {
+  renderOUTree(selectedDNs, query = '') {
     const treeContainer = document.getElementById('cfg-baseou-tree');
     if (!treeContainer || !this.ousTreeCache) return;
     
-    treeContainer.innerHTML = App.ouPickerTreeHTML(this.ousTreeCache, query, selectedDN);
+    const normalized = Array.isArray(selectedDNs) ? selectedDNs.filter(Boolean) : [];
+    treeContainer.innerHTML = App.ouPickerTreeHTML(this.ousTreeCache, query, normalized);
+    this.updateSelectedDisplay(normalized);
     
     // Bind events
     treeContainer.querySelectorAll('.tree-toggle:not(.empty)').forEach(btn => {
@@ -335,11 +348,52 @@ const SettingsPage = {
       node.addEventListener('click', (e) => {
         if (e.target.closest('.tree-toggle')) return;
         const dn = node.dataset.dn;
-        if (dnInput) dnInput.value = dn;
-        
-        treeContainer.querySelectorAll('.tree-node.selected').forEach(n => n.classList.remove('selected'));
-        node.classList.add('selected');
+        const nextDNs = normalized.includes(dn)
+          ? normalized.filter(item => item !== dn)
+          : [...normalized, dn];
+        if (dnInput) dnInput.value = JSON.stringify(nextDNs);
+        this.renderOUTree(nextDNs, document.getElementById('cfg-baseou-search')?.value || '');
       });
     });
+  },
+
+  updateSelectedDisplay(selectedDNs) {
+    const selectedEl = document.getElementById('cfg-baseou-selected');
+    const dnInput = document.getElementById('cfg-base-ou');
+    if (!selectedEl) return;
+
+    if (!selectedDNs || selectedDNs.length === 0) {
+      selectedEl.innerHTML = `<span style="font-size:12px;color:var(--text-muted);">${t('apps.selectOuRecommended')}</span>`;
+      return;
+    }
+
+    selectedEl.innerHTML = selectedDNs.map(dn => {
+      const selectedName = this.findOUName(this.ousTreeCache, dn) || dn;
+      return `<span style="display:inline-flex;align-items:center;gap:6px;background:rgba(30,144,255,0.15);color:var(--primary-color);padding:2px 10px;border-radius:4px;font-size:12px;">
+        📁 ${this.esc(selectedName)}
+        <button type="button" class="btn btn-ghost btn-sm cfg-baseou-remove" data-dn="${this.esc(dn)}" style="font-size:11px;padding:0 4px;min-height:auto;">✕</button>
+      </span>`;
+    }).join('');
+
+    selectedEl.querySelectorAll('.cfg-baseou-remove').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const dn = btn.dataset.dn;
+        const nextDNs = selectedDNs.filter(item => item !== dn);
+        if (dnInput) dnInput.value = JSON.stringify(nextDNs);
+        this.renderOUTree(nextDNs, document.getElementById('cfg-baseou-search')?.value || '');
+      });
+    });
+  },
+
+  findOUName(nodes, dn) {
+    if (!Array.isArray(nodes) || !dn) return '';
+    for (const node of nodes) {
+      if (node?.dn === dn) return node.name || dn;
+      const childMatch = this.findOUName(node?.children, dn);
+      if (childMatch) return childMatch;
+    }
+    return '';
   }
 };

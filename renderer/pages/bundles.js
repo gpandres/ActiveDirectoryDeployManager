@@ -237,6 +237,35 @@ const BundlesPage = {
 
   esc(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; },
 
+  normalizeOUDNs(value) {
+    const raw = Array.isArray(value)
+      ? value
+      : (typeof value === 'string' && value.trim() ? [value.trim()] : []);
+    return [...new Set(raw.filter(Boolean))];
+  },
+
+  getBundleOUs(bundle) {
+    return this.normalizeOUDNs(bundle?.ouDNs || bundle?.ouDN);
+  },
+
+  getOUName(dn) {
+    const match = (this._wizOus || []).find(ou => ou.dn === dn);
+    return match?.name || dn;
+  },
+
+  renderOUChips(ouDNs) {
+    if (!ouDNs || ouDNs.length === 0) {
+      return `<span style="font-size:12px;color:var(--text-muted);">${t('apps.selectOuRecommended') || '-'}</span>`;
+    }
+
+    return ouDNs.map(dn => `
+      <span style="display:inline-flex;align-items:center;gap:6px;background:rgba(30,144,255,0.15);color:var(--primary-color);padding:2px 10px;border-radius:4px;font-size:12px;margin:2px 6px 2px 0;">
+        📁 ${this.esc(this.getOUName(dn))}
+        <button type="button" class="btn btn-ghost btn-sm btn-remove-bundle-ou" data-dn="${this.esc(dn)}" style="font-size:11px;padding:0 4px;min-height:auto;">✕</button>
+      </span>
+    `).join('');
+  },
+
   // ─── Bulk Logic ────────────────────────────────────
   toggleSelect(id, checked) {
     if (checked) this.selectedIds.add(id);
@@ -308,25 +337,53 @@ const BundlesPage = {
   async bulkDelete() {
     if (this.selectedIds.size === 0) return;
     const ids = Array.from(this.selectedIds);
-    
-    // Single prompt for AD cleanup
-    const adCleanup = confirm(t('bundles.bulkDeletePrompt') || `¿Eliminar ${ids.length} bundles?\n\n¿Quieres intentar limpiar también las GPOs de los bundles seleccionados en Active Directory si existen?`);
-    
-    App.toast(t('bundles.bulkDeleting') || `Eliminando ${ids.length} bundles...`, 'info');
-    
+
+    // Gather bundle names for display
+    const bundleNames = ids.map(id => {
+      const b = this.bundles.find(x => x.id === id);
+      return b ? this.esc(b.name) : id;
+    });
+
+    const { confirmed, adCleanup } = await new Promise(resolve => {
+      const body = `
+        <p style="margin-bottom:12px;color:var(--text-secondary);">${t('apps.bulkDeleteWarning').replace('{count}', ids.length)}</p>
+        <div style="max-height:140px;overflow-y:auto;background:var(--bg-input);border-radius:6px;padding:8px 12px;margin-bottom:14px;">
+          ${bundleNames.map(n => `<div style="padding:3px 0;font-size:13px;color:var(--text-primary);">📦 ${n}</div>`).join('')}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+            <input type="checkbox" id="bdel-chk-gpo" checked style="width:auto;">
+            <span>${t('apps.bulkDeleteCleanGpo') || 'Eliminar GPOs asociadas de AD (si existen)'}</span>
+          </label>
+        </div>`;
+      const footer = `
+        <button class="btn btn-secondary" onclick="App.closeModal(); window._bulkDeleteResolve({confirmed:false, adCleanup:false})">${t('common.cancel')}</button>
+        <div style="flex:1"></div>
+        <button class="btn btn-danger" id="bdel-confirm-btn">${t('apps.bulkDeleteConfirm') || 'Eliminar ' + ids.length + ' bundles'}</button>`;
+      window._bulkDeleteResolve = resolve;
+      App.openModal(t('apps.bulkDeleteTitle') || 'Eliminar bundles', body, footer);
+      document.getElementById('bdel-confirm-btn')?.addEventListener('click', () => {
+        const adCleanup = document.getElementById('bdel-chk-gpo')?.checked ?? false;
+        App.closeModal();
+        resolve({ confirmed: true, adCleanup });
+      });
+    });
+
+    if (!confirmed) return;
+
+    App.toast(t('apps.bulkDeleting') || `Eliminando ${ids.length} bundles...`, 'info');
     try {
       let successCount = 0;
       for (const id of ids) {
         const bundle = await window.api.bundles.get(id);
         if (!bundle) continue;
-        
         if (adCleanup && bundle.gpoName) {
           try { await window.api.ad.deleteGPO(bundle.gpoName); } catch (e) { console.warn('GPO cleanup failed for', bundle.gpoName); }
         }
         await window.api.bundles.delete(id);
         successCount++;
       }
-      App.toast(t('bundles.bulkDeleteSuccess') || `Se eliminaron ${successCount} bundles.`, 'success');
+      App.toast(t('apps.bulkDeleteSuccess').replace('{count}', successCount) || `Se eliminaron ${successCount} bundles.`, 'success');
       this.clearSelection();
       App.navigate('bundles');
     } catch (err) {
@@ -418,7 +475,12 @@ const BundlesPage = {
         <div class="card" style="padding:12px 16px; margin:0;">
           <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionTargeting')}</div>
           ${row(t('apps.detailGpo'), bundle.gpoName ? this.esc(bundle.gpoName) : '-')}
-          ${row(t('apps.detailAssignedOUs') || 'OU Asignada', bundle.ouDN ? '<span style="word-break:break-all;">' + this.esc(bundle.ouDN) + '</span>' : '-')}
+          ${row(
+            t('apps.detailAssignedOUs') || 'OU Asignada',
+            this.getBundleOUs(bundle).length > 0
+              ? this.getBundleOUs(bundle).map(dn => '<div style="word-break:break-all;margin:2px 0;">' + this.esc(this.getOUName(dn)) + '</div>').join('')
+              : '-'
+          )}
         </div>
       </div>
     `;
@@ -475,7 +537,8 @@ const BundlesPage = {
       selectedApps: existingBundle?.apps || [],
       notifyUser: existingBundle?.notifyUser || false,
       gpoName: existingBundle?.gpoName || '',
-      ouDN: existingBundle?.ouDN || '',
+      selectedOUs: this.getBundleOUs(existingBundle),
+      ouDN: existingBundle?.ouDN || (this.getBundleOUs(existingBundle)[0] || ''),
       createGPO: existingBundle?.createGPO || false,
       version: existingBundle?.version || '1.0.0'
     };
@@ -555,10 +618,19 @@ const BundlesPage = {
           ${flatOUs.length > 0 ? `
             <div class="form-group">
               <label class="form-label">${t('apps.selectOus')}</label>
-              <select class="form-select" id="wiz-bundle-ou">
-              <option value="">${t('bundles.cancelOption')}</option>
-                ${flatOUs.map(ou => `<option value="${this.esc(ou.dn)}" ${state.ouDN === ou.dn ? 'selected' : ''}>${'  '.repeat(ou.depth)}${ou.depth > 0 ? '↳ ' : ''}${this.esc(ou.name)}</option>`).join('')}
-              </select>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <select class="form-select" id="wiz-bundle-ou-option" style="flex:1;">
+                  <option value="">${t('bundles.cancelOption')}</option>
+                  ${flatOUs.map(ou => `<option value="${this.esc(ou.dn)}">${'  '.repeat(ou.depth)}${ou.depth > 0 ? '↳ ' : ''}${this.esc(ou.name)}</option>`).join('')}
+                </select>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-bundle-ou-add">
+                  + ${t('common.add') || 'Agregar'}
+                </button>
+              </div>
+              <div id="wiz-bundle-ou-selected" style="margin-top:8px;display:flex;flex-wrap:wrap;align-items:center;gap:6px;">
+                ${this.renderOUChips(state.selectedOUs || [])}
+              </div>
+              <input type="hidden" id="wiz-bundle-ou" value="${this.esc(JSON.stringify(state.selectedOUs || []))}">
             </div>
           ` : ''}
 
@@ -566,6 +638,7 @@ const BundlesPage = {
             <div style="font-size:var(--font-sm);color:var(--text-muted);margin-bottom:8px">${t('apps.reviewSummary')}:</div>
             <div style="font-weight:600;color:var(--text-primary)">${this.esc(state.name)} v${state.version}</div>
             <div style="color:var(--text-secondary);font-size:var(--font-sm)">${state.selectedApps.length} ${t('apps.selected')}: ${state.selectedApps.map(a => a.name).join(', ') || ''}</div>
+            <div style="color:var(--text-secondary);font-size:var(--font-sm);margin-top:6px;">UOs: ${(state.selectedOUs || []).map(dn => this.esc(this.getOUName(dn))).join(', ') || '-'}</div>
           </div>
         `;
       }
@@ -581,6 +654,10 @@ const BundlesPage = {
              </button>`
         }
       `);
+
+      if (state.step === 3) {
+        this.bindBundleOUSelector(state);
+      }
     };
 
     this._wizState = state;
@@ -611,12 +688,49 @@ const BundlesPage = {
       const notify = document.getElementById('wiz-bundle-notify');
       const gpo = document.getElementById('wiz-bundle-gpo');
       const createGPO = document.getElementById('wiz-bundle-create-gpo');
-      const ou = document.getElementById('wiz-bundle-ou');
       if (notify) s.notifyUser = notify.checked;
       if (gpo) s.gpoName = gpo.value;
       if (createGPO) s.createGPO = createGPO.checked;
-      if (ou) s.ouDN = ou.value;
+      try {
+        const parsed = JSON.parse(document.getElementById('wiz-bundle-ou')?.value || '[]');
+        s.selectedOUs = Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+      } catch {
+        s.selectedOUs = [];
+      }
+      s.ouDN = s.selectedOUs[0] || '';
     }
+  },
+
+  bindBundleOUSelector(state) {
+    const selectEl = document.getElementById('wiz-bundle-ou-option');
+    const hiddenEl = document.getElementById('wiz-bundle-ou');
+    const selectedEl = document.getElementById('wiz-bundle-ou-selected');
+    const addBtn = document.getElementById('btn-bundle-ou-add');
+    if (!selectEl || !hiddenEl || !selectedEl || !addBtn) return;
+
+    const sync = () => {
+      hiddenEl.value = JSON.stringify(state.selectedOUs || []);
+      selectedEl.innerHTML = this.renderOUChips(state.selectedOUs || []);
+      selectedEl.querySelectorAll('.btn-remove-bundle-ou').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const dn = btn.dataset.dn;
+          state.selectedOUs = this.normalizeOUDNs((state.selectedOUs || []).filter(item => item !== dn));
+          state.ouDN = state.selectedOUs[0] || '';
+          sync();
+        });
+      });
+    };
+
+    addBtn.addEventListener('click', () => {
+      if (!selectEl.value) return;
+      state.selectedOUs = this.normalizeOUDNs([...(state.selectedOUs || []), selectEl.value]);
+      state.ouDN = state.selectedOUs[0] || '';
+      sync();
+    });
+
+    selectEl.addEventListener('dblclick', () => addBtn.click());
+    sync();
   },
 
   _toggleApp(checkbox) {
@@ -669,7 +783,8 @@ const BundlesPage = {
       notifyUser: s.notifyUser,
       gpoName: s.gpoName,
       createGPO: s.createGPO,
-      ouDN: s.ouDN,
+      ouDN: s.selectedOUs?.[0] || '',
+      ouDNs: s.selectedOUs || [],
       version: s.version
     };
 
@@ -708,7 +823,7 @@ const BundlesPage = {
       ${hasGPO ? `
         <div class="form-group mt-md" style="background: rgba(255,50,50,0.08); border: 1px solid rgba(255,50,50,0.25); border-radius:8px; padding:12px;">
           <p style="margin:0 0 8px 0; color:var(--danger-color); font-weight:600;">🗑️ GPO: "${this.esc(bundle.gpoName)}"</p>
-          ${bundle.ouDN ? `
+          ${this.getBundleOUs(bundle).length > 0 ? `
             <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
               <input type="checkbox" id="chk-bdel-unlink" checked style="width:auto; cursor:pointer;">
               <label for="chk-bdel-unlink" style="margin:0; cursor:pointer; font-size:14px; color:var(--text-secondary);">${t('apps.cleanGpoOption')}</label>
@@ -742,8 +857,10 @@ const BundlesPage = {
           const cleanScript = document.getElementById('chk-bdel-clean')?.checked ?? false;
           const deleteGPO = document.getElementById('chk-bdel-gpo')?.checked ?? false;
 
-          if (unlinkGPO && bundle.ouDN) {
-            await window.api.ad.unlinkGPOfromOU(bundle.gpoName, bundle.ouDN);
+          if (unlinkGPO && this.getBundleOUs(bundle).length > 0) {
+            for (const ouDN of this.getBundleOUs(bundle)) {
+              await window.api.ad.unlinkGPOfromOU(bundle.gpoName, ouDN);
+            }
           }
           if (cleanScript) {
             await window.api.ad.removeGPOStartupScript(bundle.gpoName);
@@ -797,11 +914,11 @@ const BundlesPage = {
         if (bundle.createGPO && (bundle.gpoName || bundle.name)) {
           const gpoName = bundle.gpoName || `Deploy_Bundle_${bundle.name.replace(/\s/g, '_')}`;
           const scriptPath = result.path;
-          const ouDN = bundle.ouDN || '';
+          const ouDNs = this.getBundleOUs(bundle);
 
           App.toast(`${t('bundles.creatingGpo')} ${gpoName}...`, 'info');
           try {
-            const gpoResult = await window.api.ad.createGPO(gpoName, scriptPath, ouDN);
+            const gpoResult = await window.api.ad.createGPO(gpoName, scriptPath, ouDNs);
             if (gpoResult.success) {
               // Save the GPO name back to the bundle
               await window.api.bundles.update(id, { gpoName: gpoName });
@@ -814,9 +931,9 @@ const BundlesPage = {
           }
         } else if (bundle.gpoName && !bundle.createGPO) {
           // GPO already exists, just link it if we have an OU
-          if (bundle.ouDN) {
+          if (this.getBundleOUs(bundle).length > 0) {
             try {
-              await window.api.ad.linkGPOtoOU(bundle.gpoName, bundle.ouDN);
+              await window.api.ad.bulkLinkGPO(bundle.gpoName, this.getBundleOUs(bundle));
               App.toast(`${t('bundles.gpoCreatedBound')}`, 'success');
             } catch (e) {}
           }
@@ -847,7 +964,7 @@ const BundlesPage = {
       ${hasGPO ? `
         <div class="form-group mt-md" style="background: rgba(255,165,0,0.08); border: 1px solid rgba(255,165,0,0.25); border-radius:8px; padding:12px;">
           <p style="margin:0 0 8px 0; color:var(--warning-color); font-weight:600;">⚠️ GPO: "${this.esc(bundle.gpoName)}"</p>
-          ${bundle.ouDN ? `
+          ${this.getBundleOUs(bundle).length > 0 ? `
             <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
               <input type="checkbox" id="chk-bdis-unlink" checked style="width:auto; cursor:pointer;">
               <label for="chk-bdis-unlink" style="margin:0; cursor:pointer; font-size:14px; color:var(--text-secondary);">${t('apps.cleanGpoOption')}</label>
@@ -881,9 +998,11 @@ const BundlesPage = {
           const cleanScript = document.getElementById('chk-bdis-clean')?.checked ?? false;
           const deleteGPO = document.getElementById('chk-bdis-delete-gpo')?.checked ?? false;
 
-          if (unlinkGPO && bundle.ouDN) {
-            const r = await window.api.ad.unlinkGPOfromOU(bundle.gpoName, bundle.ouDN);
-            if (r.success) App.toast(t('bundles.gpoUnlinkedOu'), 'success');
+          if (unlinkGPO && this.getBundleOUs(bundle).length > 0) {
+            for (const ouDN of this.getBundleOUs(bundle)) {
+              const r = await window.api.ad.unlinkGPOfromOU(bundle.gpoName, ouDN);
+              if (r.success) App.toast(t('bundles.gpoUnlinkedOu'), 'success');
+            }
           }
           if (cleanScript) {
             const r = await window.api.ad.removeGPOStartupScript(bundle.gpoName);

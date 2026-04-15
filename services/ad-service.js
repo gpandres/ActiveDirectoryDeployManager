@@ -19,6 +19,26 @@ function sanitizePSPath(str) {
   return str.replace(/[`$;|&{}<>"\0]/g, '').replace(/'/g, "''").trim();
 }
 
+function normalizeDNArray(value) {
+  const raw = Array.isArray(value)
+    ? value
+    : (typeof value === 'string' && value.trim() ? [value.trim()] : []);
+  const seen = new Set();
+  return raw
+    .filter(item => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .filter(item => {
+      if (seen.has(item)) return false;
+      seen.add(item);
+      return true;
+    });
+}
+
+function toPSSingleQuotedArray(values) {
+  return '@(' + values.map(v => `'${sanitizePSInput(v).replace(/'/g, "''")}'`).join(',') + ')';
+}
+
 function runPowerShell(command) {
   return new Promise((resolve, reject) => {
     const ps = execFile(
@@ -88,19 +108,37 @@ const adService = {
   async getOUs(ignoreBaseOU = false) {
     try {
       const config = require('./config').getConfig();
-      let searchBaseStr = '';
-      if (!ignoreBaseOU && config.baseOU) {
-        const sanitized = sanitizePSInput(config.baseOU).replace(/'/g, "''");
-        searchBaseStr = `-SearchBase '${sanitized}'`;
-      }
-      const json = await runPowerShell(
-        `Import-Module ActiveDirectory; ${dcSnippet(config.preferredDC)}; Get-ADOrganizationalUnit -Filter * ${searchBaseStr} -Server $adServer -Properties Name,DistinguishedName,Description | Select-Object Name,DistinguishedName,Description | ConvertTo-Json -Depth 5`
-      );
+      const baseOUs = !ignoreBaseOU ? normalizeDNArray(config.baseOUs || config.baseOU) : [];
       let ous = [];
-      try {
-        ous = JSON.parse(json || '[]');
-      } catch (e) {
-        console.error('Error parsing OUs JSON:', e.message);
+
+      if (baseOUs.length === 0) {
+        const json = await runPowerShell(
+          `Import-Module ActiveDirectory; ${dcSnippet(config.preferredDC)}; Get-ADOrganizationalUnit -Filter * -Server $adServer -Properties Name,DistinguishedName,Description | Select-Object Name,DistinguishedName,Description | ConvertTo-Json -Depth 5`
+        );
+        try {
+          ous = JSON.parse(json || '[]');
+        } catch (e) {
+          console.error('Error parsing OUs JSON:', e.message);
+        }
+      } else {
+        const map = new Map();
+        for (const baseOU of baseOUs) {
+          const sanitized = sanitizePSInput(baseOU).replace(/'/g, "''");
+          const json = await runPowerShell(
+            `Import-Module ActiveDirectory; ${dcSnippet(config.preferredDC)}; Get-ADOrganizationalUnit -Filter * -SearchBase '${sanitized}' -Server $adServer -Properties Name,DistinguishedName,Description | Select-Object Name,DistinguishedName,Description | ConvertTo-Json -Depth 5`
+          );
+          let subset = [];
+          try {
+            subset = JSON.parse(json || '[]');
+          } catch (e) {
+            console.error('Error parsing scoped OUs JSON:', e.message);
+          }
+          const subsetArray = Array.isArray(subset) ? subset : [subset];
+          for (const ou of subsetArray) {
+            if (ou?.DistinguishedName) map.set(ou.DistinguishedName, ou);
+          }
+        }
+        ous = Array.from(map.values());
       }
       const ouArray = Array.isArray(ous) ? ous : [ous];
       return { success: true, data: buildOUTree(ouArray) };
@@ -158,7 +196,8 @@ const adService = {
       const config = require('./config').getConfig();
       const safeGpoName = sanitizePSInput(gpoName).replace(/'/g, "''");
       const safeScriptPath = sanitizePSPath(scriptPath);
-      const safeOuDN = ouDN ? sanitizePSInput(ouDN).replace(/'/g, "''") : '';
+      const normalizedOUs = normalizeDNArray(ouDN);
+      const ouTargetsArray = toPSSingleQuotedArray(normalizedOUs);
 
       const ps = `
         $ErrorActionPreference = 'Stop'
@@ -168,7 +207,7 @@ const adService = {
             ${dcSnippet(config.preferredDC)}
             $gpoName = '${safeGpoName}'
             $scriptLocalPath = '${safeScriptPath}'
-            $ouDN = '${safeOuDN}'
+            $ouTargets = ${ouTargetsArray}
 
             $gpo = Get-GPO -Name $gpoName -Server $adServer -ErrorAction SilentlyContinue
             if (-not $gpo) { $gpo = New-GPO -Name $gpoName -Server $adServer }
@@ -212,8 +251,10 @@ const adService = {
                 Write-Warning "AVISO: No se pudo habilitar el atributo gPCMachineExtensionNames en AD. $_"
             }
 
-            if ($ouDN) {
-                New-GPLink -Name $gpoName -Target $ouDN -Server $adServer -LinkEnabled Yes -ErrorAction Stop | Out-Null
+            foreach ($ouDN in $ouTargets) {
+                if ($ouDN) {
+                    New-GPLink -Name $gpoName -Target $ouDN -Server $adServer -LinkEnabled Yes -ErrorAction Stop | Out-Null
+                }
             }
         } catch {
             Write-Error $_.Exception.Message

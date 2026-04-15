@@ -251,13 +251,16 @@ const App = {
   ouPickerTreeHTML(nodes, query, selectedDN) {
     if (!nodes || !nodes.length) return '';
     const q = (query || '').trim().toLowerCase();
+    const selectedDNs = Array.isArray(selectedDN)
+      ? selectedDN.filter(Boolean)
+      : (selectedDN ? [selectedDN] : []);
     let html = '<ul class="tree" style="margin:0;padding-left:0;">';
     for (const node of nodes) {
       if (q && !this.ouNodeMatchesSearch(node, q)) continue;
       const hasChildren = node.children && node.children.length > 0;
-      const isSelected = node.dn === selectedDN;
+      const isSelected = selectedDNs.includes(node.dn);
       // Auto-expand: when searching, when selected, or when selected is a descendant
-      const selectedIsDescendant = selectedDN && selectedDN !== node.dn && selectedDN.includes(node.dn);
+      const selectedIsDescendant = selectedDNs.some(dn => dn !== node.dn && dn.includes(node.dn));
       const shouldExpand = q ? true : (isSelected || !!selectedIsDescendant);
       
       const escName = this._esc(node.name);
