@@ -7,3 +7,5 @@ out/
 *.log
 npm-debug.log*
 .DS_Store
+.claude/
+CLAUDE.md
