@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
+const { resolveNamedSubdirectory } = require('./path-utils');
 
 let appsFilePath = null;
 
@@ -91,6 +92,8 @@ const appService = {
       wingetId: data.wingetId || '',
       odtConfig: data.odtConfig || null,
       customParams: data.customParams || {},
+      templateFiles: data.templateFiles || {},
+      templateDefinition: data.templateDefinition || null,
       ouDN: assignedOUs[0] || '',
       assignedOUs,
       gpoName: data.gpoName || '',
@@ -136,15 +139,8 @@ const appService = {
       const configService = require('./config');
       const cfg = configService.getConfig();
       if (cfg && cfg.networkSharePath) {
-        const safeAppName = (appToDelete.name || '').replace(/[^a-zA-Z0-9\s\-_.]/g, '').substring(0, 128);
-        if (safeAppName && safeAppName !== appToDelete.name) {
-          return { success: false, error: 'Invalid app name detected' };
-        }
-        const folderPath = path.normalize(path.join(cfg.networkSharePath, safeAppName));
-        if (!folderPath.startsWith(path.normalize(cfg.networkSharePath))) {
-          return { success: false, error: 'Path traversal detected' };
-        }
         try {
+          const { path: folderPath } = resolveNamedSubdirectory(cfg.networkSharePath, appToDelete.name, 'App');
           if (fs.existsSync(folderPath)) {
             fs.rmSync(folderPath, { recursive: true, force: true });
           }

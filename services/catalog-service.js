@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════════════════
 
 const https = require('https');
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 
 // ─── Curated Catalog ────────────────────────────────────────
 // versionCheck.method: 'github' | 'winget' | 'none'
@@ -236,18 +236,54 @@ function checkVersionGitHub(repo) {
   });
 }
 
+const WINGET_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9+._-]*(\.[A-Za-z0-9][A-Za-z0-9+._-]*)+$/;
+
+function isValidWingetId(wingetId) {
+  return typeof wingetId === 'string'
+    && wingetId.length > 0
+    && wingetId.length <= 256
+    && WINGET_ID_PATTERN.test(wingetId.trim());
+}
+
+function normalizeWingetQuery(query) {
+  if (typeof query !== 'string') return '';
+  return query.replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, 128);
+}
+
+function runWinget(args, timeout) {
+  return new Promise((resolve) => {
+    execFile(
+      'winget',
+      args,
+      { timeout, windowsHide: true, maxBuffer: 1024 * 1024 * 4 },
+      (err, stdout) => {
+        if (err || !stdout) {
+          resolve('');
+          return;
+        }
+        resolve(stdout);
+      }
+    );
+  });
+}
+
 function checkVersionWinget(wingetId) {
   return new Promise((resolve) => {
-    const cmd = `winget show --id "${wingetId}" --source winget --accept-source-agreements 2>nul`;
-    exec(cmd, { timeout: 15000, shell: 'cmd.exe' }, (err, stdout) => {
-      if (err || !stdout) { resolve(null); return; }
-      const match = stdout.match(/Version\s*:\s*([^\r\n]+)/i);
-      if (match) {
-        resolve(match[1].trim() || null);
-      } else {
-        resolve(null);
-      }
-    });
+    if (!isValidWingetId(wingetId)) {
+      resolve(null);
+      return;
+    }
+
+    runWinget(['show', '--id', wingetId.trim(), '--source', 'winget', '--accept-source-agreements'], 15000)
+      .then(stdout => {
+        if (!stdout) { resolve(null); return; }
+        const match = stdout.match(/Version\s*:\s*([^\r\n]+)/i);
+        if (match) {
+          resolve(match[1].trim() || null);
+        } else {
+          resolve(null);
+        }
+      });
   });
 }
 
@@ -256,15 +292,14 @@ function checkVersionWinget(wingetId) {
 
 function searchWingetCLI(query) {
   return new Promise((resolve) => {
-    if (!query || query.length < 2) { resolve([]); return; }
+    const safeQuery = normalizeWingetQuery(query);
+    if (!safeQuery || safeQuery.length < 2) { resolve([]); return; }
 
-    // Sanitise: strip double-quotes to avoid shell injection
-    const safeQuery = query.replace(/"/g, '');
+    runWinget(['search', '--query', safeQuery, '--source', 'winget', '--accept-source-agreements'], 25000)
+      .then(stdout => {
     // Note: --disable-interactivity was added in winget 1.5 — omit for compatibility
-    const cmd = `winget search --query "${safeQuery}" --source winget --accept-source-agreements 2>nul`;
 
-    exec(cmd, { timeout: 25000, shell: 'cmd.exe' }, (_err, stdout) => {
-      if (!stdout || !stdout.trim()) { resolve([]); return; }
+        if (!stdout || !stdout.trim()) { resolve([]); return; }
 
       // Strip ANSI/VT escape sequences winget may emit
       const clean = stdout.replace(/\x1B\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
@@ -410,6 +445,13 @@ const catalogService = {
    * @returns {Promise<{wingetId, latestVersion}>}
    */
   async checkSingle(wingetId) {
+    if (!isValidWingetId(wingetId)) {
+      return {
+        wingetId,
+        latestVersion: null
+      };
+    }
+
     const item = CURATED_CATALOG.find(a => a.wingetId === wingetId);
     let latestVersion = null;
     

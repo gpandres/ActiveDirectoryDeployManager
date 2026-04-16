@@ -35,8 +35,17 @@ function normalizeDNArray(value) {
     });
 }
 
+// Sanitize an AD Distinguished Name for embedding in a PS single-quoted string.
+// In PS '...' only the single quote itself needs escaping (doubled).
+// We also strip backtick, $, ;, |, &, {, }, <, >, NUL which could break PS even
+// in single-quoted context if the shell pre-processes the command.
+function sanitizeDN(dn) {
+  if (typeof dn !== 'string') return '';
+  return dn.replace(/[`$;|&{}<>\0]/g, '').replace(/'/g, "''").trim();
+}
+
 function toPSSingleQuotedArray(values) {
-  return '@(' + values.map(v => `'${sanitizePSInput(v).replace(/'/g, "''")}'`).join(',') + ')';
+  return '@(' + values.map(v => `'${sanitizeDN(v)}'`).join(',') + ')';
 }
 
 function runPowerShell(command) {
@@ -169,7 +178,7 @@ const adService = {
     try {
       const config = require('./config').getConfig();
       const safeGpo = sanitizePSInput(gpoName).replace(/'/g, "''");
-      const safeOU = sanitizePSInput(ouDN).replace(/'/g, "''");
+      const safeOU = sanitizeDN(ouDN);
       await runPowerShell(
         `Import-Module ActiveDirectory; Import-Module GroupPolicy; ${dcSnippet(config.preferredDC)}; New-GPLink -Name '${safeGpo}' -Target '${safeOU}' -Server $adServer -LinkEnabled Yes -ErrorAction Stop`
       );
@@ -299,7 +308,7 @@ const adService = {
     try {
       const config = require('./config').getConfig();
       const safeGpoName = sanitizePSInput(gpoName).replace(/'/g, "''");
-      const safeOuDN = sanitizePSInput(ouDN).replace(/'/g, "''");
+      const safeOuDN = sanitizeDN(ouDN);
       await runPowerShell(
         `Import-Module ActiveDirectory; Import-Module GroupPolicy; ${dcSnippet(config.preferredDC)}; Remove-GPLink -Name '${safeGpoName}' -Target '${safeOuDN}' -Server $adServer -ErrorAction Stop`
       );
@@ -379,7 +388,7 @@ const adService = {
   async checkGPOConflicts(ouDN) {
     try {
       const config = require('./config').getConfig();
-      const safeOuDN = sanitizePSInput(ouDN).replace(/'/g, "''");
+      const safeOuDN = sanitizeDN(ouDN);
       const json = await runPowerShell(
         `Import-Module ActiveDirectory; Import-Module GroupPolicy; ${dcSnippet(config.preferredDC)}; (Get-GPInheritance -Target '${safeOuDN}' -Server $adServer).GpoLinks | Select-Object DisplayName,Enabled,Order | ConvertTo-Json -Depth 2`
       );

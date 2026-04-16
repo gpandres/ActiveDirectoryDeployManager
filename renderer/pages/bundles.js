@@ -182,6 +182,7 @@ const BundlesPage = {
           ${bundle.gpoName ? `<span class="badge badge-info">${this.esc(bundle.gpoName)}</span>` : ''}
           ${bundle.createGPO ? `<span class="badge badge-info">${t('bundles.autoGpo')}</span>` : ''}
           ${bundle.notifyUser ? '<span class="badge badge-info">🔔</span>' : ''}
+          ${(() => { const ous = this.getBundleOUs(bundle); const n = ous.length; return n > 0 ? `<span class="badge badge-neutral" title="${t('apps.detailAssignedOUs')}">🏢 ${n} OU${n > 1 ? 's' : ''}</span>` : ''; })()}
         </div>
         <div class="bundle-card-apps">
           ${bundle.apps.map(a => `<span class="app-chip">${this.esc(a.name)}</span>`).join('')}
@@ -630,7 +631,7 @@ const BundlesPage = {
               <div id="wiz-bundle-ou-selected" style="margin-top:8px;display:flex;flex-wrap:wrap;align-items:center;gap:6px;">
                 ${this.renderOUChips(state.selectedOUs || [])}
               </div>
-              <input type="hidden" id="wiz-bundle-ou" value="${this.esc(JSON.stringify(state.selectedOUs || []))}">
+              <input type="hidden" id="wiz-bundle-ou" value="${JSON.stringify(state.selectedOUs || []).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">
             </div>
           ` : ''}
 
@@ -710,26 +711,42 @@ const BundlesPage = {
 
     const sync = () => {
       hiddenEl.value = JSON.stringify(state.selectedOUs || []);
-      selectedEl.innerHTML = this.renderOUChips(state.selectedOUs || []);
+      const chips = this.renderOUChips(state.selectedOUs || []);
+      const clearBtn = (state.selectedOUs || []).length > 0
+        ? `<button type="button" class="btn btn-ghost btn-sm" id="btn-bundle-ou-clear" style="font-size:11px;margin-left:4px;opacity:.7;">${t('common.clear') || 'Borrar selección'}</button>`
+        : '';
+      selectedEl.innerHTML = chips + clearBtn;
+
       selectedEl.querySelectorAll('.btn-remove-bundle-ou').forEach(btn => {
-        btn.addEventListener('click', (e) => {
+        btn.onclick = (e) => {
           e.preventDefault();
           const dn = btn.dataset.dn;
           state.selectedOUs = this.normalizeOUDNs((state.selectedOUs || []).filter(item => item !== dn));
           state.ouDN = state.selectedOUs[0] || '';
           sync();
-        });
+        };
       });
+
+      const clearAllBtn = document.getElementById('btn-bundle-ou-clear');
+      if (clearAllBtn) {
+        clearAllBtn.onclick = (e) => {
+          e.preventDefault();
+          state.selectedOUs = [];
+          state.ouDN = '';
+          hiddenEl.value = '[]';
+          sync();
+        };
+      }
     };
 
-    addBtn.addEventListener('click', () => {
+    addBtn.onclick = () => {
       if (!selectEl.value) return;
       state.selectedOUs = this.normalizeOUDNs([...(state.selectedOUs || []), selectEl.value]);
       state.ouDN = state.selectedOUs[0] || '';
       sync();
-    });
+    };
 
-    selectEl.addEventListener('dblclick', () => addBtn.click());
+    selectEl.ondblclick = () => addBtn.click();
     sync();
   },
 

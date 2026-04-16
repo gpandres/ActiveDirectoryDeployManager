@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const configService = require('./config');
+const { resolveNamedSubdirectory } = require('./path-utils');
 
 const fileService = {
   listDeployedApps() {
@@ -30,7 +31,11 @@ const fileService = {
           });
 
           const hasScript = files.some(f => f.extension === '.ps1');
-          const hasInstaller = files.some(f => f.extension === '.msi' || f.extension === '.exe');
+          const hasInstaller = files.some(f =>
+            f.extension === '.msi'
+            || f.extension === '.exe'
+            || (f.extension === '.ps1' && String(f.name || '').toLowerCase() !== 'install.ps1')
+          );
 
           // Read version manifest if available
           let manifest = null;
@@ -77,14 +82,7 @@ const fileService = {
   getAppContents(name) {
     try {
       const config = configService.getConfig();
-      const safeName = (name || '').replace(/[^a-zA-Z0-9\s\-_.]/g, '').substring(0, 128);
-      if (!safeName || safeName !== name) {
-        return { success: false, error: 'Invalid folder name', data: [] };
-      }
-      const dirPath = path.normalize(path.join(config.networkSharePath, safeName));
-      if (!dirPath.startsWith(path.normalize(config.networkSharePath))) {
-        return { success: false, error: 'Path traversal detected', data: [] };
-      }
+      const { path: dirPath } = resolveNamedSubdirectory(config.networkSharePath, name, 'App');
 
       if (!fs.existsSync(dirPath)) {
         return { success: false, error: 'Carpeta no encontrada', data: [] };
@@ -110,14 +108,7 @@ const fileService = {
   createAppFolder(name) {
     try {
       const config = configService.getConfig();
-      const safeName = (name || '').replace(/[^a-zA-Z0-9\s\-_.]/g, '').substring(0, 128);
-      if (!safeName || safeName !== name) {
-        return { success: false, error: 'Invalid folder name' };
-      }
-      const dirPath = path.normalize(path.join(config.networkSharePath, safeName));
-      if (!dirPath.startsWith(path.normalize(config.networkSharePath))) {
-        return { success: false, error: 'Path traversal detected' };
-      }
+      const { path: dirPath } = resolveNamedSubdirectory(config.networkSharePath, name, 'App');
 
       if (!fs.existsSync(dirPath)) {
         fs.mkdirSync(dirPath, { recursive: true });

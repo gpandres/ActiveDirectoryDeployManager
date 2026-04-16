@@ -33,6 +33,10 @@ const AppsPage = {
           <p class="page-subtitle">${t('apps.subtitle')}</p>
         </div>
         <div style="display:flex;gap:8px;">
+          <button class="btn btn-secondary" id="btn-manage-templates">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M12 12l8-4.5"/><path d="M12 12v9"/><path d="M12 12L4 7.5"/></svg>
+            ${this.tr('apps.manageTemplates', 'Plantillas')}
+          </button>
           <button class="btn btn-secondary" id="btn-check-updates">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg>
             ${t('apps.checkUpdates')}
@@ -125,6 +129,7 @@ const AppsPage = {
     this._currentFilter = 'all';
 
     document.getElementById('btn-new-app').addEventListener('click', () => this.openWizard());
+    document.getElementById('btn-manage-templates')?.addEventListener('click', () => this.openTemplateManager());
     document.getElementById('btn-check-updates')?.addEventListener('click', () => this.checkUpdates());
     document.getElementById('btn-bulk-gpo').addEventListener('click', () => this.bulkAssignGPO());
     document.getElementById('btn-bulk-delete')?.addEventListener('click', () => this.bulkDelete());
@@ -203,7 +208,7 @@ const AppsPage = {
   },
 
   renderAppCard(app, templates) {
-    const templateInfo = templates.find(tmpl => tmpl.id === app.template) || { name: app.template };
+    const templateInfo = templates.find(tmpl => tmpl.id === app.template) || { name: app.templateDefinition?.name || app.template };
     const isDeployed = app.deployed !== false && app.deployedPath;
     const statusClass = isDeployed ? 'deployed' : 'pending';
     const statusText = isDeployed ? t('apps.deployedBadge') : t('apps.detailNotDeployed');
@@ -219,8 +224,9 @@ const AppsPage = {
           </div>
         </div>
         <div class="app-card-badges">
-          <span class="badge badge-info">v${this.esc(app.version || '1.0.0')}</span>
+          <span class="badge badge-info app-card-version">v${this.esc(app.version || '1.0.0')}</span>
           ${app.gpoName ? `<span class="badge badge-info" title="GPO">${this.esc(app.gpoName)}</span>` : ''}
+          ${(() => { const n = Array.isArray(app.assignedOUs) ? app.assignedOUs.length : (app.ouDN ? 1 : 0); return n > 0 ? `<span class="badge badge-neutral" title="${t('apps.detailAssignedOUs')}">🏢 ${n} OU${n > 1 ? 's' : ''}</span>` : ''; })()}
         </div>
         <div class="app-card-footer" onclick="event.stopPropagation()">
           <div class="app-card-deploy-info">
@@ -365,16 +371,36 @@ const AppsPage = {
     return div.innerHTML;
   },
 
-  // Returns the .exe/.msi path inside the app's share folder, or null if
+  isSupportedInstallerExtension(extension) {
+    return ['.exe', '.msi', '.ps1'].includes(String(extension || '').toLowerCase());
+  },
+
+  isInstallerTemplateFile(fileField) {
+    return fileField?.storageKind === 'installer';
+  },
+
+  getInstallerTypeFromPath(installerPath, template = '') {
+    if (template === 'winget') return 'winget';
+    if (template === 'odt') return 'odt';
+    const normalized = String(installerPath || '').toLowerCase();
+    if (normalized.endsWith('.msi')) return 'msi';
+    if (normalized.endsWith('.ps1')) return 'ps1';
+    return 'exe';
+  },
+
+  // Returns the installer path inside the app's share folder, or null if
   // the app isn't deployed / no installer is present on the share.
-  async resolveSharedInstaller(appName) {
+  async resolveSharedInstaller(appName, preferredInstallerPath = '') {
     try {
       if (!appName) return null;
       const result = await window.api.files.getContents(appName);
       if (!result || !result.success || !Array.isArray(result.data)) return null;
-      const installer = result.data.find(f =>
-        f.extension === '.exe' || f.extension === '.msi'
+      const preferredName = String(preferredInstallerPath || '').split(/[\\/]/).pop()?.toLowerCase() || '';
+      const installers = result.data.filter(f =>
+        this.isSupportedInstallerExtension(f.extension)
+        && String(f.name || '').toLowerCase() !== 'install.ps1'
       );
+      const installer = installers.find(f => String(f.name || '').toLowerCase() === preferredName) || installers[0];
       if (!installer) return null;
       const config = await window.api.config.get();
       if (!config || !config.networkSharePath) return null;
@@ -391,11 +417,11 @@ const AppsPage = {
     if (!app) return;
 
     const templates = await window.api.scripts.getTemplates();
-    const templateInfo = templates.find(tmpl => tmpl.id === app.template) || { name: app.template };
+    const templateInfo = templates.find(tmpl => tmpl.id === app.template) || { name: app.templateDefinition?.name || app.template };
     const isDeployed = app.deployed !== false && app.deployedPath;
 
     // Prefer the share location for the installer (where it actually lives now)
-    const sharedInstaller = await this.resolveSharedInstaller(app.name);
+    const sharedInstaller = await this.resolveSharedInstaller(app.name, app.installerPath);
     const displayInstallerPath = sharedInstaller || app.installerPath;
 
     const row = (label, value) => value ? `
@@ -535,7 +561,7 @@ const AppsPage = {
     if (!app) return;
 
     const templates = await window.api.scripts.getTemplates();
-    const templateInfo = templates.find(tmpl => tmpl.id === app.template) || { name: app.template };
+    const templateInfo = templates.find(tmpl => tmpl.id === app.template) || { name: app.templateDefinition?.name || app.template };
 
     // Local state for the quick update flow
     const state = {
@@ -714,9 +740,7 @@ const AppsPage = {
       });
 
       // 2. Build updated app data
-      const newInstallerType = app.template === 'winget' ? 'winget'
-        : app.template === 'odt' ? 'odt'
-        : state.newInstallerPath.toLowerCase().endsWith('.msi') ? 'msi' : 'exe';
+      const newInstallerType = this.getInstallerTypeFromPath(state.newInstallerPath, app.template);
       const updatedData = {
         installerPath: state.newInstallerPath,
         installerType: newInstallerType,
@@ -986,6 +1010,13 @@ const AppsPage = {
 
       App.toast(t('apps.updateSuccess').replace('{name}', appName).replace('{version}', newVersion), 'success');
 
+      // Update the card version badge in-place without a full page reload
+      const card = document.querySelector(`.app-card[data-id="${appId}"]`);
+      if (card) {
+        const vBadge = card.querySelector('.app-card-version');
+        if (vBadge) vBadge.textContent = `v${newVersion}`;
+      }
+
       // Remove from results list
       this._updateCheckResults = this._updateCheckResults.filter(r => r.appId !== appId);
       const panel = document.getElementById('apps-updates-panel');
@@ -1115,6 +1146,22 @@ const AppsPage = {
       const ids = Array.from(this.selectedIds);
       await window.api.apps.bulkAssignGPO(ids, gpoName);
       App.toast(t('apps.gpoAssignedBulk').replace('{gpo}', gpoName).replace('{count}', ids.length), 'success');
+
+      // Link GPO to all unique OUs across the selected apps
+      if (App.rsatAvailable) {
+        try {
+          const allApps = await window.api.apps.getAll();
+          const ouSet = new Set();
+          allApps.filter(a => ids.includes(a.id)).forEach(a => {
+            const ous = Array.isArray(a.assignedOUs) ? a.assignedOUs : (a.ouDN ? [a.ouDN] : []);
+            ous.forEach(ou => ou && ouSet.add(ou));
+          });
+          if (ouSet.size > 0) {
+            await window.api.ad.bulkLinkGPO(gpoName, Array.from(ouSet));
+          }
+        } catch (e) { /* non-fatal */ }
+      }
+
       this.clearSelection();
       App.navigate('apps');
     } catch (err) {
@@ -1246,6 +1293,10 @@ const AppsPage = {
       ]);
       this.wingetCatalogCache = catalogData;
       const isEdit = !!(existingApp?.id);
+      if (existingApp?.templateDefinition?.kind === 'user-template' && !templates.some(tmpl => tmpl.id === existingApp.template)) {
+        const fallbackTemplate = this.buildTemplateViewFromDefinition(existingApp.template, existingApp.templateDefinition);
+        if (fallbackTemplate) templates.push(fallbackTemplate);
+      }
 
       // Pre-fetch OUs — always refresh for new apps so stale tree/baseOU change is reflected
       if (!isEdit) { this.ousTreeCache = null; this.ousCache = null; }
@@ -1263,8 +1314,20 @@ const AppsPage = {
       // lives now) instead of the original local path used at creation time.
       let initialInstallerPath = existingApp?.installerPath || '';
       if (existingApp) {
-        const sharedPath = await this.resolveSharedInstaller(existingApp.name);
+        const sharedPath = await this.resolveSharedInstaller(existingApp.name, existingApp.installerPath);
         if (sharedPath) initialInstallerPath = sharedPath;
+      }
+      let initialConfigXmlPath = existingApp?.configXmlPath || '';
+      let initialTemplateFiles = existingApp?.templateFiles || {};
+      if (existingApp?.template) {
+        const selectedTemplate = templates.find(tmpl => tmpl.id === existingApp.template) || null;
+        const normalizedTemplateSelection = this.reconcileLegacyTemplateXmlSelection(
+          selectedTemplate,
+          initialTemplateFiles,
+          initialConfigXmlPath
+        );
+        initialTemplateFiles = normalizedTemplateSelection.templateFiles;
+        initialConfigXmlPath = normalizedTemplateSelection.configXmlPath;
       }
 
     // State
@@ -1290,8 +1353,10 @@ const AppsPage = {
       name: existingApp?.name || '',
       silentArgs: existingApp?.silentArgs || '/S',
       installerPath: initialInstallerPath,
-      configXmlPath: existingApp?.configXmlPath || '',
+      configXmlPath: initialConfigXmlPath,
       customParams: existingApp?.customParams || {},
+      templateFiles: initialTemplateFiles,
+      templateDefinition: existingApp?.templateDefinition || null,
       selectedOUs: (existingApp?.assignedOUs && existingApp.assignedOUs.length > 0)
         ? [...existingApp.assignedOUs]
         : (existingApp?.ouDN ? [existingApp.ouDN] : []),
@@ -1445,13 +1510,25 @@ const AppsPage = {
 
         } else if (state.catalogTab === 'plantilla') {
           // ── Plantilla tab: Non-General templates + Office XML ─────
-          const plantillaCats = ['Security', 'Connectivity', 'RMM', 'Backups', 'Corporate'];
+          const preferredPlantillaCats = ['Security', 'Connectivity', 'RMM', 'Backups', 'Corporate', 'Custom'];
+          const plantillaCats = [
+            ...preferredPlantillaCats.filter(cat => templates.some(tmpl => tmpl.category === cat && tmpl.id !== 'office')),
+            ...[...new Set(
+              templates
+                .filter(tmpl => tmpl.category && tmpl.category !== 'General' && tmpl.id !== 'office' && !preferredPlantillaCats.includes(tmpl.category))
+                .map(tmpl => tmpl.category)
+            )]
+          ];
+          let hasVisibleTemplates = false;
 
           // Search bar for Plantilla tab
           body += `
-            <div style="position:relative;margin-bottom:var(--space-sm);max-width:320px;">
-              <svg style="position:absolute;left:8px;top:50%;transform:translateY(-50%);opacity:.4;pointer-events:none;" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input type="text" class="form-input" id="plantilla-search" value="${this.esc(state.plantillaSearch||'')}" placeholder="Buscar plantilla..." style="padding-left:28px;padding-top:5px;padding-bottom:5px;font-size:13px;" autocomplete="off">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:var(--space-sm);flex-wrap:wrap;">
+              <div style="position:relative;max-width:360px;flex:1;min-width:260px;">
+                <svg style="position:absolute;left:8px;top:50%;transform:translateY(-50%);opacity:.4;pointer-events:none;" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" class="form-input" id="plantilla-search" value="${this.esc(state.plantillaSearch||'')}" placeholder="Buscar plantilla..." style="padding-left:28px;padding-top:6px;padding-bottom:6px;font-size:13px;" autocomplete="off">
+              </div>
+              <button class="btn btn-secondary btn-sm" type="button" id="btn-open-template-manager">${this.tr('apps.newCustomTemplate', 'Nueva plantilla')}</button>
             </div>
           `;
 
@@ -1463,6 +1540,7 @@ const AppsPage = {
           if (officeTmpl) {
             const officeMatches = !pq || 'microsoft office'.includes(pq) || 'office xml'.includes(pq) || officeTmpl.name.toLowerCase().includes(pq) || officeTmpl.description.toLowerCase().includes(pq);
             if (officeMatches) {
+              hasVisibleTemplates = true;
               body += `
                 <div class="template-category-group" style="margin-bottom:var(--space-md);">
                   <h5 style="margin-bottom:var(--space-sm);color:var(--text-primary);border-bottom:1px solid var(--border-color);padding-bottom:4px;">Microsoft Office</h5>
@@ -1484,9 +1562,10 @@ const AppsPage = {
               return tmpl.name.toLowerCase().includes(pq) || tmpl.description.toLowerCase().includes(pq) || tmpl.id.toLowerCase().includes(pq) || cat.toLowerCase().includes(pq);
             });
             if (!catTmpls.length) return;
+            hasVisibleTemplates = true;
             body += `
               <div class="template-category-group" style="margin-bottom:var(--space-md);">
-                <h5 style="margin-bottom:var(--space-sm);color:var(--text-primary);border-bottom:1px solid var(--border-color);padding-bottom:4px;">${cat}</h5>
+                <h5 style="margin-bottom:var(--space-sm);color:var(--text-primary);border-bottom:1px solid var(--border-color);padding-bottom:4px;">${cat === 'Custom' ? this.tr('apps.customTemplatesTitle', 'Plantillas personalizadas') : cat}</h5>
                 <div class="template-grid">
                   ${catTmpls.map(tmpl => `
                     <div class="template-card ${state.template === tmpl.id ? 'selected' : ''}" data-template="${tmpl.id}">
@@ -1497,6 +1576,9 @@ const AppsPage = {
                 </div>
               </div>`;
           });
+          if (!hasVisibleTemplates) {
+            body += `<div style="padding:16px;border:1px dashed var(--border-color);border-radius:8px;color:var(--text-muted);font-size:12px;">${this.tr('apps.templatesSearchEmpty', 'No se han encontrado plantillas para esa busqueda.')}</div>`;
+          }
           body += `</div>`;
 
         } else {
@@ -1504,12 +1586,18 @@ const AppsPage = {
           const manualTmpls = templates.filter(tmpl => tmpl.id === 'generic' || tmpl.id === 'custom');
           body += `
             <div style="max-height:360px;overflow-y:auto;padding-right:2px;">
+              <div style="margin-bottom:var(--space-sm);">
+                <div>
+                  <div style="font-size:12px;font-weight:700;color:var(--text-primary);">${this.tr('apps.manualTemplatesTitle', 'Plantillas manuales')}</div>
+                  <div style="font-size:11px;color:var(--text-muted);">${this.tr('apps.manualTemplatesHint', 'Usa una app generica o un script manual cuando no quieras una plantilla reutilizable.')}</div>
+                </div>
+              </div>
               <div class="template-grid">
                 ${manualTmpls.map(tmpl => `
                   <div class="template-card ${state.template === tmpl.id ? 'selected' : ''}" data-template="${tmpl.id}">
                     <div class="template-card-icon">${this.templateIcon(tmpl.id)}</div>
                     <div class="template-card-name">${this.esc(tmpl.name)}</div>
-                    <div class="template-card-desc">${this.esc(tmpl.description)}</div>
+                  <div class="template-card-desc">${this.esc(tmpl.description)}</div>
                   </div>`).join('')}
               </div>
             </div>`;
@@ -1519,6 +1607,9 @@ const AppsPage = {
         const tmpl = templates.find(tmp => tmp.id === state.template);
         const isWinget = state.template === 'winget';
         const isODT = state.template === 'odt';
+        const isUserTemplate = !!tmpl?.isUserDefined;
+        const showsConfigXmlPicker = ['sap-gui', 'office'].includes(state.template);
+        const requiresConfigXml = ['sap-gui', 'office'].includes(state.template);
 
         body += `
           <div class="form-group">
@@ -1526,6 +1617,25 @@ const AppsPage = {
             <input class="form-input" id="wiz-name" value="${this.esc(state.name)}" placeholder="Ej: Google Chrome">
             <p class="form-hint">${t('apps.nameHint')}</p>
           </div>`;
+
+        if (isUserTemplate) {
+          const fieldCount = Array.isArray(tmpl?.fields) ? tmpl.fields.length : 0;
+          const fileCount = Array.isArray(tmpl?.fileFields) ? tmpl.fileFields.length : 0;
+          body += `
+            <div class="card" style="padding:14px 16px;margin:0 0 14px 0;background:rgba(30,144,255,0.08);border-color:rgba(30,144,255,0.2);">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+                <div>
+                  <div style="font-size:15px;font-weight:700;color:var(--text-primary);">${this.esc(tmpl.name)}</div>
+                  <p style="margin:6px 0 0 0;font-size:13px;line-height:1.5;color:var(--text-secondary);">${this.esc(tmpl.description || this.tr('apps.customTemplateDefaultDescLong', 'Plantilla reutilizable. Completa solo los valores que cambian en cada despliegue.'))}</p>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  <span class="badge badge-info">${fieldCount} ${this.tr('apps.customTemplateArgsBadge', 'campos')}</span>
+                  <span class="badge badge-neutral">${fileCount} ${this.tr('apps.customTemplateFilesBadge', 'archivos')}</span>
+                  ${tmpl?.hasCustomScript ? `<span class="badge badge-primary">${this.tr('apps.customTemplateScriptBadge', 'script opcional')}</span>` : ''}
+                </div>
+              </div>
+            </div>`;
+        }
 
         if (isWinget) {
           // ── Winget mode: info panel + wingetId display ──────────
@@ -1640,17 +1750,17 @@ const AppsPage = {
             </div>
           ` : ''}
 
-          ${['sap-gui', 'office'].includes(state.template) ? `
+          ${showsConfigXmlPicker ? `
             <div class="form-group">
-              <label class="form-label">${t('apps.xmlConfig')}</label>
+              <label class="form-label">${t('apps.xmlConfig')}${requiresConfigXml ? ' *' : ''}</label>
               <div class="flex gap-sm">
-                <input class="form-input" id="wiz-xml" value="${this.esc(state.configXmlPath)}" placeholder="${t('apps.xmlHint')}" readonly style="flex:1">
+                <input class="form-input" id="wiz-xml" value="${this.esc(state.configXmlPath)}" placeholder="${this.esc(t('apps.xmlHint'))}" readonly style="flex:1">
                 <button class="btn btn-secondary" id="btn-pick-xml">${t('apps.browse')}</button>
               </div>
             </div>
           ` : ''}
 
-          ${state.template === 'generic' ? `
+          ${state.template === 'generic' || isUserTemplate ? `
             <div id="wiz-silent-args-container">
               <div class="form-group">
                 <label class="form-label">${t('apps.silentArgs')}</label>
@@ -1661,6 +1771,7 @@ const AppsPage = {
                     ${t('apps.commonArgs')}
                   </button>
                 </div>
+                ${isUserTemplate ? `<p class="form-hint">${this.tr('apps.customTemplateSilentHint', 'Estos argumentos base se anaden antes de los argumentos definidos en la plantilla.')}</p>` : ''}
               </div>
             </div>
           ` : ''}`;
@@ -1712,12 +1823,30 @@ const AppsPage = {
             }
             return `
               <div class="form-group">
-                <label class="form-label">${this.esc(f.label)}</label>
+                <label class="form-label">${this.esc(f.label)}${f.required ? ' *' : ''}</label>
                 ${inputHtml}
                 ${f.hint ? '<p class="form-hint">' + this.esc(f.hint) + '</p>' : ''}
               </div>
             `;
           }).join('') : ''}
+
+          ${(!isWinget && !isODT && isUserTemplate) ? (tmpl?.fileFields || []).map(fileField => `
+            <div class="form-group">
+              <label class="form-label">${this.esc(fileField.label)}${fileField.required ? ' *' : ''}</label>
+              <div class="flex gap-sm">
+                <input class="form-input" id="wiz-file-${fileField.key}" value="${this.esc(state.templateFiles[fileField.key]?.sourcePath || state.templateFiles[fileField.key] || '')}" placeholder="${this.esc(this.describeTemplateFile(fileField))}" readonly style="flex:1">
+                <button class="btn btn-secondary btn-template-file" type="button" data-file-key="${this.esc(fileField.key)}">${t('apps.browse')}</button>
+              </div>
+              <p class="form-hint">${this.esc(this.describeTemplateFile(fileField))}</p>
+            </div>
+          `).join('') : ''}
+
+          ${isUserTemplate && tmpl?.hasCustomScript ? `
+            <div style="padding:12px 14px;background:rgba(30,144,255,0.08);border:1px solid rgba(30,144,255,0.2);border-radius:8px;margin-top:8px;">
+              <div style="font-weight:600;font-size:13px;color:var(--text-primary);margin-bottom:4px;">${this.tr('apps.customTemplatePostScriptTitle', 'Script adicional')}</div>
+              <p style="margin:0;font-size:12px;color:var(--text-secondary);">${this.tr('apps.customTemplatePostScriptHint', 'La plantilla incluye un script opcional que se ejecutara despues del instalador con acceso a los valores y archivos auxiliares definidos.')}</p>
+            </div>
+          ` : ''}
         `;
       } else if (state.step === 3) {
         const selectedOUs = Array.isArray(state.selectedOUs) ? state.selectedOUs : [];
@@ -1731,20 +1860,10 @@ const AppsPage = {
             <div id="wiz-ou-tree" style="max-height:190px;overflow-y:auto;border:1px solid var(--border-color);border-radius:6px;padding:4px 6px;background:var(--bg-secondary);">
               ${this.ousTreeCache ? App.ouPickerTreeHTML(this.ousTreeCache, '', selectedOUs) : `<p style="padding:8px;font-size:13px;color:var(--text-muted);">${t('ous.noOusFound')}</p>`}
             </div>
-            <div id="wiz-ou-selected" style="margin-top:6px;min-height:22px;display:flex;align-items:center;gap:8px;">
-              ${selectedOUs.length > 0
-                ? selectedOUs.map(dn => {
-                    const selectedOUName = this.ousCache
-                      ? (this.ousCache.find(o => o.dn === dn) || {}).name || dn
-                      : dn;
-                    return `<span style="display:inline-flex;align-items:center;gap:6px;background:rgba(30,144,255,0.15);color:var(--primary-color);padding:2px 10px;border-radius:4px;font-size:12px;">
-                      📁 ${this.esc(selectedOUName)}
-                      <button class="btn btn-ghost btn-sm btn-remove-ou" data-dn="${this.esc(dn)}" style="font-size:11px;padding:0 4px;min-height:auto;">✕</button>
-                    </span>`;
-                  }).join('')
-                : `<span style="font-size:12px;color:var(--text-muted);">${t('apps.selectOuRecommended')}</span>`}
+            <div id="wiz-ou-selected" style="margin-top:6px;min-height:22px;display:flex;flex-wrap:wrap;align-items:center;gap:6px;">
+              <span style="font-size:12px;color:var(--text-muted);">${t('apps.selectOuRecommended')}</span>
             </div>
-            <input type="hidden" id="wiz-ou-dn" value="${this.esc(JSON.stringify(selectedOUs))}">
+            <input type="hidden" id="wiz-ou-dn" value="${JSON.stringify(selectedOUs).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">
           </div>
 
           <div class="form-group mb-md">
@@ -1818,6 +1937,10 @@ const AppsPage = {
         // Clear template selection when switching tabs so user picks fresh
         state.template = '';
         state.wingetId = '';
+        state.customParams = {};
+        state.templateFiles = {};
+        state.templateDefinition = null;
+        state.configXmlPath = '';
         renderWizard();
       });
     });
@@ -1827,6 +1950,13 @@ const AppsPage = {
       card.addEventListener('click', (e) => {
         e.stopPropagation(); // prevent the generic .template-card handler below
         const catalogType = card.dataset.catalogType;
+        const nextTemplate = catalogType === 'odt' ? 'odt' : 'winget';
+        if (state.template !== nextTemplate) {
+          state.customParams = {};
+          state.templateFiles = {};
+          state.templateDefinition = null;
+          state.configXmlPath = '';
+        }
         if (catalogType === 'odt') {
           state.template = 'odt';
           state.wingetId = '';
@@ -1848,6 +1978,12 @@ const AppsPage = {
     // ── Template selection (plantilla / manual tabs) ──────────────
     document.querySelectorAll('.template-card:not(.catalog-item)').forEach(card => {
       card.addEventListener('click', () => {
+        if (state.template !== card.dataset.template) {
+          state.customParams = {};
+          state.templateFiles = {};
+          state.templateDefinition = null;
+          state.configXmlPath = '';
+        }
         state.template = card.dataset.template;
         state.wingetId = '';
         // Auto-advance to step 2 (name/config)
@@ -1855,6 +1991,25 @@ const AppsPage = {
         renderWizard();
       });
     });
+
+    const manageTemplatesBtn = document.getElementById('btn-open-template-manager');
+    if (manageTemplatesBtn) {
+      manageTemplatesBtn.addEventListener('click', () => {
+        this.saveStepData(state, templates);
+        this.openTemplateManager(async () => {
+          const refreshedTemplates = await window.api.scripts.getTemplates();
+          templates.splice(0, templates.length, ...refreshedTemplates);
+          if (state.template && !refreshedTemplates.some(item => item.id === state.template)) {
+            state.template = '';
+            state.customParams = {};
+            state.templateFiles = {};
+            state.templateDefinition = null;
+            state.configXmlPath = '';
+          }
+          renderWizard();
+        });
+      });
+    }
 
     // ── Catalog search input (two-phase: curated + winget CLI) ──
     const catalogSearchInput = document.getElementById('catalog-search');
@@ -1942,6 +2097,26 @@ const AppsPage = {
             App.toast(t('apps.installerRequired'), 'warning');
             return;
           }
+          const missingRequiredArg = (tmpl?.fields || []).find(field =>
+            field.required && !String(state.customParams[field.key] ?? field.default ?? '').trim()
+          );
+          if (missingRequiredArg) {
+            App.toast(this.tr('apps.customTemplateRequiredArg', 'Completa todos los argumentos obligatorios de la plantilla.'), 'warning');
+            document.getElementById(`wiz-param-${missingRequiredArg.key}`)?.focus();
+            return;
+          }
+          const missingRequiredFile = (tmpl?.fileFields || []).find(field =>
+            field.required && !String(state.templateFiles[field.key]?.sourcePath || state.templateFiles[field.key] || '').trim()
+          );
+          if (missingRequiredFile) {
+            App.toast(this.tr('apps.customTemplateRequiredFile', 'Selecciona todos los archivos obligatorios de la plantilla.'), 'warning');
+            return;
+          }
+          const requiresConfigXml = ['office', 'sap-gui'].includes(state.template);
+          if (requiresConfigXml && !String(state.configXmlPath || '').trim()) {
+            App.toast(this.tr('apps.customTemplateRequiredXml', 'Selecciona el XML requerido para esta plantilla.'), 'warning');
+            return;
+          }
         }
 
         state.step++;
@@ -1977,6 +2152,18 @@ const AppsPage = {
              if (!state.silentArgs || state.silentArgs === '/qn /norestart' || state.silentArgs === '/qn') {
                  state.silentArgs = '/S';
              }
+          } else if (file.toLowerCase().endsWith('.ps1')) {
+             if (!state.silentArgs || state.silentArgs === '/S' || state.silentArgs === '/qn /norestart' || state.silentArgs === '/qn') {
+                 state.silentArgs = '';
+             }
+          }
+
+          // Auto-suggest name from filename — only if user hasn't typed one yet
+          if (!state.name.trim()) {
+            const basename = file.split(/[\\/]/).pop() || '';
+            const nameWithoutExt = basename.replace(/\.[^.]+$/, '');
+            const suggestedName = nameWithoutExt.replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim();
+            if (suggestedName) state.name = suggestedName;
           }
 
           // Try to auto-detect version from installer metadata
@@ -2022,6 +2209,32 @@ const AppsPage = {
         }
       });
     }
+
+    document.querySelectorAll('.btn-template-file').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        this.saveStepData(state, templates);
+        const tmpl = templates.find(item => item.id === state.template);
+        const fileField = (tmpl?.fileFields || []).find(item => item.key === btn.dataset.fileKey);
+        if (!fileField) return;
+        const extensions = Array.isArray(fileField.extensions) && fileField.extensions.length > 0
+          ? fileField.extensions
+          : ['*'];
+        const normalizedExtensions = this.isInstallerTemplateFile(fileField) && extensions.length === 1 && extensions[0] === '*'
+          ? ['exe', 'msi', 'ps1']
+          : extensions;
+        const file = await window.api.config.selectFile([{
+          name: fileField.label || this.tr(
+            this.isInstallerTemplateFile(fileField) ? 'apps.customTemplateInstallerFile' : 'apps.customTemplateConfigFile',
+            this.isInstallerTemplateFile(fileField) ? 'Instalador adjunto' : 'Archivo de configuracion'
+          ),
+          extensions: normalizedExtensions
+        }]);
+        if (file) {
+          state.templateFiles[fileField.key] = { sourcePath: file };
+          renderWizard();
+        }
+      });
+    });
 
     // Silent args helper button
     const btnArgsHelp = document.getElementById('btn-show-args-help');
@@ -2106,6 +2319,11 @@ const AppsPage = {
     const silentInput = document.getElementById('wiz-silentArgs');
     if (silentInput) state.silentArgs = silentInput.value;
 
+    const xmlInput = document.getElementById('wiz-xml');
+    if (xmlInput) {
+      state.configXmlPath = xmlInput.value;
+    }
+
     if (state.step === 2) {
       const tmpl = templates.find(tmp => tmp.id === state.template);
       (tmpl?.fields || []).forEach(f => {
@@ -2116,6 +2334,16 @@ const AppsPage = {
           } else {
             state.customParams[f.key] = input.value;
           }
+        }
+      });
+
+      (tmpl?.fileFields || []).forEach(fileField => {
+        const input = document.getElementById(`wiz-file-${fileField.key}`);
+        if (input) {
+          const existing = state.templateFiles[fileField.key];
+          state.templateFiles[fileField.key] = typeof existing === 'object'
+            ? { ...existing, sourcePath: input.value }
+            : { sourcePath: input.value };
         }
       });
 
@@ -2286,10 +2514,11 @@ const AppsPage = {
           📁 ${this.esc(name)}
           <button class="btn btn-ghost btn-sm btn-remove-ou" data-dn="${this.esc(dn)}" style="font-size:11px;padding:0 4px;min-height:auto;">✕</button>
         </span>`;
-      }).join('');
+      }).join('') + `<button class="btn btn-ghost btn-sm" id="btn-clear-ou" style="font-size:11px;margin-left:4px;opacity:.7;">${t('common.clear') || 'Borrar selección'}</button>`;
 
+      // Bind remove-one buttons
       selectedDisplay.querySelectorAll('.btn-remove-ou').forEach(btn => {
-        btn.addEventListener('click', (ev) => {
+        btn.onclick = (ev) => {
           ev.stopPropagation();
           const dn = btn.dataset.dn;
           state.selectedOUs = (state.selectedOUs || []).filter(item => item !== dn);
@@ -2300,25 +2529,30 @@ const AppsPage = {
           );
           bindNodes();
           renderSelectedDisplay();
-        });
+        };
       });
-    };
 
-    const bindClearButton = () => {
-      document.getElementById('btn-clear-ou')?.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        if (dnInput) dnInput.value = '[]';
-        state.selectedOUs = [];
-        state.ouDN = '';
-        renderSelectedDisplay();
-        treeContainer.querySelectorAll('.tree-node.selected').forEach(n => n.classList.remove('selected'));
-      });
+      // Bind clear-all button
+      const clearBtn = document.getElementById('btn-clear-ou');
+      if (clearBtn) {
+        clearBtn.onclick = (ev) => {
+          ev.stopPropagation();
+          state.selectedOUs = [];
+          state.ouDN = '';
+          if (dnInput) dnInput.value = '[]';
+          treeContainer.innerHTML = App.ouPickerTreeHTML(
+            this.ousTreeCache, searchInput?.value || '', []
+          );
+          bindNodes();
+          renderSelectedDisplay();
+        };
+      }
     };
 
     const bindNodes = () => {
       // Toggle expand/collapse
       treeContainer.querySelectorAll('.tree-toggle:not(.empty)').forEach(btn => {
-        btn.addEventListener('click', (e) => {
+        btn.onclick = (e) => {
           e.stopPropagation();
           const li = btn.closest('.tree-item');
           const children = li.querySelector('.tree-children');
@@ -2326,12 +2560,12 @@ const AppsPage = {
             children.classList.toggle('collapsed');
             btn.classList.toggle('expanded');
           }
-        });
+        };
       });
 
       // Click to select (toggle: clicking already-selected OU deselects it)
       treeContainer.querySelectorAll('.tree-node').forEach(node => {
-        node.addEventListener('click', (e) => {
+        node.onclick = (e) => {
           if (e.target.closest('.tree-toggle')) return;
           const dn = node.dataset.dn;
           const current = Array.isArray(state.selectedOUs) ? state.selectedOUs : [];
@@ -2345,21 +2579,20 @@ const AppsPage = {
           );
           bindNodes();
           renderSelectedDisplay();
-        });
+        };
       });
     };
 
     bindNodes();
-    bindClearButton();
     renderSelectedDisplay();
 
     if (searchInput) {
-      searchInput.addEventListener('input', () => {
+      searchInput.oninput = () => {
         treeContainer.innerHTML = App.ouPickerTreeHTML(
           this.ousTreeCache, searchInput.value, state.selectedOUs || []
         );
         bindNodes();
-      });
+      };
     }
   },
 
@@ -2376,11 +2609,16 @@ const AppsPage = {
   async generatePreview(state) {
     const preview = document.getElementById('script-preview');
     try {
+      const templateDefinition = await this.fetchTemplateDefinition(state.template);
+      state.templateDefinition = templateDefinition || state.templateDefinition || null;
       const script = await window.api.scripts.generate({
         name: state.name,
         template: state.template,
         silentArgs: state.silentArgs,
-        customParams: state.customParams
+        configXmlPath: state.configXmlPath,
+        customParams: state.customParams,
+        templateFiles: state.templateFiles,
+        templateDefinition: templateDefinition || state.templateDefinition || null
       });
       preview.textContent = script;
     } catch (err) {
@@ -2411,7 +2649,8 @@ const AppsPage = {
 
   async showWizardConfirmation(state, isEdit, existingApp, renderWizard) {
     const templates = await window.api.scripts.getTemplates();
-    const templateInfo = templates.find(tmpl => tmpl.id === state.template) || { name: state.template };
+    const templateInfo = templates.find(tmpl => tmpl.id === state.template)
+      || (state.templateDefinition ? { name: state.templateDefinition.name } : { name: state.template });
 
     const row = (label, value) => value ? `
       <div style="display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border-color);">
@@ -2426,7 +2665,7 @@ const AppsPage = {
 
     const installerType = state.template === 'winget' ? 'WINGET'
       : state.template === 'odt' ? 'ODT'
-      : (state.installerPath && state.installerPath.toLowerCase().endsWith('.msi')) ? 'MSI' : 'EXE';
+      : this.getInstallerTypeFromPath(state.installerPath, state.template).toUpperCase();
     const gpoDisplay = state.createGPO
       ? `<span style="color:var(--primary-color);">✨ ${t('apps.confirmAutoGpo')}: Deploy_${this.esc(state.name.trim().replace(/\s/g, '_'))}</span>`
       : (state.gpoName ? this.esc(state.gpoName) : `<span style="color:var(--text-muted);">${t('apps.confirmNoGpo')}</span>`);
@@ -2435,6 +2674,11 @@ const AppsPage = {
       ? Object.entries(state.customParams)
           .filter(([, v]) => v !== '' && v !== undefined && v !== null)
           .map(([k, v]) => row(this.esc(k), this.esc(String(v)))).join('')
+      : '';
+    const templateFilesHtml = state.templateFiles && Object.keys(state.templateFiles).length > 0
+      ? Object.entries(state.templateFiles)
+          .filter(([, v]) => (v?.sourcePath || v))
+          .map(([k, v]) => row(this.esc(k), '<span style="font-family:monospace; font-size:12px;">' + this.esc(v?.sourcePath || v) + '</span>')).join('')
       : '';
 
     const body = `
@@ -2476,6 +2720,7 @@ const AppsPage = {
           <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionPaths')}</div>
           ${row(t('apps.detailInstaller'), state.installerPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(state.installerPath) + '</span>' : '-')}
           ${state.configXmlPath ? row(t('apps.detailConfigXml'), '<span style="font-family:monospace; font-size:12px;">' + this.esc(state.configXmlPath) + '</span>') : ''}
+          ${templateFilesHtml}
         </div>
 
         <!-- Targeting -->
@@ -2536,14 +2781,19 @@ const AppsPage = {
       const backBtn = document.getElementById('btn-confirm-back');
       if (backBtn) backBtn.disabled = true;
 
+      const templateDefinition = await this.fetchTemplateDefinition(state.template);
+      state.templateDefinition = templateDefinition || state.templateDefinition || null;
+
       const appData = {
         name: state.name.trim(),
         template: state.template,
-        installerType: state.template === 'winget' ? 'winget' : state.template === 'odt' ? 'odt' : (state.installerPath && state.installerPath.toLowerCase().endsWith('.msi')) ? 'msi' : 'exe',
+        installerType: this.getInstallerTypeFromPath(state.installerPath, state.template),
         silentArgs: state.silentArgs,
         installerPath: state.installerPath,
         configXmlPath: state.configXmlPath,
         customParams: state.customParams,
+        templateFiles: state.templateFiles,
+        templateDefinition: state.templateDefinition,
         gpoName: state.gpoName,
         ouDN: state.selectedOUs?.[0] || '',
         assignedOUs: Array.isArray(state.selectedOUs) ? state.selectedOUs : [],
@@ -2596,6 +2846,15 @@ const AppsPage = {
         if (state.createGPO) {
           const newGpoName = `Deploy_${state.name.replace(/\s/g, "_")}`;
           await this._handleAutoGPO(newGpoName, deployResult.path, state.selectedOUs || [], app.id);
+        } else if (state.gpoName && Array.isArray(state.selectedOUs) && state.selectedOUs.length > 0 && App.rsatAvailable) {
+          // Existing GPO: link it to all selected OUs (already-linked ones are silently skipped by AD)
+          try {
+            const linkResults = await window.api.ad.bulkLinkGPO(state.gpoName, state.selectedOUs);
+            const failed = (linkResults || []).filter(r => !r.success);
+            if (failed.length > 0) {
+              App.toast(`${t('apps.gpoWarningOnlyServer')} ${failed.map(r => r.error).join(', ')}`, 'warning');
+            }
+          } catch (e) { /* non-fatal — script is deployed even if link fails */ }
         }
       } else {
         App.toast(`${t('apps.appSavedDeployError')} ${deployResult.error}`, 'error');
@@ -2908,7 +3167,644 @@ const AppsPage = {
     });
   },
 
+  tr(key, fallback) {
+    const value = t(key);
+    return value === key ? fallback : value;
+  },
+
+  describeTemplateFile(fileField) {
+    const parts = [];
+    if (this.isInstallerTemplateFile(fileField)) {
+      parts.push(this.tr('apps.customTemplateFileTypeInstaller', 'Instalador adjunto'));
+    }
+    const extensions = Array.isArray(fileField?.extensions) ? fileField.extensions : [];
+    if (extensions.length > 0) {
+      parts.push(this.tr('apps.customTemplateExtensions', 'Extensiones') + ': ' + extensions.join(', '));
+    }
+    if (fileField?.argumentName) {
+      parts.push(this.tr('apps.customTemplateArgLabel', 'Argumento') + ': ' + fileField.argumentName);
+    }
+    if (fileField?.destinationName) {
+      parts.push(this.tr('apps.customTemplateTargetName', 'Destino') + ': ' + fileField.destinationName);
+    }
+    return parts.join(' | ') || this.tr('apps.customTemplateConfigFile', 'Archivo de configuracion auxiliar');
+  },
+
+  isXmlTemplateFile(fileField) {
+    const extensions = Array.isArray(fileField?.extensions) ? fileField.extensions : [];
+    return extensions.some(item => String(item || '').trim().toLowerCase() === 'xml');
+  },
+
+  normalizeTemplateViewFileFields(definition) {
+    const fileFields = (definition?.files || []).map(field => ({
+      key: field.key,
+      label: field.label,
+      hint: field.hint || '',
+      storageKind: field.storageKind === 'installer' ? 'installer' : 'file',
+      required: field.required === true,
+      extensions: Array.isArray(field.extensions)
+        ? field.extensions
+        : (typeof field.extensions === 'string'
+            ? field.extensions.split(/[\s,;]+/).map(item => item.replace(/^\./, '').trim().toLowerCase()).filter(Boolean)
+            : ['*']),
+      destinationName: field.destinationName || '',
+      argumentName: field.argumentName || '',
+      joiner: field.joiner === 'space' ? 'space' : '=',
+      quoteValue: field.quoteValue !== false
+    }));
+
+    const needsLegacyXml = definition?.requiresConfigXml === true && !fileFields.some(field => this.isXmlTemplateFile(field));
+    if (needsLegacyXml) {
+      let key = 'config_xml';
+      const usedKeys = new Set(fileFields.map(field => field.key));
+      let counter = 2;
+      while (usedKeys.has(key)) {
+        key = `config_xml_${counter++}`;
+      }
+      fileFields.push({
+        key,
+        label: this.tr('apps.customTemplateXmlLabel', 'Archivo XML'),
+        hint: this.tr('apps.customTemplateXmlHint', 'XML solicitado por la plantilla. Se copiara al cache del equipo cliente y el script podra usar $ConfigXmlPath.'),
+        storageKind: 'file',
+        required: true,
+        extensions: ['xml'],
+        destinationName: 'config.xml',
+        argumentName: '',
+        joiner: '=',
+        quoteValue: true
+      });
+    }
+
+    return fileFields;
+  },
+
+  reconcileLegacyTemplateXmlSelection(templateView, templateFiles, configXmlPath) {
+    const normalizedTemplateFiles = templateFiles && typeof templateFiles === 'object'
+      ? { ...templateFiles }
+      : {};
+    const legacyXmlPath = String(configXmlPath || '').trim();
+
+    if (!templateView?.isUserDefined || !legacyXmlPath) {
+      return { templateFiles: normalizedTemplateFiles, configXmlPath };
+    }
+
+    const xmlField = (templateView.fileFields || []).find(field => this.isXmlTemplateFile(field));
+    if (!xmlField?.key) {
+      return { templateFiles: normalizedTemplateFiles, configXmlPath };
+    }
+
+    const currentValue = normalizedTemplateFiles[xmlField.key];
+    const currentPath = typeof currentValue === 'object' ? currentValue?.sourcePath : currentValue;
+    if (!String(currentPath || '').trim()) {
+      normalizedTemplateFiles[xmlField.key] = { sourcePath: legacyXmlPath };
+    }
+
+    return {
+      templateFiles: normalizedTemplateFiles,
+      configXmlPath: ''
+    };
+  },
+
+  async fetchTemplateDefinition(templateId) {
+    if (!templateId) return null;
+    try {
+      const template = await window.api.templates.get(templateId);
+      return template && template.kind === 'user-template' ? template : null;
+    } catch {
+      return null;
+    }
+  },
+
+  buildTemplateViewFromDefinition(templateId, definition) {
+    if (!definition || definition.kind !== 'user-template') return null;
+    return {
+      id: templateId || definition.id,
+      category: definition.category || 'Custom',
+      name: definition.name,
+      description: definition.description || this.tr('apps.customTemplateDefaultDesc', 'Plantilla definida por el administrador'),
+      noInstaller: false,
+      source: 'user',
+      isUserDefined: true,
+      fields: (definition.arguments || []).map(field => ({
+        key: field.key,
+        label: field.label,
+        default: field.defaultValue || '',
+        hint: field.hint || '',
+        required: field.required === true
+      })),
+      fileFields: this.normalizeTemplateViewFileFields(definition),
+      hasCustomScript: !!definition.script
+    };
+  },
+
+  createEmptyTemplateDraft() {
+    return {
+      name: '',
+      description: '',
+      arguments: [{
+        label: '',
+        token: '',
+        joiner: '=',
+        quoteValue: true,
+        required: false,
+        hint: '',
+        defaultValue: ''
+      }],
+      files: [],
+      script: ''
+    };
+  },
+
+  cloneTemplateDraft(template) {
+    if (!template) return this.createEmptyTemplateDraft();
+    return {
+      id: template.id,
+      name: template.name || '',
+      description: template.description || '',
+      arguments: Array.isArray(template.arguments) && template.arguments.length > 0
+        ? template.arguments.map(item => ({
+            label: item.label || '',
+            token: item.token || '',
+            joiner: item.joiner === 'space' ? 'space' : '=',
+            quoteValue: item.quoteValue !== false,
+            required: item.required === true,
+            hint: item.hint || '',
+            defaultValue: item.defaultValue || ''
+          }))
+        : [{
+            label: '',
+            token: '',
+            joiner: '=',
+            quoteValue: true,
+            required: false,
+            hint: '',
+            defaultValue: ''
+          }],
+      files: Array.isArray(template.files)
+        ? template.files.map(item => ({
+            label: item.label || '',
+            storageKind: item.storageKind === 'installer' ? 'installer' : 'file',
+            argumentName: item.argumentName || '',
+            joiner: item.joiner === 'space' ? 'space' : '=',
+            quoteValue: item.quoteValue !== false,
+            required: item.required === true,
+            hint: item.hint || '',
+            destinationName: item.destinationName || '',
+            extensions: Array.isArray(item.extensions) ? item.extensions.join(',') : ''
+          }))
+        : [],
+      script: template.script || ''
+    };
+  },
+
+  readTemplateDraftFromDom(state) {
+    const current = state?.draft ? this.cloneTemplateDraft(state.draft) : this.createEmptyTemplateDraft();
+    const nameInput = document.getElementById('tmpl-name');
+    const descInput = document.getElementById('tmpl-description');
+    const scriptInput = document.getElementById('tmpl-script');
+
+    if (nameInput) current.name = nameInput.value;
+    if (descInput) current.description = descInput.value;
+    if (scriptInput) current.script = scriptInput.value;
+
+    const argRows = [...document.querySelectorAll('.tmpl-arg-row')];
+    current.arguments = argRows.map(row => ({
+      label: row.querySelector('[data-field="label"]')?.value || '',
+      token: row.querySelector('[data-field="token"]')?.value || '',
+      joiner: row.querySelector('[data-field="joiner"]')?.value === 'space' ? 'space' : '=',
+      quoteValue: row.querySelector('[data-field="quote"]')?.checked ?? true,
+      required: row.querySelector('[data-field="required"]')?.checked ?? false,
+      hint: row.querySelector('[data-field="hint"]')?.value || '',
+      defaultValue: row.querySelector('[data-field="default"]')?.value || ''
+    }));
+
+    const fileRows = [...document.querySelectorAll('.tmpl-file-row')];
+    current.files = fileRows.map(row => ({
+      label: row.querySelector('[data-field="label"]')?.value || '',
+      storageKind: row.querySelector('[data-field="storageKind"]')?.value === 'installer' ? 'installer' : 'file',
+      argumentName: row.querySelector('[data-field="argument"]')?.value || '',
+      joiner: row.querySelector('[data-field="joiner"]')?.value === 'space' ? 'space' : '=',
+      quoteValue: row.querySelector('[data-field="quote"]')?.checked ?? true,
+      required: row.querySelector('[data-field="required"]')?.checked ?? false,
+      hint: row.querySelector('[data-field="hint"]')?.value || '',
+      destinationName: row.querySelector('[data-field="destination"]')?.value || '',
+      extensions: row.querySelector('[data-field="extensions"]')?.value || ''
+    }));
+
+    return current;
+  },
+
+  getTemplateArgPreview(arg = {}) {
+    const token = String(arg.token || 'ARGUMENT').trim() || 'ARGUMENT';
+    const separator = arg.joiner === 'space' ? ' ' : '=';
+    const value = arg.quoteValue === false ? 'VALOR' : '"VALOR"';
+    return `${token}${separator}${value}`;
+  },
+
+  getTemplateFilePreview(file = {}) {
+    if (!file.argumentName) return this.isInstallerTemplateFile(file) ? 'setup_auxiliar.exe' : 'archivo.xml';
+    const separator = file.joiner === 'space' ? ' ' : '=';
+    const sampleName = this.isInstallerTemplateFile(file) ? 'setup_auxiliar.exe' : 'archivo.xml';
+    const value = file.quoteValue === false ? sampleName : `"${sampleName}"`;
+    return `${file.argumentName}${separator}${value}`;
+  },
+
+  refreshTemplateDraftPreview() {
+    document.querySelectorAll('.tmpl-arg-row').forEach(row => {
+      const preview = row.querySelector('.tmpl-arg-preview');
+      if (!preview) return;
+      const token = row.querySelector('[data-field="token"]')?.value || '';
+      const joiner = row.querySelector('[data-field="joiner"]')?.value === 'space' ? 'space' : '=';
+      const quoteValue = row.querySelector('[data-field="quote"]')?.checked ?? true;
+      preview.textContent = this.getTemplateArgPreview({ token, joiner, quoteValue });
+    });
+
+    document.querySelectorAll('.tmpl-file-row').forEach(row => {
+      const preview = row.querySelector('.tmpl-file-preview');
+      if (!preview) return;
+      const argumentName = row.querySelector('[data-field="argument"]')?.value || '';
+      const joiner = row.querySelector('[data-field="joiner"]')?.value === 'space' ? 'space' : '=';
+      const quoteValue = row.querySelector('[data-field="quote"]')?.checked ?? true;
+      const storageKind = row.querySelector('[data-field="storageKind"]')?.value === 'installer' ? 'installer' : 'file';
+      preview.textContent = this.getTemplateFilePreview({ argumentName, joiner, quoteValue, storageKind });
+    });
+  },
+
+  renderTemplateManager(state, onClose) {
+    const draft = state.draft || this.createEmptyTemplateDraft();
+    const templates = Array.isArray(state.templates) ? state.templates : [];
+    const deleteUsageCount = Number.isFinite(state.deleteUsageCount) ? state.deleteUsageCount : 0;
+    const listHtml = templates.length > 0
+      ? templates.map(template => `
+          <button class="template-manager-item ${state.selectedId === template.id ? 'active' : ''}" type="button" data-template-id="${this.esc(template.id)}">
+            <div style="font-weight:600;color:var(--text-primary);font-size:13px;">${this.esc(template.name)}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">${this.esc(template.description || this.tr('apps.customTemplateDefaultDesc', 'Plantilla definida por el administrador'))}</div>
+          </button>
+        `).join('')
+      : `<div style="padding:14px;border:1px dashed var(--border-color);border-radius:8px;color:var(--text-muted);font-size:12px;">${this.tr('apps.customTemplatesEmpty', 'Todavia no hay plantillas personalizadas. Crea una para reutilizar argumentos, archivos auxiliares y pasos post-instalacion.')}</div>`;
+
+    const argumentRows = draft.arguments.map((arg, index) => `
+      <div class="tmpl-arg-row" data-index="${index}" style="border:1px solid var(--border-color);border-radius:8px;padding:12px;margin-bottom:10px;background:var(--bg-secondary);">
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">${this.tr('apps.customTemplateFieldLabel', 'Etiqueta')}</label>
+            <input class="form-input" data-field="label" value="${this.esc(arg.label)}" placeholder="Valor de configuracion">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">${this.tr('apps.customTemplateArgLabel', 'Argumento')}</label>
+            <input class="form-input" data-field="token" value="${this.esc(arg.token)}" placeholder="CONFIG_ID">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">${this.tr('apps.customTemplateHintLabel', 'Ayuda')}</label>
+            <input class="form-input" data-field="hint" value="${this.esc(arg.hint)}" placeholder="${this.esc(this.tr('apps.customTemplateHintPlaceholder', 'Texto mostrado al operador'))}">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">${this.tr('apps.customTemplateDefaultValue', 'Valor por defecto')}</label>
+            <input class="form-input" data-field="default" value="${this.esc(arg.defaultValue)}" placeholder="">
+          </div>
+        </div>
+        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:10px;">
+          <label class="checkbox-wrapper" style="margin:0;">
+            <input type="checkbox" data-field="quote" ${arg.quoteValue !== false ? 'checked' : ''}>
+            <span>${this.tr('apps.customTemplateQuoteValue', 'Entrecomillar valor')}</span>
+          </label>
+          <label class="checkbox-wrapper" style="margin:0;">
+            <input type="checkbox" data-field="required" ${arg.required ? 'checked' : ''}>
+            <span>${this.tr('apps.customTemplateRequired', 'Obligatorio')}</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;color:var(--text-secondary);font-size:12px;">
+            <span>${this.tr('apps.customTemplateJoiner', 'Separador')}</span>
+            <select class="form-select" data-field="joiner" style="width:auto;min-width:110px;">
+              <option value="=" ${arg.joiner !== 'space' ? 'selected' : ''}>=</option>
+              <option value="space" ${arg.joiner === 'space' ? 'selected' : ''}>espacio</option>
+            </select>
+          </label>
+          <button class="btn btn-ghost btn-sm btn-remove-template-arg" type="button" data-index="${index}">${this.tr('common.delete', 'Borrar')}</button>
+        </div>
+        <div style="margin-top:8px;font-size:11px;color:var(--text-muted);">${this.tr('apps.customTemplateArgExample', 'Resultado')}: <code class="tmpl-arg-preview">${this.esc(this.getTemplateArgPreview(arg))}</code></div>
+      </div>
+    `).join('');
+
+    const fileRows = draft.files.map((file, index) => `
+      <div class="tmpl-file-row" data-index="${index}" style="border:1px solid var(--border-color);border-radius:8px;padding:12px;margin-bottom:10px;background:var(--bg-secondary);">
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">${this.tr('apps.customTemplateFieldLabel', 'Etiqueta')}</label>
+            <input class="form-input" data-field="label" value="${this.esc(file.label)}" placeholder="${this.esc(this.isInstallerTemplateFile(file) ? 'Instalador adicional' : 'Archivo de configuracion')}">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">${this.tr('apps.customTemplateExtensions', 'Extensiones')}</label>
+            <input class="form-input" data-field="extensions" value="${this.esc(file.extensions)}" placeholder="${this.esc(this.isInstallerTemplateFile(file) ? 'exe,msi,ps1' : 'xml,json')}">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">${this.tr('apps.customTemplateFileType', 'Tipo')}</label>
+            <select class="form-select" data-field="storageKind">
+              <option value="file" ${!this.isInstallerTemplateFile(file) ? 'selected' : ''}>${this.tr('apps.customTemplateFileTypeFile', 'Archivo auxiliar')}</option>
+              <option value="installer" ${this.isInstallerTemplateFile(file) ? 'selected' : ''}>${this.tr('apps.customTemplateFileTypeInstaller', 'Instalador adjunto')}</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">${this.tr('apps.customTemplateInstallArg', 'Argumento de instalacion')}</label>
+            <input class="form-input" data-field="argument" value="${this.esc(file.argumentName)}" placeholder="/configure">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">${this.tr('apps.customTemplateTargetName', 'Nombre destino')}</label>
+            <input class="form-input" data-field="destination" value="${this.esc(file.destinationName)}" placeholder="${this.esc(this.isInstallerTemplateFile(file) ? 'helper_setup.exe' : 'config_app.xml')}">
+          </div>
+          <div class="form-group" style="margin-bottom:0;grid-column:1 / -1;">
+            <label class="form-label">${this.tr('apps.customTemplateHintLabel', 'Ayuda')}</label>
+            <input class="form-input" data-field="hint" value="${this.esc(file.hint)}" placeholder="${this.esc(this.isInstallerTemplateFile(file)
+              ? this.tr('apps.customTemplateInstallerHintPlaceholder', 'Ejemplo: instalador auxiliar que se copiara al share sin sustituir al principal')
+              : this.tr('apps.customTemplateFileHintPlaceholder', 'Ejemplo: XML o CFG exportado desde la herramienta original'))}">
+          </div>
+        </div>
+        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:10px;">
+          <label class="checkbox-wrapper" style="margin:0;">
+            <input type="checkbox" data-field="quote" ${file.quoteValue !== false ? 'checked' : ''}>
+            <span>${this.tr('apps.customTemplateQuotePath', 'Entrecomillar ruta')}</span>
+          </label>
+          <label class="checkbox-wrapper" style="margin:0;">
+            <input type="checkbox" data-field="required" ${file.required ? 'checked' : ''}>
+            <span>${this.tr('apps.customTemplateRequired', 'Obligatorio')}</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;color:var(--text-secondary);font-size:12px;">
+            <span>${this.tr('apps.customTemplateJoiner', 'Separador')}</span>
+            <select class="form-select" data-field="joiner" style="width:auto;min-width:110px;">
+              <option value="=" ${file.joiner !== 'space' ? 'selected' : ''}>=</option>
+              <option value="space" ${file.joiner === 'space' ? 'selected' : ''}>espacio</option>
+            </select>
+          </label>
+          <button class="btn btn-ghost btn-sm btn-remove-template-file" type="button" data-index="${index}">${this.tr('common.delete', 'Borrar')}</button>
+        </div>
+        <div style="margin-top:8px;font-size:11px;color:var(--text-muted);">${this.isInstallerTemplateFile(file)
+          ? this.tr('apps.customTemplateInstallerExample', 'El instalador adjunto se copiara al share en una carpeta separada y el script recibira su ruta cacheada en el equipo cliente.')
+          : this.tr('apps.customTemplateFileExample', 'Si defines un argumento, el instalador recibira la ruta cacheada del archivo en el equipo cliente.')}: <code class="tmpl-file-preview">${this.esc(this.getTemplateFilePreview(file))}</code></div>
+      </div>
+    `).join('');
+
+    const deletePanel = state.deleteConfirm && state.selectedId ? `
+      <div class="card template-builder-section" style="border-color:rgba(220,38,38,0.28);background:rgba(220,38,38,0.08);">
+        <div style="font-weight:700;color:var(--text-primary);margin-bottom:8px;">${this.tr('apps.customTemplateDeleteTitle', 'Borrar plantilla')}</div>
+        <p class="form-hint" style="margin:0 0 10px 0;color:var(--text-secondary);">
+          ${this.tr('apps.customTemplateDeleteConfirm', 'Seguro que quieres borrar esta plantilla personalizada?')}
+        </p>
+        ${deleteUsageCount > 0 ? `<p class="form-hint" style="margin:0 0 12px 0;color:var(--accent-warning);">${this.tr('apps.customTemplateDeleteWarning', 'Hay apps usando esta plantilla:')} ${deleteUsageCount}. ${this.tr('apps.customTemplateDeleteSnapshotHint', 'Las apps ya creadas conservaran su configuracion guardada, pero la plantilla dejara de estar disponible para nuevas apps.')}</p>` : ''}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-secondary" type="button" id="btn-cancel-delete-template">${this.tr('common.cancel', 'Cancelar')}</button>
+          <button class="btn btn-danger" type="button" id="btn-confirm-delete-template">${this.tr('apps.customTemplateDeleteAction', 'Eliminar plantilla')}</button>
+        </div>
+      </div>
+    ` : '';
+
+    const body = `
+      <div class="template-manager-shell">
+        <div class="template-manager-sidebar">
+          <button class="btn btn-primary" type="button" id="btn-new-template" style="width:100%;margin-bottom:10px;">${this.tr('apps.newCustomTemplate', 'Nueva plantilla')}</button>
+          ${listHtml}
+        </div>
+        <div class="template-manager-main">
+          ${deletePanel}
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">${this.tr('apps.customTemplateName', 'Nombre de la plantilla')}</label>
+            <input class="form-input" id="tmpl-name" value="${this.esc(draft.name)}" placeholder="Plantilla personalizada">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">${this.tr('apps.customTemplateDescription', 'Descripcion')}</label>
+            <textarea class="form-input" id="tmpl-description" rows="2" placeholder="${this.esc(this.tr('apps.customTemplateDescriptionPlaceholder', 'Explica que hace esta plantilla y que espera del operador.'))}">${this.esc(draft.description)}</textarea>
+          </div>
+          <div class="card template-builder-section">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;">
+              <div style="font-weight:700;color:var(--text-primary);">${this.tr('apps.customTemplateArgsTitle', 'Argumentos')}</div>
+              <button class="btn btn-secondary btn-sm" type="button" id="btn-add-template-arg">${this.tr('apps.customTemplateAddArg', 'Anadir argumento')}</button>
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">${this.tr('apps.customTemplateArgsHint', 'Cada argumento crea un campo de texto en la app y se traduce a `ARGUMENTO=\"valor\"` o `ARGUMENTO valor`.')}</div>
+            ${argumentRows || `<div style="color:var(--text-muted);font-size:12px;">${this.tr('apps.customTemplateArgsEmpty', 'No hay argumentos definidos.')}</div>`}
+          </div>
+          <div class="card template-builder-section">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;">
+              <div style="font-weight:700;color:var(--text-primary);">${this.tr('apps.customTemplateFilesTitle', 'Archivos auxiliares')}</div>
+              <button class="btn btn-secondary btn-sm" type="button" id="btn-add-template-file">${this.tr('apps.customTemplateAddFile', 'Anadir archivo')}</button>
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">${this.tr('apps.customTemplateFilesHint', 'Sirve para XML, CFG, JSON o instaladores adjuntos. Si anades aqui un XML, se pedira al crear la app y el script podra usar $ConfigXmlPath. Los instaladores adjuntos se guardan en el share sin sustituir al instalador principal. Si defines un argumento de instalacion, se pasara la ruta del archivo copiado al cache de despliegue.')}</div>
+            ${fileRows || `<div style="color:var(--text-muted);font-size:12px;">${this.tr('apps.customTemplateFilesEmpty', 'No hay archivos definidos.')}</div>`}
+          </div>
+          <div class="card template-builder-section">
+            <div style="font-weight:700;color:var(--text-primary);margin-bottom:10px;">${this.tr('apps.customTemplateScriptTitle', 'Script opcional post-instalacion')}</div>
+            <textarea class="form-input" id="tmpl-script" rows="8" style="font-family:monospace;" placeholder="${this.esc(this.tr('apps.customTemplateScriptPlaceholder', 'Ejemplo:\nWrite-Host "Configuracion adicional aplicada"'))}">${this.esc(draft.script)}</textarea>
+            <p class="form-hint" style="margin-top:8px;">${this.tr('apps.customTemplateScriptHint', 'Variables disponibles: $TemplateValues.<clave>, $TemplateFiles.<clave>, $TemplateFileNames.<clave>, $ConfigXmlPath (si la plantilla incluye un XML), $Instalador y $CacheDir. Este script se ejecuta despues del instalador.')}</p>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const footer = `
+      <button class="btn btn-secondary" type="button" id="btn-close-template-manager">${this.tr('common.close', 'Cerrar')}</button>
+      <div style="flex:1"></div>
+      ${state.selectedId ? `<button class="btn btn-danger" type="button" id="btn-delete-template">${this.tr('common.delete', 'Borrar')}</button>` : ''}
+      <button class="btn btn-success" type="button" id="btn-save-template">${this.tr('common.save', 'Guardar')}</button>
+    `;
+
+    App.openModal(this.tr('apps.manageTemplates', 'Plantillas'), body, footer, { size: 'full' });
+    this.bindTemplateManagerEvents(state, onClose);
+    if (!state.selectedId) {
+      requestAnimationFrame(() => document.getElementById('tmpl-name')?.focus());
+    }
+  },
+
+  bindTemplateManagerEvents(state, onClose) {
+    document.getElementById('btn-close-template-manager')?.addEventListener('click', async () => {
+      App.closeModal();
+      if (typeof onClose === 'function') await onClose();
+    });
+
+    document.getElementById('btn-new-template')?.addEventListener('click', () => {
+      state.draft = this.createEmptyTemplateDraft();
+      state.selectedId = null;
+      state.deleteConfirm = false;
+      state.deleteUsageCount = 0;
+      this.renderTemplateManager(state, onClose);
+    });
+
+    document.querySelectorAll('.template-manager-item').forEach(item => {
+      item.addEventListener('click', async () => {
+        state.draft = this.readTemplateDraftFromDom(state);
+        const templateId = item.dataset.templateId;
+        const template = state.templates.find(entry => entry.id === templateId);
+        state.selectedId = templateId;
+        state.draft = this.cloneTemplateDraft(template);
+        state.deleteConfirm = false;
+        state.deleteUsageCount = 0;
+        this.renderTemplateManager(state, onClose);
+      });
+    });
+
+    document.getElementById('btn-add-template-arg')?.addEventListener('click', () => {
+      state.draft = this.readTemplateDraftFromDom(state);
+      state.deleteConfirm = false;
+      state.draft.arguments.push({
+        label: '',
+        token: '',
+        joiner: '=',
+        quoteValue: true,
+        required: false,
+        hint: '',
+        defaultValue: ''
+      });
+      this.renderTemplateManager(state, onClose);
+    });
+
+    document.querySelectorAll('.btn-remove-template-arg').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.draft = this.readTemplateDraftFromDom(state);
+        state.deleteConfirm = false;
+        state.draft.arguments.splice(Number(btn.dataset.index), 1);
+        this.renderTemplateManager(state, onClose);
+      });
+    });
+
+    document.getElementById('btn-add-template-file')?.addEventListener('click', () => {
+      state.draft = this.readTemplateDraftFromDom(state);
+      state.deleteConfirm = false;
+      state.draft.files.push({
+        label: '',
+        storageKind: 'file',
+        argumentName: '',
+        joiner: 'space',
+        quoteValue: true,
+        required: false,
+        hint: '',
+        destinationName: '',
+        extensions: 'xml'
+      });
+      this.renderTemplateManager(state, onClose);
+    });
+
+    document.querySelectorAll('.btn-remove-template-file').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.draft = this.readTemplateDraftFromDom(state);
+        state.deleteConfirm = false;
+        state.draft.files.splice(Number(btn.dataset.index), 1);
+        this.renderTemplateManager(state, onClose);
+      });
+    });
+
+    document.querySelectorAll('.tmpl-arg-row [data-field="token"], .tmpl-arg-row [data-field="joiner"], .tmpl-arg-row [data-field="quote"]').forEach(input => {
+      input.addEventListener('input', () => this.refreshTemplateDraftPreview());
+      input.addEventListener('change', () => this.refreshTemplateDraftPreview());
+    });
+
+    document.querySelectorAll('.tmpl-file-row [data-field="argument"], .tmpl-file-row [data-field="joiner"], .tmpl-file-row [data-field="quote"]').forEach(input => {
+      input.addEventListener('input', () => this.refreshTemplateDraftPreview());
+      input.addEventListener('change', () => this.refreshTemplateDraftPreview());
+    });
+
+    document.querySelectorAll('.tmpl-file-row [data-field="storageKind"]').forEach(input => {
+      input.addEventListener('change', () => {
+        state.draft = this.readTemplateDraftFromDom(state);
+        const row = input.closest('.tmpl-file-row');
+        const index = Number(row?.dataset.index);
+        if (Number.isFinite(index) && state.draft.files[index]) {
+          const currentExtensions = String(state.draft.files[index].extensions || '').trim().toLowerCase();
+          if (state.draft.files[index].storageKind === 'installer' && (!currentExtensions || currentExtensions === 'xml')) {
+            state.draft.files[index].extensions = 'exe,msi,ps1';
+          } else if (state.draft.files[index].storageKind !== 'installer' && !currentExtensions) {
+            state.draft.files[index].extensions = 'xml';
+          }
+        }
+        this.renderTemplateManager(state, onClose);
+      });
+    });
+
+    this.refreshTemplateDraftPreview();
+
+    document.getElementById('btn-delete-template')?.addEventListener('click', async () => {
+      if (!state.selectedId) return;
+      state.draft = this.readTemplateDraftFromDom(state);
+      if (state.deleteConfirm) {
+        state.deleteConfirm = false;
+        state.deleteUsageCount = 0;
+        this.renderTemplateManager(state, onClose);
+        return;
+      }
+      const apps = await window.api.apps.getAll().catch(() => []);
+      state.deleteUsageCount = apps.filter(app => app.template === state.selectedId).length;
+      state.deleteConfirm = true;
+      this.renderTemplateManager(state, onClose);
+    });
+
+    document.getElementById('btn-cancel-delete-template')?.addEventListener('click', () => {
+      state.draft = this.readTemplateDraftFromDom(state);
+      state.deleteConfirm = false;
+      state.deleteUsageCount = 0;
+      this.renderTemplateManager(state, onClose);
+    });
+
+    document.getElementById('btn-confirm-delete-template')?.addEventListener('click', async () => {
+      if (!state.selectedId) return;
+      const result = await window.api.templates.delete(state.selectedId);
+      if (!result?.success) {
+        App.toast((result?.error || this.tr('common.error', 'Error')), 'error');
+        return;
+      }
+
+      state.templates = await window.api.templates.getAll();
+      state.selectedId = null;
+      state.draft = this.createEmptyTemplateDraft();
+      state.deleteConfirm = false;
+      state.deleteUsageCount = 0;
+      App.toast(this.tr('apps.customTemplateDeleted', 'Plantilla borrada correctamente'), 'success');
+      this.renderTemplateManager(state, onClose);
+    });
+
+    document.getElementById('btn-save-template')?.addEventListener('click', async () => {
+      state.draft = this.readTemplateDraftFromDom(state);
+      state.deleteConfirm = false;
+      if (!state.draft.name.trim()) {
+        App.toast(this.tr('apps.customTemplateNameRequired', 'Indica un nombre para la plantilla.'), 'warning');
+        document.getElementById('tmpl-name')?.focus();
+        return;
+      }
+
+      const payload = {
+        name: state.draft.name,
+        description: state.draft.description,
+        arguments: state.draft.arguments,
+        files: state.draft.files,
+        script: state.draft.script
+      };
+
+      const saved = state.selectedId
+        ? await window.api.templates.update(state.selectedId, payload)
+        : await window.api.templates.create(payload);
+
+      if (!saved?.id) {
+        App.toast(this.tr('apps.customTemplateSaveError', 'No se pudo guardar la plantilla.'), 'error');
+        return;
+      }
+
+      state.templates = await window.api.templates.getAll();
+      state.selectedId = saved.id;
+      state.draft = this.cloneTemplateDraft(saved);
+      state.deleteUsageCount = 0;
+      App.toast(this.tr('apps.customTemplateSaved', 'Plantilla guardada correctamente'), 'success');
+      this.renderTemplateManager(state, onClose);
+    });
+  },
+
+  async openTemplateManager(onClose = null) {
+    const templates = await window.api.templates.getAll().catch(() => []);
+    const state = {
+      templates,
+      selectedId: null,
+      draft: this.createEmptyTemplateDraft(),
+      deleteConfirm: false,
+      deleteUsageCount: 0
+    };
+    this.renderTemplateManager(state, onClose);
+  },
+
   templateIcon(id) {
+    if (String(id || '').startsWith('user-')) return 'ðŸ§©';
     const icons = {
       generic: '📦',
       office: '📎',

@@ -51,6 +51,14 @@ contextBridge.exposeInMainWorld('api', {
     getTemplates: () => ipcRenderer.invoke('scripts:getTemplates')
   },
 
+  templates: {
+    getAll: () => ipcRenderer.invoke('templates:getAll'),
+    get: (id) => ipcRenderer.invoke('templates:get', id),
+    create: (data) => ipcRenderer.invoke('templates:create', data),
+    update: (id, data) => ipcRenderer.invoke('templates:update', id, data),
+    delete: (id) => ipcRenderer.invoke('templates:delete', id)
+  },
+
   // Files
   files: {
     listDeployed: () => ipcRenderer.invoke('files:listDeployed'),

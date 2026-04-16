@@ -3,6 +3,8 @@ const path = require('path');
 const crypto = require('crypto');
 const configService = require('./config');
 const i18nService = require('./i18n');
+const templateService = require('./template-service');
+const { resolveNamedSubdirectory } = require('./path-utils');
 
 function sanitizePSForEmbedding(str) {
   if (typeof str !== 'string') return '';
@@ -16,6 +18,13 @@ function sanitizePSForEmbedding(str) {
 function sanitizeAppName(str) {
   if (typeof str !== 'string') return '';
   return str.replace(/[^a-zA-Z0-9\s\-_.,()[\]@#]/g, '').trim().substring(0, 128);
+}
+
+function isInstallerArtifactName(fileName) {
+  const normalized = String(fileName || '').toLowerCase();
+  return normalized.endsWith('.exe')
+    || normalized.endsWith('.msi')
+    || (normalized.endsWith('.ps1') && normalized !== 'install.ps1');
 }
 
 const TEMPLATES = {
@@ -76,35 +85,47 @@ function getGenerators() {
   return GENERATORS;
 }
 
-const scriptService = {
-  getTemplateList() {
-    const config = configService.getConfig();
-    const dict = i18nService.getTranslations(config.language || 'en');
-    
-    return Object.entries(TEMPLATES).map(([key, val]) => {
-      const tplDict = dict.templates?.[key] || {};
-      
-      const localizedFields = (val.fields || []).map(f => {
-        const fieldDict = tplDict.fields?.[f.key] || {};
-        return {
-          ...f,
-          label: fieldDict.label || f.label,
-          hint: fieldDict.hint || f.hint
-        };
-      });
+function getBuiltInTemplateList() {
+  const config = configService.getConfig();
+  const dict = i18nService.getTranslations(config.language || 'en');
 
+  return Object.entries(TEMPLATES).map(([key, val]) => {
+    const tplDict = dict.templates?.[key] || {};
+
+    const localizedFields = (val.fields || []).map(f => {
+      const fieldDict = tplDict.fields?.[f.key] || {};
       return {
-        id: key,
-        category: tplDict.category || val.category || 'General',
-        name: tplDict.name || val.name,
-        description: tplDict.description || val.description,
-        fields: localizedFields,
-        noInstaller: val.noInstaller || false
+        ...f,
+        label: fieldDict.label || f.label,
+        hint: fieldDict.hint || f.hint
       };
     });
+
+    return {
+      id: key,
+      category: tplDict.category || val.category || 'General',
+      name: tplDict.name || val.name,
+      description: tplDict.description || val.description,
+      fields: localizedFields,
+      noInstaller: val.noInstaller || false
+    };
+  });
+}
+
+const scriptService = {
+  getTemplateList() {
+    return [
+      ...getBuiltInTemplateList(),
+      ...templateService.getWizardTemplates()
+    ];
   },
 
   generateScript(appConfig) {
+    const customTemplate = templateService.resolve(appConfig?.template, appConfig?.templateDefinition);
+    if (customTemplate) {
+      return generateUserTemplate(appConfig, customTemplate);
+    }
+
     const generators = getGenerators();
     const fn = generators[appConfig.template] ?? generators.generic;
     return fn(appConfig);
@@ -116,11 +137,16 @@ const scriptService = {
       try { require('./app-service').cleanupTempFiles(); } catch (e) {}
 
       const config = configService.getConfig();
-      const appFolder = path.join(config.networkSharePath, appConfig.name);
+      const { safeName, path: appFolder } = resolveNamedSubdirectory(
+        config.networkSharePath,
+        appConfig.name,
+        'App'
+      );
 
       if (!fs.existsSync(appFolder)) {
         await fs.promises.mkdir(appFolder, { recursive: true });
       }
+      const customTemplate = templateService.resolve(appConfig?.template, appConfig?.templateDefinition);
 
       // winget and odt modes don't use local installer files — skip copy entirely
       const isNoInstaller = appConfig.template === 'winget' || appConfig.template === 'odt';
@@ -140,7 +166,7 @@ const scriptService = {
         } else {
           const files = await fs.promises.readdir(appFolder);
           for (const file of files) {
-            if (file.toLowerCase().endsWith('.exe') || file.toLowerCase().endsWith('.msi')) {
+            if (isInstallerArtifactName(file)) {
               try { await fs.promises.unlink(path.join(appFolder, file)); } catch (e) {}
             }
           }
@@ -155,7 +181,7 @@ const scriptService = {
         // Compute hash of existing installer if any
         const files = await fs.promises.readdir(appFolder);
         for (const file of files) {
-          if (file.toLowerCase().endsWith('.exe') || file.toLowerCase().endsWith('.msi')) {
+          if (isInstallerArtifactName(file)) {
             const buffer = await fs.promises.readFile(path.join(appFolder, file));
             installerHash = crypto.createHash('sha256').update(buffer).digest('hex');
             break;
@@ -175,6 +201,10 @@ const scriptService = {
         await fs.promises.copyFile(appConfig.configXmlPath, path.join(appFolder, fileName));
       }
 
+      if (customTemplate) {
+        await copyCustomTemplateFiles(appFolder, appConfig, customTemplate);
+      }
+
       const scriptContent = this.generateScript(appConfig);
       const scriptPath = path.join(appFolder, 'install.ps1');
       await fs.promises.writeFile(scriptPath, '\uFEFF' + scriptContent, 'utf-8');
@@ -183,9 +213,14 @@ const scriptService = {
       const cfgForManifest = require('./config').getConfig();
       const manifest = {
         app: appConfig.name,
+        deploymentFolder: safeName,
         version: appConfig.version || '1.0.0',
         hash: installerHash,
+        primaryInstallerName: appConfig.installerPath
+          ? sanitizeTemplateFileName(path.basename(appConfig.installerPath))
+          : '',
         template: appConfig.template || 'generic',
+        templateSource: customTemplate ? 'user' : 'builtin',
         notifyUser: appConfig.notifyUser || false,
         deployedAt: new Date().toISOString(),
         shareId: cfgForManifest.shareId || ''
@@ -203,6 +238,226 @@ const scriptService = {
   }
 };
 
+function sanitizeTemplateFileName(fileName) {
+  if (typeof fileName !== 'string') return '';
+  const base = path.basename(fileName.trim());
+  const clean = base
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 128);
+  if (!clean || clean === '.' || clean === '..') return '';
+  return clean;
+}
+
+function isTemplateInstallerAttachment(fileDef) {
+  return fileDef?.storageKind === 'installer';
+}
+
+function normalizeTemplateFileSelection(value) {
+  if (typeof value === 'string') return { sourcePath: value };
+  if (value && typeof value === 'object' && typeof value.sourcePath === 'string') return value;
+  return { sourcePath: '' };
+}
+
+function resolveCustomTemplateFileEntries(template, appConfig) {
+  const selections = (appConfig && appConfig.templateFiles && typeof appConfig.templateFiles === 'object')
+    ? appConfig.templateFiles
+    : {};
+
+  return (template?.files || []).map(fileDef => {
+    const selection = normalizeTemplateFileSelection(selections[fileDef.key]);
+    const sourcePath = selection.sourcePath || '';
+    const defaultExt = Array.isArray(fileDef.extensions) && fileDef.extensions.length === 1 && fileDef.extensions[0] !== '*'
+      ? `.${fileDef.extensions[0]}`
+      : '';
+    const targetName = sanitizeTemplateFileName(
+      fileDef.destinationName
+      || (sourcePath ? path.basename(sourcePath) : '')
+      || `${fileDef.key}${defaultExt}`
+    ) || `${fileDef.key}${defaultExt || '.dat'}`;
+    const relativePath = isTemplateInstallerAttachment(fileDef)
+      ? path.join('attached-installers', targetName)
+      : targetName;
+
+    return {
+      ...fileDef,
+      sourcePath,
+      targetName,
+      relativePath
+    };
+  });
+}
+
+function getSelectedXmlTemplateFileEntry(fileEntries) {
+  return (Array.isArray(fileEntries) ? fileEntries : []).find(entry => {
+    if (!entry?.sourcePath) return false;
+    const extensions = Array.isArray(entry.extensions) ? entry.extensions : [];
+    return extensions.some(item => String(item || '').trim().toLowerCase() === 'xml');
+  }) || null;
+}
+
+async function copyCustomTemplateFiles(appFolder, appConfig, template) {
+  const fileEntries = resolveCustomTemplateFileEntries(template, appConfig);
+
+  for (const entry of fileEntries) {
+    if (!entry.sourcePath) {
+      if (entry.required) {
+        throw new Error(`Missing required configuration file: ${entry.label}`);
+      }
+      continue;
+    }
+
+    if (!fs.existsSync(entry.sourcePath)) {
+      if (entry.required) {
+        throw new Error(`Configuration file not found: ${entry.label}`);
+      }
+      continue;
+    }
+
+    const allowedExts = Array.isArray(entry.extensions) ? entry.extensions : ['*'];
+    const sourceExt = path.extname(entry.sourcePath).replace(/^\./, '').toLowerCase();
+    if (allowedExts.length > 0 && !allowedExts.includes('*') && !allowedExts.includes(sourceExt)) {
+      throw new Error(`Invalid file type for ${entry.label}`);
+    }
+
+    const destinationPath = path.join(appFolder, entry.relativePath || entry.targetName);
+    const sourceResolved = path.resolve(entry.sourcePath).toLowerCase();
+    const destinationResolved = path.resolve(destinationPath).toLowerCase();
+    if (sourceResolved !== destinationResolved) {
+      await fs.promises.mkdir(path.dirname(destinationPath), { recursive: true });
+      await fs.promises.copyFile(entry.sourcePath, destinationPath);
+    }
+  }
+}
+
+function buildPsObjectLiteral(entries) {
+  if (!entries.length) return '([pscustomobject]@{})';
+  return [
+    '([pscustomobject]@{',
+    ...entries.map(entry => `    '${entry.key}' = ${entry.expression}`),
+    '})'
+  ].join('\n');
+}
+
+function buildPsArgumentExpression(name, joiner, quoteValue, valueExpression) {
+  const separator = name ? (joiner === 'space' ? ' ' : '=') : '';
+  const prefix = sanitizePSForEmbedding(`${name || ''}${separator}`);
+  if (quoteValue) {
+    return `"${prefix}\`"$(${valueExpression})\`""`;
+  }
+  return `"${prefix}$(${valueExpression})"`;
+}
+
+function getCustomTemplateValues(template, appConfig) {
+  const params = (appConfig && appConfig.customParams && typeof appConfig.customParams === 'object')
+    ? appConfig.customParams
+    : {};
+
+  return (template?.arguments || []).map(arg => {
+    const raw = params[arg.key];
+    const value = raw === undefined || raw === null || raw === ''
+      ? String(arg.defaultValue || '')
+      : String(raw);
+    return {
+      ...arg,
+      value
+    };
+  });
+}
+
+function buildCustomTemplateArgumentLines(template, appConfig) {
+  const argumentValues = getCustomTemplateValues(template, appConfig);
+  const fileEntries = resolveCustomTemplateFileEntries(template, appConfig);
+  const lines = [];
+
+  for (const arg of argumentValues) {
+    if (!arg.value) continue;
+    lines.push(
+      `    if ($TemplateValues.${arg.key}) { $ArgumentSegments += ${buildPsArgumentExpression(arg.token, arg.joiner, arg.quoteValue !== false, `$TemplateValues.${arg.key}`)} }`
+    );
+  }
+
+  for (const fileEntry of fileEntries) {
+    if (!fileEntry.sourcePath || !fileEntry.argumentName) continue;
+    lines.push(
+      `    if (Test-Path -LiteralPath $TemplateFiles.${fileEntry.key}) { $ArgumentSegments += ${buildPsArgumentExpression(fileEntry.argumentName, fileEntry.joiner, fileEntry.quoteValue !== false, `$TemplateFiles.${fileEntry.key}`)} }`
+    );
+  }
+
+  return lines.length > 0 ? lines.join('\n') : '    # No template-specific arguments';
+}
+
+function generateUserTemplate(cfg, template) {
+  const notify = cfg.notifyUser || false;
+  const safeName = sanitizeAppName(cfg.name);
+  const silentArgs = sanitizePSForEmbedding(cfg.silentArgs || '/S');
+  const valueEntries = getCustomTemplateValues(template, cfg);
+  const fileEntries = resolveCustomTemplateFileEntries(template, cfg);
+  const templateValuesObject = buildPsObjectLiteral(
+    valueEntries.map(entry => ({
+      key: entry.key,
+      expression: `"${sanitizePSForEmbedding(entry.value)}"`
+    }))
+  );
+  const templateFileNamesObject = buildPsObjectLiteral(
+    fileEntries.map(entry => ({
+      key: entry.key,
+      expression: `"${sanitizePSForEmbedding(entry.targetName)}"`
+    }))
+  );
+  const templateFilesObject = buildPsObjectLiteral(
+    fileEntries.map(entry => ({
+      key: entry.key,
+      expression: `Join-Path -Path $CacheDir -ChildPath "${sanitizePSForEmbedding(entry.relativePath || entry.targetName)}"`
+    }))
+  );
+  const selectedXmlEntry = getSelectedXmlTemplateFileEntry(fileEntries);
+  const configXmlName = cfg.configXmlPath
+    ? sanitizeTemplateFileName(path.basename(cfg.configXmlPath))
+    : (selectedXmlEntry?.targetName
+        ? sanitizeTemplateFileName(selectedXmlEntry.targetName)
+        : '');
+  const customScript = typeof template.script === 'string' && template.script.trim()
+    ? `${template.script.trimEnd()}\n`
+    : '';
+
+  return `# =========================================================================
+# USER TEMPLATE - DROP & RUN
+# Template: ${sanitizeAppName(template.name)}
+# App: ${safeName}
+# Version: ${cfg.version || '1.0.0'}
+# Generado: ${new Date().toISOString()}
+# =========================================================================
+$BaseSilentArgs = "${silentArgs}"
+
+If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
+    Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
+}
+${getLocalCachingLogic(undefined, notify, safeName)}
+$TemplateValues = ${templateValuesObject}
+$TemplateFileNames = ${templateFileNamesObject}
+$TemplateFiles = ${templateFilesObject}
+$ConfigXmlName = "${sanitizePSForEmbedding(configXmlName)}"
+$ConfigXmlPath = if ($ConfigXmlName) { Join-Path -Path $CacheDir -ChildPath $ConfigXmlName } else { $null }
+$HasConfigXml = [bool]($ConfigXmlPath -and (Test-Path -LiteralPath $ConfigXmlPath))
+$ArgumentSegments = @()
+if ($BaseSilentArgs) { $ArgumentSegments += $BaseSilentArgs }
+${buildCustomTemplateArgumentLines(template, cfg)}
+$ArgumentosExe = ($ArgumentSegments | Where-Object { $_ -and $_.Trim() }) -join ' '
+
+try {
+    if ($Instalador.Extension -eq ".msi") {
+        $msiArgs = "/i \`"$($Instalador.FullName)\`""
+        if ($ArgumentosExe) { $msiArgs += " " + $ArgumentosExe }
+        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+    } else {
+        Start-Process -FilePath $Instalador.FullName -ArgumentList $ArgumentosExe -Wait -NoNewWindow
+    }
+${customScript}${getTrackerSaveLogic(notify)}
+`;
+}
+
 const { getToastSnippet } = require('./ps-snippets');
 function getNotificationLogic(_appName) {
   return getToastSnippet();
@@ -217,7 +472,7 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
   const { getToastSnippet } = require('./ps-snippets');
   const notifyPrefix = notifyUser ? getToastSnippet(ToastTitleProcess, ToastMsgProcess) : '';
   const notifyBefore = '';
-  const safeFilter = filter.replace(/\\/g, '\\\\');
+  const safeFilter = String(filter || "\\.(exe|msi)$").replace(/"/g, '""');
   return [
     '# ── Guardia $PSScriptRoot (puede estar vacío en GPO startup / PS4) ────────',
     'if (-not $PSScriptRoot) { $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }',
@@ -254,6 +509,7 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
     '    $Manifest       = Get-Content $VersionFile -Raw | ConvertFrom-Json',
     '    $CurrentHash    = $Manifest.hash',
     '    $CurrentVersion = $Manifest.version',
+    '    $PrimaryInstallerName = [string]($Manifest.primaryInstallerName)',
     '} catch {',
     '    Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] ERROR: version.json corrupto - $_"',
     '    Stop-Transcript -ErrorAction SilentlyContinue',
@@ -283,9 +539,18 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
     '',
     '# ── Localizar instalador en share ────────────────────────────────────────',
     'Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] Buscando instalador en share..."',
-    '$InstaladorRed = Get-ChildItem -Path $PSScriptRoot -File -ErrorAction SilentlyContinue |',
-    '                 Where-Object { $_.Extension -match "' + safeFilter + '" } |',
-    '                 Select-Object -First 1',
+    '$InstaladorRed = $null',
+    'if ($PrimaryInstallerName) {',
+    '    $PrimaryInstallerPath = Join-Path -Path $PSScriptRoot -ChildPath $PrimaryInstallerName',
+    '    if (Test-Path -LiteralPath $PrimaryInstallerPath) {',
+    '        $InstaladorRed = Get-Item -LiteralPath $PrimaryInstallerPath -ErrorAction SilentlyContinue',
+    '    }',
+    '}',
+    'if (-not $InstaladorRed) {',
+    '    $InstaladorRed = Get-ChildItem -Path $PSScriptRoot -File -ErrorAction SilentlyContinue |',
+    '                     Where-Object { $_.Extension -match "' + safeFilter + '" -and $_.Name -ne "install.ps1" } |',
+    '                     Select-Object -First 1',
+    '}',
     'if (-not $InstaladorRed) {',
     '    Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] ERROR: No se encontro instalador (' + safeFilter + ') en $PSScriptRoot"',
     '    if (Test-Path $VersionFile) {',
@@ -311,9 +576,56 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
     '}',
     '',
     '# ── Localizar instalador en cache ────────────────────────────────────────',
-    '$Instalador = Get-ChildItem -Path $CacheDir -File |',
-    '              Where-Object { $_.Extension -match "' + safeFilter + '" } |',
-    '              Select-Object -First 1',
+    'function Test-DeployCachePathSafety {',
+    '    param([string]$Path)',
+    '    if (-not $Path) { return $false }',
+    '    try {',
+    '        $fullPath = [System.IO.Path]::GetFullPath($Path)',
+    '        $cacheRoot = [System.IO.Path]::GetFullPath("C:\\Temp\\Deploy")',
+    '        return $fullPath.StartsWith($cacheRoot.TrimEnd("\\") + "\\", [System.StringComparison]::OrdinalIgnoreCase) -and $fullPath.Length -gt ($cacheRoot.Length + 1)',
+    '    } catch {',
+    '        return $false',
+    '    }',
+    '}',
+    '',
+    'function Invoke-DeployCacheCleanup {',
+    '    param([string]$CacheDir)',
+    '    if (-not (Test-DeployCachePathSafety -Path $CacheDir)) {',
+    '        Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] AVISO: Ruta de cache no segura, se omite la limpieza: $CacheDir"',
+    '        return $false',
+    '    }',
+    '    if (-not (Test-Path -LiteralPath $CacheDir)) {',
+    '        return $true',
+    '    }',
+    '    for ($attempt = 1; $attempt -le 5; $attempt++) {',
+    '        try {',
+    '            Remove-Item -LiteralPath $CacheDir -Recurse -Force -ErrorAction Stop',
+    '            Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] Cache local eliminada: $CacheDir"',
+    '            return $true',
+    '        } catch {',
+    '            if ($attempt -lt 5) {',
+    '                Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] AVISO: Cache en uso, reintentando limpieza ($attempt/5)..."',
+    '                Start-Sleep -Seconds 2',
+    '            } else {',
+    '                Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] AVISO: No se pudo eliminar la cache local: $_"',
+    '            }',
+    '        }',
+    '    }',
+    '    return $false',
+    '}',
+    '',
+    '$Instalador = $null',
+    'if ($PrimaryInstallerName) {',
+    '    $PrimaryInstallerCachePath = Join-Path -Path $CacheDir -ChildPath $PrimaryInstallerName',
+    '    if (Test-Path -LiteralPath $PrimaryInstallerCachePath) {',
+    '        $Instalador = Get-Item -LiteralPath $PrimaryInstallerCachePath -ErrorAction SilentlyContinue',
+    '    }',
+    '}',
+    'if (-not $Instalador) {',
+    '    $Instalador = Get-ChildItem -Path $CacheDir -File |',
+    '                  Where-Object { $_.Extension -match "' + safeFilter + '" -and $_.Name -ne "install.ps1" } |',
+    '                  Select-Object -First 1',
+    '}',
     'if (-not $Instalador) {',
     '    Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] ERROR: Instalador no encontrado en cache tras la copia"',
     '    Stop-Transcript -ErrorAction SilentlyContinue',
@@ -343,6 +655,7 @@ function getTrackerSaveLogic(notifyUser = false) {
 ${notifyAfter}
     @{ hash = $CurrentHash; version = $CurrentVersion; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success' } |
         ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+    Invoke-DeployCacheCleanup -CacheDir $CacheDir | Out-Null
 
 } catch {
     # ── Error ──────────────────────────────────────────────────────────
@@ -368,11 +681,15 @@ $ArgumentosExe = "${silentArgs}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
     Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
 }
-${getLocalCachingLogic(undefined, notify, safeName)}
+${getLocalCachingLogic("\\.(exe|msi|ps1)$", notify, safeName)}
 try {
     if ($Instalador.Extension -eq ".msi") {
         $msiArgs = "/i \`"$($Instalador.FullName)\`" " + $ArgumentosExe
         Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+    } elseif ($Instalador.Extension -eq ".ps1") {
+        $psArgs = "-ExecutionPolicy Bypass -File \`"$($Instalador.FullName)\`""
+        if ($ArgumentosExe) { $psArgs += " " + $ArgumentosExe }
+        Start-Process -FilePath "PowerShell.exe" -ArgumentList $psArgs -Wait -NoNewWindow
     } else {
         Start-Process -FilePath $Instalador.FullName -ArgumentList $ArgumentosExe -Wait -NoNewWindow
     }
@@ -394,10 +711,14 @@ $Token = "${token}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
     Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
 }
-${getLocalCachingLogic("\\.msi$", notify, sanitizeAppName(cfg.name))}
+${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
-    $msiArgs = "/i \`"$($Instalador.FullName)\`" REGISTRATIONTOKEN=\`"$Token\`" /qn /norestart"
-    Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+    if ($Instalador.Extension -eq ".msi") {
+        $msiArgs = "/i \`"$($Instalador.FullName)\`" REGISTRATIONTOKEN=\`"$Token\`" /qn /norestart"
+        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+    } else {
+        Start-Process -FilePath $Instalador.FullName -ArgumentList "/S REGISTRATIONTOKEN=\`"$Token\`"" -Wait -NoNewWindow
+    }
 ${getTrackerSaveLogic(notify)}
 `;
 }
@@ -482,13 +803,17 @@ $FcVpnServer = "${vpnServer}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
     Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
 }
-${getLocalCachingLogic("\\.msi$", notify, vpnName)}
+${getLocalCachingLogic("\\.(exe|msi)$", notify, vpnName)}
 try {
-    $msiArgs = "/i \`"$($Instalador.FullName)\`" REBOOT=ReallySuppress /qn"
-    $installProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow -PassThru
+    if ($Instalador.Extension -eq ".msi") {
+        $msiArgs = "/i \`"$($Instalador.FullName)\`" REBOOT=ReallySuppress /qn"
+        $installProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow -PassThru
+    } else {
+        $installProcess = Start-Process -FilePath $Instalador.FullName -ArgumentList "/S /silent /NORESTART" -Wait -NoNewWindow -PassThru
+    }
 
     if ($installProcess.ExitCode -notin @(0, 3010, 1641)) {
-        throw "msiexec salio con codigo $($installProcess.ExitCode)"
+        throw "instalador salio con codigo $($installProcess.ExitCode)"
     }
 
     $vpnPath = "HKLM:\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels\\$FcVpnName"
@@ -552,12 +877,19 @@ $WazuhManager = "${manager}"
 $WazuhGroup   = "${group}"
 $WazuhPwd     = "${pwd}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
-${getLocalCachingLogic("\\.msi$", notify, sanitizeAppName(cfg.name))}
+${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
-    $msiArgs = "/i \`"$($Instalador.FullName)\`" WAZUH_MANAGER=\`"$WazuhManager\`" WAZUH_AGENT_GROUP=\`"$WazuhGroup\`""
-    if ($WazuhPwd) { $msiArgs += " WAZUH_REGISTRATION_PASSWORD=\`"$WazuhPwd\`"" }
-    $msiArgs += " /qn"
-    Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+    if ($Instalador.Extension -eq ".msi") {
+        $msiArgs = "/i \`"$($Instalador.FullName)\`" WAZUH_MANAGER=\`"$WazuhManager\`" WAZUH_AGENT_GROUP=\`"$WazuhGroup\`""
+        if ($WazuhPwd) { $msiArgs += " WAZUH_REGISTRATION_PASSWORD=\`"$WazuhPwd\`"" }
+        $msiArgs += " /qn"
+        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+    } else {
+        $exeArgs = "WAZUH_MANAGER=\`"$WazuhManager\`" WAZUH_AGENT_GROUP=\`"$WazuhGroup\`""
+        if ($WazuhPwd) { $exeArgs += " WAZUH_REGISTRATION_PASSWORD=\`"$WazuhPwd\`"" }
+        $exeArgs += " /S"
+        Start-Process -FilePath $Instalador.FullName -ArgumentList $exeArgs -Wait -NoNewWindow
+    }
 ${getTrackerSaveLogic(notify)}
 `;
 }
@@ -589,11 +921,17 @@ function generateCortexXDR(cfg) {
 # =========================================================================
 $CortexDir = "${dir}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
-${getLocalCachingLogic("\\.msi$", notify, sanitizeAppName(cfg.name))}
+${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
-    $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn"
-    if ($CortexDir) { $msiArgs += " INSTALLDIR=\`"$CortexDir\`"" }
-    Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+    if ($Instalador.Extension -eq ".msi") {
+        $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn"
+        if ($CortexDir) { $msiArgs += " INSTALLDIR=\`"$CortexDir\`"" }
+        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+    } else {
+        $exeArgs = "/S /quiet"
+        if ($CortexDir) { $exeArgs += " /D=\`"$CortexDir\`"" }
+        Start-Process -FilePath $Instalador.FullName -ArgumentList $exeArgs -Wait -NoNewWindow
+    }
 ${getTrackerSaveLogic(notify)}
 `;
 }
@@ -626,11 +964,17 @@ function generateZscaler(cfg) {
 $ZscCloud  = "${cloud}"
 $ZscDomain = "${domain}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
-${getLocalCachingLogic("\\.msi$", notify, sanitizeAppName(cfg.name))}
+${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
-    $msiArgs = "/i \`"$($Instalador.FullName)\`" CLOUDNAME=\`"$ZscCloud\`" STRICTENFORCEMENT=${strict} /qn"
-    if ($ZscDomain) { $msiArgs += " USERDOMAIN=\`"$ZscDomain\`"" }
-    Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+    if ($Instalador.Extension -eq ".msi") {
+        $msiArgs = "/i \`"$($Instalador.FullName)\`" CLOUDNAME=\`"$ZscCloud\`" STRICTENFORCEMENT=${strict} /qn"
+        if ($ZscDomain) { $msiArgs += " USERDOMAIN=\`"$ZscDomain\`"" }
+        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+    } else {
+        $exeArgs = "/S /CLOUDNAME=\`"$ZscCloud\`" /STRICTENFORCEMENT=${strict}"
+        if ($ZscDomain) { $exeArgs += " /USERDOMAIN=\`"$ZscDomain\`"" }
+        Start-Process -FilePath $Instalador.FullName -ArgumentList $exeArgs -Wait -NoNewWindow
+    }
 ${getTrackerSaveLogic(notify)}
 `;
 }
@@ -643,10 +987,16 @@ function generateGlobalProtect(cfg) {
 # =========================================================================
 $VpnPortal = "${portal}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
-${getLocalCachingLogic("\\.msi$", notify, sanitizeAppName(cfg.name))}
+${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
-    $msiArgs = "/i \`"$($Instalador.FullName)\`" PORTAL=\`"$VpnPortal\`" /qn"
-    Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+    if ($Instalador.Extension -eq ".msi") {
+        $msiArgs = "/i \`"$($Instalador.FullName)\`" PORTAL=\`"$VpnPortal\`" /qn"
+        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+    } else {
+        $exeArgs = "/s"
+        if ($VpnPortal) { $exeArgs += " PORTAL=\`"$VpnPortal\`"" }
+        Start-Process -FilePath $Instalador.FullName -ArgumentList $exeArgs -Wait -NoNewWindow
+    }
 ${getTrackerSaveLogic(notify)}
 `;
 }
@@ -659,9 +1009,13 @@ function generateCiscoSecureClient(cfg) {
 # =========================================================================
 $XmlProfile = "${xml}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
-${getLocalCachingLogic("\\.msi$", notify, sanitizeAppName(cfg.name))}
+${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
-    Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$($Instalador.FullName)\`" /qn" -Wait -NoNewWindow
+    if ($Instalador.Extension -eq ".msi") {
+        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$($Instalador.FullName)\`" /qn" -Wait -NoNewWindow
+    } else {
+        Start-Process -FilePath $Instalador.FullName -ArgumentList "/S /s" -Wait -NoNewWindow
+    }
 
     $xmlSource = Join-Path -Path $CacheDir -ChildPath $XmlProfile
     $xmlDestDir = "C:\\ProgramData\\Cisco\\Cisco Secure Client\\VPN\\Profile"
@@ -703,11 +1057,17 @@ function generateNinjaOne(cfg) {
 # =========================================================================
 $NinjaTk = "${tk}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
-${getLocalCachingLogic("\\.msi$", notify, sanitizeAppName(cfg.name))}
+${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
-    $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn"
-    if ($NinjaTk) { $msiArgs += " TOKEN=\`"$NinjaTk\`"" }
-    Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+    if ($Instalador.Extension -eq ".msi") {
+        $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn"
+        if ($NinjaTk) { $msiArgs += " TOKEN=\`"$NinjaTk\`"" }
+        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+    } else {
+        $exeArgs = "/S /silent"
+        if ($NinjaTk) { $exeArgs += " /TOKEN=\`"$NinjaTk\`"" }
+        Start-Process -FilePath $Instalador.FullName -ArgumentList $exeArgs -Wait -NoNewWindow
+    }
 ${getTrackerSaveLogic(notify)}
 `;
 }
@@ -722,13 +1082,20 @@ function generateTeamViewer(cfg) {
 $TvCid = "${cid}"
 $TvApi = "${api}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
-${getLocalCachingLogic("\\.msi$", notify, sanitizeAppName(cfg.name))}
+${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
-    $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn"
-    if ($TvCid) { $msiArgs += " CUSTOMCONFIGID=\`"$TvCid\`"" }
-    if ($TvApi) { $msiArgs += " APITOKEN=\`"$TvApi\`"" }
-    $msiArgs += " ASSIGNMENTOPTIONS=\`"--grant-easy-access\`""
-    Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+    if ($Instalador.Extension -eq ".msi") {
+        $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn"
+        if ($TvCid) { $msiArgs += " CUSTOMCONFIGID=\`"$TvCid\`"" }
+        if ($TvApi) { $msiArgs += " APITOKEN=\`"$TvApi\`"" }
+        $msiArgs += " ASSIGNMENTOPTIONS=\`"--grant-easy-access\`""
+        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+    } else {
+        $exeArgs = "--silent"
+        if ($TvCid) { $exeArgs += " --id $TvCid" }
+        if ($TvApi) { $exeArgs += " --token $TvApi" }
+        Start-Process -FilePath $Instalador.FullName -ArgumentList $exeArgs -Wait -NoNewWindow
+    }
 ${getTrackerSaveLogic(notify)}
 `;
 }
@@ -739,9 +1106,13 @@ function generateAnyDesk(cfg) {
 # ANYDESK CUSTOM - DROP & RUN
 # =========================================================================
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
-${getLocalCachingLogic("\\.msi$", notify, sanitizeAppName(cfg.name))}
+${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
-    Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$($Instalador.FullName)\`" /qn" -Wait -NoNewWindow
+    if ($Instalador.Extension -eq ".msi") {
+        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$($Instalador.FullName)\`" /qn" -Wait -NoNewWindow
+    } else {
+        Start-Process -FilePath $Instalador.FullName -ArgumentList "--install --start-with-win --silent" -Wait -NoNewWindow
+    }
 ${getTrackerSaveLogic(notify)}
 `;
 }
@@ -781,12 +1152,19 @@ function generateCrashPlan(cfg) {
 $CpUrl   = "${url}"
 $CpToken = "${token}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit }
-${getLocalCachingLogic("\\.msi$", notify, sanitizeAppName(cfg.name))}
+${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
-    $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn"
-    if ($CpUrl)   { $msiArgs += " DEPLOYMENT_URL=\`"$CpUrl\`"" }
-    if ($CpToken) { $msiArgs += " DEPLOYMENT_TOKEN=\`"$CpToken\`"" }
-    Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+    if ($Instalador.Extension -eq ".msi") {
+        $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn"
+        if ($CpUrl)   { $msiArgs += " DEPLOYMENT_URL=\`"$CpUrl\`"" }
+        if ($CpToken) { $msiArgs += " DEPLOYMENT_TOKEN=\`"$CpToken\`"" }
+        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+    } else {
+        $exeArgs = "/S"
+        if ($CpUrl)   { $exeArgs += " /DEPLOYMENT_URL=\`"$CpUrl\`"" }
+        if ($CpToken) { $exeArgs += " /DEPLOYMENT_TOKEN=\`"$CpToken\`"" }
+        Start-Process -FilePath $Instalador.FullName -ArgumentList $exeArgs -Wait -NoNewWindow
+    }
 ${getTrackerSaveLogic(notify)}
 `;
 }

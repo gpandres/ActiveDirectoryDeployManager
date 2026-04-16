@@ -13,6 +13,37 @@ vi.mock('../services/i18n', () => ({
   getTranslations: () => ({})
 }));
 
+vi.mock('../services/template-service', () => ({
+  default: {
+    getWizardTemplates: () => ([
+      {
+        id: 'user-cid-template',
+        category: 'Custom',
+        name: 'CID Template',
+        description: 'Custom template',
+        fields: [],
+        fileFields: [],
+        noInstaller: false,
+        isUserDefined: true
+      }
+    ]),
+    resolve: (_id, snapshot) => (snapshot?.kind === 'user-template' ? snapshot : null)
+  },
+  getWizardTemplates: () => ([
+    {
+      id: 'user-cid-template',
+      category: 'Custom',
+      name: 'CID Template',
+      description: 'Custom template',
+      fields: [],
+      fileFields: [],
+      noInstaller: false,
+      isUserDefined: true
+    }
+  ]),
+  resolve: (_id, snapshot) => (snapshot?.kind === 'user-template' ? snapshot : null)
+}));
+
 const svc = require('../services/script-service');
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -49,6 +80,28 @@ describe('generateScript — generic template', () => {
     const script = svc.generateScript(base({ template: 'nonexistent-template-xyz' }));
     expect(typeof script).toBe('string');
     expect(script.length).toBeGreaterThan(0);
+  });
+
+  it('uses a valid installer regex without over-escaping it', () => {
+    const script = svc.generateScript(base({ template: 'generic' }));
+    expect(script).toContain('-match "\\.(exe|msi|ps1)$"');
+    expect(script).not.toContain('-match "\\\\.(exe|msi|ps1)$"');
+    expect(script).toContain('$_.Name -ne "install.ps1"');
+    expect(script).toContain('$PrimaryInstallerName = [string]($Manifest.primaryInstallerName)');
+  });
+
+  it('supports ps1 wrappers in the generic installer flow', () => {
+    const script = svc.generateScript(base({ template: 'generic', silentArgs: '-Mode Silent' }));
+    expect(script).toContain('$Instalador.Extension -eq ".ps1"');
+    expect(script).toContain('Start-Process -FilePath "PowerShell.exe"');
+    expect(script).toContain('-ExecutionPolicy Bypass -File');
+  });
+
+  it('cleans up the local cache directory after a successful install', () => {
+    const script = svc.generateScript(base({ template: 'generic' }));
+    expect(script).toContain('function Test-DeployCachePathSafety');
+    expect(script).toContain('Remove-Item -LiteralPath $CacheDir -Recurse -Force -ErrorAction Stop');
+    expect(script).toContain('Invoke-DeployCacheCleanup -CacheDir $CacheDir | Out-Null');
   });
 });
 

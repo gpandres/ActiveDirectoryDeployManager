@@ -146,25 +146,37 @@ const App = {
     });
   },
 
-  openModal(title, bodyHTML, footerHTML = '') {
+  applyModalOptions(options = {}) {
+    const modal = document.getElementById('modal');
+    if (!modal) return;
+
+    modal.classList.remove('modal-wide', 'modal-full');
+    if (options.size === 'wide') modal.classList.add('modal-wide');
+    if (options.size === 'full') modal.classList.add('modal-full');
+  },
+
+  openModal(title, bodyHTML, footerHTML = '', options = {}) {
     this._modalLocked = false;
     document.getElementById('modal-title').textContent = title;
     document.getElementById('modal-body').innerHTML = bodyHTML;
     document.getElementById('modal-footer').innerHTML = footerHTML;
+    this.applyModalOptions(options);
     document.getElementById('modal-overlay').classList.add('visible');
   },
 
-  openModalLocked(title, bodyHTML, footerHTML = '') {
+  openModalLocked(title, bodyHTML, footerHTML = '', options = {}) {
     this._modalLocked = true;
     document.getElementById('modal-title').textContent = title;
     document.getElementById('modal-body').innerHTML = bodyHTML;
     document.getElementById('modal-footer').innerHTML = footerHTML;
+    this.applyModalOptions(options);
     document.getElementById('modal-overlay').classList.add('visible');
   },
 
   closeModal() {
     this._modalLocked = false;
     document.getElementById('modal-overlay').classList.remove('visible');
+    this.applyModalOptions();
   },
 
   // ─── Toast ─────────────────────────────────────────

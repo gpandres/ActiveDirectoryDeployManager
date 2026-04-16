@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { resolveNamedSubdirectory, resolveWithinBase, sanitizeDeploymentName } = require('./path-utils');
 
 let bundlesFilePath = null;
 
@@ -120,14 +121,17 @@ const bundleService = {
   },
 
   generateBundleScript(bundle, apps, config) {
-    const safeBundleName = (bundle.name || 'Bundle').replace(/[^a-zA-Z0-9\s\-_.,()]/g, '').substring(0, 128);
+    const safeBundleName = sanitizeDeploymentName(bundle.name, 'Bundle');
     const appEntries = bundle.apps
       .sort((a, b) => a.order - b.order)
       .map(entry => {
         const app = apps.find(a => a.id === entry.appId);
         if (!app) return null;
-        const safeAppName = (app.name || 'App').replace(/[^a-zA-Z0-9\s\-_.,()]/g, '');
-        const appFolder = path.join(config.networkSharePath, app.name, 'install.ps1');
+        const safeAppName = sanitizeDeploymentName(app.name, 'App');
+        const appFolder = path.join(
+          resolveNamedSubdirectory(config.networkSharePath, app.name, 'App').path,
+          'install.ps1'
+        );
         return { name: safeAppName, scriptPath: appFolder };
       })
       .filter(Boolean);
@@ -205,13 +209,8 @@ Stop-Transcript
 
   async deployBundle(bundle, apps, config) {
     try {
-      const bundlesDir = path.join(config.networkSharePath, '_bundles');
-      const safeName = (bundle.name || 'bundle').replace(/[^a-zA-Z0-9\s\-_]/g, '').substring(0, 64);
-      const bundleFolder = path.normalize(path.join(bundlesDir, safeName));
-
-      if (!bundleFolder.startsWith(path.normalize(bundlesDir))) {
-        return { success: false, error: 'Invalid bundle name' };
-      }
+      const bundlesDir = resolveWithinBase(config.networkSharePath, '_bundles');
+      const { safeName, path: bundleFolder } = resolveNamedSubdirectory(bundlesDir, bundle.name, 'bundle');
 
       if (!fs.existsSync(bundleFolder)) {
         fs.mkdirSync(bundleFolder, { recursive: true });
@@ -225,6 +224,7 @@ Stop-Transcript
       // Write bundle manifest
       const manifest = {
         name: bundle.name,
+        deploymentFolder: safeName,
         version: bundle.version,
         apps: bundle.apps,
         notifyUser: bundle.notifyUser,
