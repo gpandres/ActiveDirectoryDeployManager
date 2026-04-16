@@ -19,7 +19,7 @@ contextBridge.exposeInMainWorld('api', {
   // Active Directory
   ad: {
     checkRSAT: () => ipcRenderer.invoke('ad:checkRSAT'),
-    getOUs: () => ipcRenderer.invoke('ad:getOUs'),
+    getOUs: (ignoreBaseOU = false) => ipcRenderer.invoke('ad:getOUs', ignoreBaseOU),
     getGPOs: () => ipcRenderer.invoke('ad:getGPOs'),
     createGPO: (name, path, ouDN) => ipcRenderer.invoke('ad:createGPO', name, path, ouDN),
     linkGPOtoOU: (gpoName, ouDN) => ipcRenderer.invoke('ad:linkGPOtoOU', gpoName, ouDN),
@@ -27,7 +27,8 @@ contextBridge.exposeInMainWorld('api', {
     deleteGPO: (gpoName) => ipcRenderer.invoke('ad:deleteGPO', gpoName),
     unlinkGPOfromOU: (gpoName, ouDN) => ipcRenderer.invoke('ad:unlinkGPOfromOU', gpoName, ouDN),
     removeGPOStartupScript: (gpoName) => ipcRenderer.invoke('ad:removeGPOStartupScript', gpoName),
-    checkGPOConflicts: (ouDN) => ipcRenderer.invoke('ad:checkGPOConflicts', ouDN)
+    checkGPOConflicts: (ouDN) => ipcRenderer.invoke('ad:checkGPOConflicts', ouDN),
+    checkGPOExists: (gpoName) => ipcRenderer.invoke('ad:checkGPOExists', gpoName)
   },
 
   // Apps
@@ -38,6 +39,7 @@ contextBridge.exposeInMainWorld('api', {
     update: (id, data) => ipcRenderer.invoke('apps:update', id, data),
     delete: (id, deleteFiles) => ipcRenderer.invoke('apps:delete', id, deleteFiles),
     bulkAssignGPO: (ids, gpoName) => ipcRenderer.invoke('apps:bulkAssignGPO', ids, gpoName),
+    applyAssignmentPlan: (plan) => ipcRenderer.invoke('apps:applyAssignmentPlan', plan),
     getInstallerVersion: (filePath) => ipcRenderer.invoke('apps:getInstallerVersion', filePath),
     computeHash: (filePath) => ipcRenderer.invoke('apps:computeHash', filePath)
   },
@@ -47,6 +49,14 @@ contextBridge.exposeInMainWorld('api', {
     generate: (appConfig) => ipcRenderer.invoke('scripts:generate', appConfig),
     deploy: (appConfig) => ipcRenderer.invoke('scripts:deploy', appConfig),
     getTemplates: () => ipcRenderer.invoke('scripts:getTemplates')
+  },
+
+  templates: {
+    getAll: () => ipcRenderer.invoke('templates:getAll'),
+    get: (id) => ipcRenderer.invoke('templates:get', id),
+    create: (data) => ipcRenderer.invoke('templates:create', data),
+    update: (id, data) => ipcRenderer.invoke('templates:update', id, data),
+    delete: (id) => ipcRenderer.invoke('templates:delete', id)
   },
 
   // Files
@@ -83,5 +93,20 @@ contextBridge.exposeInMainWorld('api', {
   i18n: {
     getAvailable: () => ipcRenderer.invoke('i18n:getAvailable'),
     getTranslations: (langCode) => ipcRenderer.invoke('i18n:getTranslations', langCode)
+  },
+
+  // Winget catalog + version checking (legacy, used by apps.js wizard)
+  winget: {
+    getCatalog: () => ipcRenderer.invoke('winget:getCatalog'),
+    checkVersions: (ids) => ipcRenderer.invoke('winget:checkVersions', ids)
+  },
+
+  // Catalog service (new, used by catalog page)
+  catalog: {
+    getCatalog: () => ipcRenderer.invoke('catalog:getCatalog'),
+    search: (query, category) => ipcRenderer.invoke('catalog:search', query, category),
+    searchCLI: (query) => ipcRenderer.invoke('catalog:searchCLI', query),
+    checkVersions: (ids) => ipcRenderer.invoke('catalog:checkVersions', ids),
+    checkSingle: (wingetId) => ipcRenderer.invoke('catalog:checkSingle', wingetId)
   }
 });

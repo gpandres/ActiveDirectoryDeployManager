@@ -1,8 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { exec } = require('child_process');
-const os = require('os');
+const { execFile } = require('child_process');
+const { resolveNamedSubdirectory } = require('./path-utils');
 
 let appsFilePath = null;
 
@@ -16,47 +16,12 @@ function getAppsPath() {
 
 // ─── Share-backed storage (Option A: share is source of truth) ────────
 // Local userData copy acts as a cache so the app still works offline.
-function getShareMetaPath(filename) {
-  try {
-    const configService = require('./config');
-    const cfg = configService.getConfig();
-    if (!cfg || !cfg.networkSharePath) return null;
-    return path.join(cfg.networkSharePath, '.appdeploy-meta', filename);
-  } catch (e) {
-    return null;
-  }
-}
-
-function tryReadShare(filename) {
-  const sharePath = getShareMetaPath(filename);
-  if (!sharePath) return null;
-  try {
-    if (fs.existsSync(sharePath)) {
-      return JSON.parse(fs.readFileSync(sharePath, 'utf-8'));
-    }
-  } catch (err) {
-    console.warn(`[share] Could not read ${filename} from share:`, err.message);
-  }
-  return null;
-}
-
-function tryWriteShare(filename, data) {
-  const sharePath = getShareMetaPath(filename);
-  if (!sharePath) return false;
-  try {
-    const dir = path.dirname(sharePath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(sharePath, JSON.stringify(data, null, 2), 'utf-8');
-    return true;
-  } catch (err) {
-    console.warn(`[share] Could not write ${filename} to share:`, err.message);
-    return false;
-  }
-}
+const { createShareStore } = require('./share-store');
+const appsShareStore = createShareStore('apps-config.json');
 
 function loadApps() {
   // Share is authoritative — pull from there if available
-  const fromShare = tryReadShare('apps-config.json');
+  const fromShare = appsShareStore.read();
   if (fromShare !== null) {
     // Mirror to local cache for offline fallback
     try {
@@ -80,11 +45,27 @@ function saveApps(apps) {
   // Always write local cache
   fs.writeFileSync(getAppsPath(), JSON.stringify(apps, null, 2), 'utf-8');
   // Best-effort mirror to share
-  tryWriteShare('apps-config.json', apps);
+  appsShareStore.write(apps);
 }
 
 function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  return crypto.randomUUID();
+}
+
+function normalizeDNArray(value) {
+  const raw = Array.isArray(value)
+    ? value
+    : (typeof value === 'string' && value.trim() ? [value.trim()] : []);
+  const seen = new Set();
+  return raw
+    .filter(item => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .filter(item => {
+      if (seen.has(item)) return false;
+      seen.add(item);
+      return true;
+    });
 }
 
 const appService = {
@@ -99,6 +80,7 @@ const appService = {
 
   create(data) {
     const apps = loadApps();
+    const assignedOUs = normalizeDNArray(data.assignedOUs || data.ouDN);
     const newApp = {
       id: generateId(),
       name: data.name || 'Nueva App',
@@ -107,8 +89,13 @@ const appService = {
       silentArgs: data.silentArgs || '/S',
       installerPath: data.installerPath || '',
       configXmlPath: data.configXmlPath || '',
+      wingetId: data.wingetId || '',
+      odtConfig: data.odtConfig || null,
       customParams: data.customParams || {},
-      assignedOUs: data.assignedOUs || [],
+      templateFiles: data.templateFiles || {},
+      templateDefinition: data.templateDefinition || null,
+      ouDN: assignedOUs[0] || '',
+      assignedOUs,
       gpoName: data.gpoName || '',
       createGPO: data.createGPO || false,
       version: data.version || '1.0.0',
@@ -129,7 +116,16 @@ const appService = {
     const apps = loadApps();
     const idx = apps.findIndex(a => a.id === id);
     if (idx === -1) return null;
-    apps[idx] = { ...apps[idx], ...data, updatedAt: new Date().toISOString() };
+    const assignedOUs = normalizeDNArray(
+      data.assignedOUs !== undefined ? data.assignedOUs : (data.ouDN !== undefined ? data.ouDN : apps[idx].assignedOUs || apps[idx].ouDN)
+    );
+    apps[idx] = {
+      ...apps[idx],
+      ...data,
+      ouDN: assignedOUs[0] || '',
+      assignedOUs,
+      updatedAt: new Date().toISOString()
+    };
     saveApps(apps);
     return apps[idx];
   },
@@ -143,8 +139,8 @@ const appService = {
       const configService = require('./config');
       const cfg = configService.getConfig();
       if (cfg && cfg.networkSharePath) {
-        const folderPath = path.join(cfg.networkSharePath, appToDelete.name);
         try {
+          const { path: folderPath } = resolveNamedSubdirectory(cfg.networkSharePath, appToDelete.name, 'App');
           if (fs.existsSync(folderPath)) {
             fs.rmSync(folderPath, { recursive: true, force: true });
           }
@@ -173,6 +169,76 @@ const appService = {
     return { success: true, updated };
   },
 
+  // Apply an assignment plan in a single call.
+  // plan = { toAssign: [{ appId, ouDN }], toUnassign: [{ appId, ouDN }] }
+  // Calls AD link/unlink per pair and updates each app's assignedOUs
+  // atomically based on the actual AD result (only persists pairs that
+  // AD confirms).
+  async applyAssignmentPlan(plan) {
+    const adService = require('./ad-service');
+    const toAssign = Array.isArray(plan?.toAssign) ? plan.toAssign : [];
+    const toUnassign = Array.isArray(plan?.toUnassign) ? plan.toUnassign : [];
+
+    const results = {
+      success: true,
+      assigned: [],
+      unassigned: [],
+      failures: []
+    };
+
+    // Load once, mutate, save once at the end
+    const apps = loadApps();
+    const byId = new Map(apps.map(a => [a.id, a]));
+
+    // Unassignments first — reduces chance of unique-link conflicts
+    for (const { appId, ouDN } of toUnassign) {
+      const app = byId.get(appId);
+      if (!app) {
+        results.failures.push({ action: 'unassign', appId, ouDN, error: 'App not found' });
+        continue;
+      }
+      if (app.gpoName) {
+        const adResult = await adService.unlinkGPOfromOU(app.gpoName, ouDN);
+        if (!adResult.success) {
+          results.success = false;
+          results.failures.push({ action: 'unassign', appId, ouDN, appName: app.name, error: adResult.error });
+          continue;
+        }
+      }
+      app.assignedOUs = (app.assignedOUs || []).filter(dn => dn !== ouDN);
+      app.updatedAt = new Date().toISOString();
+      results.unassigned.push({ appId, ouDN });
+    }
+
+    for (const { appId, ouDN } of toAssign) {
+      const app = byId.get(appId);
+      if (!app) {
+        results.failures.push({ action: 'assign', appId, ouDN, error: 'App not found' });
+        continue;
+      }
+      if (app.gpoName) {
+        const adResult = await adService.linkGPOtoOU(app.gpoName, ouDN);
+        if (!adResult.success) {
+          results.success = false;
+          results.failures.push({ action: 'assign', appId, ouDN, appName: app.name, error: adResult.error });
+          continue;
+        }
+      } else {
+        results.failures.push({ action: 'assign', appId, ouDN, appName: app.name, error: 'App has no GPO' });
+        results.success = false;
+        continue;
+      }
+      const ous = new Set(app.assignedOUs || []);
+      ous.add(ouDN);
+      app.assignedOUs = Array.from(ous);
+      app.updatedAt = new Date().toISOString();
+      results.assigned.push({ appId, ouDN });
+    }
+
+    saveApps(apps);
+    return results;
+  },
+
   getInstallerVersion(filePath) {
     return new Promise((resolve) => {
       try {
@@ -180,6 +246,13 @@ const appService = {
           return resolve({ success: false, error: 'File not found' });
         }
         const ext = path.extname(filePath).toLowerCase();
+        // Security: only allow .exe and .msi, reject paths with dangerous characters
+        if (!['.exe', '.msi'].includes(ext)) {
+          return resolve({ success: false, error: 'Unsupported file type' });
+        }
+        if (/[;|`$&{}]/.test(filePath)) {
+          return resolve({ success: false, error: 'Invalid file path characters' });
+        }
         let psCommand;
 
         if (ext === '.exe') {
@@ -202,19 +275,19 @@ const appService = {
           return resolve({ success: false, error: 'Unsupported file type' });
         }
 
-        const tmpFile = path.join(os.tmpdir(), `ver_${Date.now()}_${Math.floor(Math.random()*1000)}.ps1`);
-        fs.writeFileSync(tmpFile, psCommand, { encoding: 'utf8' });
-        exec(`powershell -NoProfile -ExecutionPolicy Bypass -File "${tmpFile}"`, { maxBuffer: 1024 * 1024 }, (error, stdout) => {
-          try { fs.unlinkSync(tmpFile); } catch (e) {}
-          if (error) {
-            return resolve({ success: false, error: error.message });
+        const ps = execFile(
+          'powershell',
+          ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', '-'],
+          { maxBuffer: 1024 * 1024, timeout: 15000 },
+          (error, stdout) => {
+            if (error) return resolve({ success: false, error: error.message });
+            const version = (stdout || '').trim();
+            if (!version) return resolve({ success: false, error: 'No version metadata found' });
+            resolve({ success: true, version });
           }
-          const version = (stdout || '').trim();
-          if (!version) {
-            return resolve({ success: false, error: 'No version metadata found' });
-          }
-          resolve({ success: true, version });
-        });
+        );
+        ps.stdin.write(psCommand);
+        ps.stdin.end();
       } catch (err) {
         resolve({ success: false, error: err.message });
       }
@@ -222,32 +295,10 @@ const appService = {
   },
 
   cleanupTempFiles() {
-    // Sweep orphaned temp PS scripts (ad_script_*.ps1 and ver_*.ps1)
-    // created by runPowerShell() and getInstallerVersion().
-    // Only deletes files older than 60 seconds to avoid racing
-    // with a concurrent operation that's currently using the file.
-    try {
-      const tmpDir = os.tmpdir();
-      const minAgeMs = 60 * 1000;
-      const now = Date.now();
-      const patterns = [/^ad_script_\d+_\d+\.ps1$/, /^ver_\d+_\d+\.ps1$/];
-      const files = fs.readdirSync(tmpDir);
-      let removed = 0;
-      for (const file of files) {
-        if (!patterns.some(re => re.test(file))) continue;
-        const full = path.join(tmpDir, file);
-        try {
-          const stat = fs.statSync(full);
-          if (now - stat.mtimeMs >= minAgeMs) {
-            fs.unlinkSync(full);
-            removed++;
-          }
-        } catch (e) {}
-      }
-      return { success: true, removed };
-    } catch (err) {
-      return { success: false, error: err.message };
-    }
+    // Both runPowerShell (ad-service) and getInstallerVersion now use stdin,
+    // so no temp PS scripts are written to disk. This method is kept as a
+    // no-op safety net for any orphans from older sessions.
+    return { success: true, removed: 0 };
   },
 
   computeFileHash(filePath) {
@@ -278,16 +329,39 @@ const appService = {
 
   importAll(data) {
     try {
+      const DANGEROUS_KEYS = /^(__proto__|constructor|prototype)$/;
+      const isValidKey = (k) => !DANGEROUS_KEYS.test(k) && typeof k === 'string';
+      
       if (data.apps && Array.isArray(data.apps)) {
-        saveApps(data.apps);
+        const validApps = data.apps.filter(app => 
+          app && typeof app === 'object' && 
+          typeof app.name === 'string' && app.name.length <= 128 &&
+          Object.keys(app).every(isValidKey)
+        );
+        if (validApps.length > 0) {
+          saveApps(validApps);
+        }
       }
-      if (data.config) {
+      if (data.config && typeof data.config === 'object') {
         const configService = require('./config');
-        configService.setConfig(data.config);
+        const safeConfig = {};
+        for (const key of Object.keys(data.config)) {
+          if (isValidKey(key)) {
+            safeConfig[key] = data.config[key];
+          }
+        }
+        configService.setConfig(safeConfig);
       }
       if (data.bundles && Array.isArray(data.bundles)) {
-        const bundleService = require('./bundle-service');
-        bundleService.replaceAll(data.bundles);
+        const validBundles = data.bundles.filter(b => 
+          b && typeof b === 'object' && 
+          typeof b.name === 'string' && b.name.length <= 128 &&
+          Object.keys(b).every(isValidKey)
+        );
+        if (validBundles.length > 0) {
+          const bundleService = require('./bundle-service');
+          bundleService.replaceAll(validBundles);
+        }
       }
       return { success: true };
     } catch (err) {

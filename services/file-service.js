@@ -1,12 +1,14 @@
 const fs = require('fs');
 const path = require('path');
 const configService = require('./config');
+const { resolveNamedSubdirectory } = require('./path-utils');
 
 const fileService = {
   listDeployedApps() {
     try {
       const config = configService.getConfig();
       const basePath = config.networkSharePath;
+      const myShareId = config.shareId || '';
 
       if (!fs.existsSync(basePath)) {
         return { success: false, error: `La ruta no existe: ${basePath}`, data: [] };
@@ -29,7 +31,11 @@ const fileService = {
           });
 
           const hasScript = files.some(f => f.extension === '.ps1');
-          const hasInstaller = files.some(f => f.extension === '.msi' || f.extension === '.exe');
+          const hasInstaller = files.some(f =>
+            f.extension === '.msi'
+            || f.extension === '.exe'
+            || (f.extension === '.ps1' && String(f.name || '').toLowerCase() !== 'install.ps1')
+          );
 
           // Read version manifest if available
           let manifest = null;
@@ -40,6 +46,18 @@ const fileService = {
             }
           } catch (e) {}
 
+          // If config has a shareId, only include folders that match it
+          // (folders without shareId in manifest are always included for backward compat)
+          if (myShareId && manifest?.shareId && manifest.shareId !== myShareId) {
+            return null;
+          }
+
+          const isNoInstallerApp = manifest?.template === 'winget' || manifest?.template === 'odt'
+            || (manifest && manifest.hash === '' && hasScript);
+          const status = hasScript && (hasInstaller || isNoInstallerApp) ? 'ready'
+            : hasScript ? 'missing-installer'
+            : 'missing-script';
+
           return {
             name: dir.name,
             path: dirPath,
@@ -48,10 +66,12 @@ const fileService = {
             hasInstaller,
             version: manifest?.version || null,
             hash: manifest?.hash || null,
+            template: manifest?.template || null,
             deployedAt: manifest?.deployedAt || null,
-            status: hasScript && hasInstaller ? 'ready' : hasScript ? 'missing-installer' : 'missing-script'
+            shareId: manifest?.shareId || null,
+            status
           };
-        });
+        }).filter(app => app && app.hasScript);
 
       return { success: true, data: apps };
     } catch (err) {
@@ -62,7 +82,7 @@ const fileService = {
   getAppContents(name) {
     try {
       const config = configService.getConfig();
-      const dirPath = path.join(config.networkSharePath, name);
+      const { path: dirPath } = resolveNamedSubdirectory(config.networkSharePath, name, 'App');
 
       if (!fs.existsSync(dirPath)) {
         return { success: false, error: 'Carpeta no encontrada', data: [] };
@@ -88,7 +108,7 @@ const fileService = {
   createAppFolder(name) {
     try {
       const config = configService.getConfig();
-      const dirPath = path.join(config.networkSharePath, name);
+      const { path: dirPath } = resolveNamedSubdirectory(config.networkSharePath, name, 'App');
 
       if (!fs.existsSync(dirPath)) {
         fs.mkdirSync(dirPath, { recursive: true });

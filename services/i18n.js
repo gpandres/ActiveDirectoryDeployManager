@@ -1,25 +1,14 @@
-const fs = require('fs');
-const path = require('path');
-const { app } = require('electron');
+// i18n — translations are embedded in code only.
+// No external .json files are read or written. To add a language, add a new
+// TRANSLATIONS_XX object below and register it in getTranslations().
 
-let langDir = null;
-
-function getLangDir() {
-  if (!langDir) {
-    langDir = path.join(app.getPath('userData'), 'lang');
-    if (!fs.existsSync(langDir)) {
-      fs.mkdirSync(langDir, { recursive: true });
-    }
-  }
-  return langDir;
-}
-
-const FALLBACK_EN = {
+const TRANSLATIONS_EN = {
   nav: {
     dashboard: "Dashboard",
     ous: "Organizational Units",
     gpos: "GPO Management",
     apps: "Applications",
+    catalog: "Catalog",
     bundles: "Bundles",
     deployments: "Deployments",
     settings: "Settings"
@@ -28,7 +17,7 @@ const FALLBACK_EN = {
     title: "Initial Configuration",
     subtitle: "Welcome to AD Deploy Manager. Please configure the basic settings to continue.",
     language: "Language",
-    languageHint: "You can add more languages by putting .json files in the lang folder.",
+    languageHint: "Choose the language for the application UI.",
     networkShare: "Network Share Path",
     networkShareHint: "UNC path where installers and scripts will be stored (e.g. \\\\server\\share).",
     browse: "Browse...",
@@ -36,6 +25,10 @@ const FALLBACK_EN = {
     logsDirHint: "Local path on target machines where installation logs will be saved.",
     defaultGpo: "Default GPO Name (Optional)",
     defaultGpoHint: "If specified, this GPO will be selected by default when creating new apps.",
+    baseOu: "Base OU (Optional)",
+    baseOuHint: "DN of the OU to limit AD searches (e.g. OU=Clients,DC=domain,DC=com).",
+    preferredDC: "Domain Controller (multi-DC)",
+    preferredDCHint: "Leave empty to auto-use the PDC emulator. In multi-DC environments, specify the primary DC to avoid replication issues.",
     saveAndContinue: "Save and Continue"
   },
   dashboard: {
@@ -102,12 +95,12 @@ const FALLBACK_EN = {
     next: "Next",
     back: "Back",
     cancel: "Cancel",
-    saveAndDeploy: "Save and Deploy",
-    createAndDeploy: "Create and Deploy",
+    saveAndDeploy: "Review and Save",
+    createAndDeploy: "Review and Create",
     appName: "Application Name",
     installer: "Installer (EXE/MSI)",
     browse: "Browse...",
-    silentArgs: "Silent Arguments (Optional)",
+    silentArgs: "Arguments (Optional)",
     commonArgs: "Common args",
     version: "Version",
     notifyUser: "Notify user during installation",
@@ -151,6 +144,22 @@ const FALLBACK_EN = {
     generatingGpo: "Building GPO:",
     gpoCreatedSuccess: "GPO '{gpo}' successfully created and linked",
     gpoWarningOnlyServer: "Warning: Files hosted on Server, but auto-GPO creation failed:",
+    gpoConflictTitle: "GPO already exists",
+    gpoConflictBody: "This GPO already exists in Active Directory. It was created by this program.",
+    gpoConflictQuestion: "What do you want to do?",
+    gpoConflictUpdate: "Update script",
+    gpoConflictReplace: "Delete and recreate",
+    gpoConflictSkipped: "GPO left unchanged.",
+    gpoConflictDeleting: "Deleting GPO",
+    gpoDeleteError: "Error deleting GPO:",
+    bulkDeleteTitle: "Delete applications",
+    bulkDeleteWarning: "You are about to permanently delete {count} application(s). This action cannot be undone.",
+    bulkDeleteCleanFiles: "Delete folder from network share",
+    bulkDeleteCleanFilesHint: "Removes install.ps1, version.json and installers from the share",
+    bulkDeleteCleanGpo: "Also delete linked GPOs from Active Directory",
+    bulkDeleteConfirm: "Delete {count} app(s)",
+    bulkDeleting: "Deleting {count} apps...",
+    bulkDeleteSuccess: "{count} app(s) deleted successfully.",
     scriptCopied: "Script copied to clipboard",
     copyBtn: "Copy",
     deployingLoader: "Deploying...",
@@ -161,6 +170,7 @@ const FALLBACK_EN = {
     selectGpoFirst: "Select a GPO first",
     gpoAssignedBulk: "GPO \"{gpo}\" assigned to {count} app(s)",
     nameRequired: "App name is required",
+    installerRequired: "Select an installer file to continue",
     nameDuplicate: "An app named \"{name}\" already exists",
     errorGeneratingScript: "Error generating script:",
     appSavedDeployError: "App saved but error deploying:",
@@ -241,7 +251,18 @@ const FALLBACK_EN = {
     quickUpdateDowngradeWarn: "You are downgrading from v{old} to v{new}. Proceed with caution.",
     quickUpdateConfirm: "Update & Redeploy",
     quickUpdateSuccess: "App updated to v{version}",
-    detailSectionHistory: "Version History"
+    detailSectionHistory: "Version History",
+    noGroup: "No group",
+    groupByTemplate: "Group by template",
+    create: "Create",
+    checkUpdates: "Check Updates",
+    checkingUpdates: "Checking for updates...",
+    noUpdatesFound: "All winget apps are up to date",
+    updatesFound: "{count} update(s) available",
+    updateToVersion: "Update to v{version}",
+    updateAll: "Update All",
+    updatingApp: "Updating...",
+    updateSuccess: "{name} updated to v{version}"
   },
   bundles: {
     title: "Bundles",
@@ -263,14 +284,6 @@ const FALLBACK_EN = {
     deployingMsg: "Generating scripts and configuring GPOs...",
     bundleCreated: "Bundle created successfully",
     bundleDeleted: "Bundle deleted",
-    bundleUpdated: "Bundle updated successfully",
-    individualAppsNotDeleted: "Individual applications will not be deleted.",
-    deleteBtn: "Deleting...",
-    creatingGpo: "Creating GPO...",
-    gpoCreatedBound: "GPO created and optionally linked",
-    gpoError: "Error creating GPO: ",
-    bundleDeployedWaitMsg: "Bundle deployed, but error creating GPO: ",
-    bundleCreated: "Bundle created successfully",
     bundleDeleted: "Bundle deleted",
     noBundles: "No bundles configured",
     createBundleHint: "Create a bundle to group multiple apps into a single GPO deployment",
@@ -290,7 +303,14 @@ const FALLBACK_EN = {
     startupScriptCleaned: "Startup script cleaned",
     gpoDeletedSuccess: "GPO \"{gpo}\" deleted",
     bundleDisabled: "Bundle \"{bundle}\" disabled",
-    bundleScriptTitle: "Bundle Script"
+    bundleScriptTitle: "Bundle Script",
+    loadingWizard: "Loading...",
+    loadingOUs: "Fetching AD organizational units...",
+    alreadyDeploying: "This bundle is already being deployed, please wait",
+    deployingStep: "Deploying bundle...",
+    creatingGpoStep: "Creating GPO in AD...",
+    search: "Search bundles...",
+    noBundlesMatch: "No bundles match your search"
   },
   gpos: {
     title: "GPOs",
@@ -326,7 +346,9 @@ const FALLBACK_EN = {
     actions: "Actions",
     name: "GPO Name",
     gpoCreated: "GPO {gpo} created",
-    gpoDeleted: "GPO {gpo} deleted"
+    gpoDeleted: "GPO {gpo} deleted",
+    search: "Search GPOs...",
+    noGposMatch: "No GPOs match your search"
   },
   ous: {
     title: "Organizational Units",
@@ -358,7 +380,67 @@ const FALLBACK_EN = {
     appUnassignedSuccess: "App unassigned",
     gpoLinkFailed: "Failed to link GPO to OU",
     gpoUnlinkFailed: "Failed to unlink GPO from OU",
-    refresh: "Refresh"
+    // Assignment-centric redesign
+    treeView: "Tree",
+    assignmentsView: "Assignments",
+    pickerTitle: "Select OUs to display",
+    pickerSubtitle: "Choose only the OUs relevant to software deployment (e.g. user or computer OUs).",
+    pickerSearch: "Filter OUs...",
+    pickerSelectAll: "Select all",
+    pickerClear: "Clear",
+    pickerConfirm: "Show assignments ({n} OUs)",
+    pickerSelected: "{n} OUs selected",
+    pickerSelectAtLeastOne: "Select at least one OU",
+    changeOUs: "Change OUs",
+    assignmentsOUCount: "OUs selected",
+    searchOUs: "Search OUs...",
+    searchApps: "Search apps...",
+    ctrlClickHint: "Ctrl+Click to select multiple OUs",
+    selectedOUs: "OUs selected",
+    statsApps: "apps",
+    statsOUs: "OUs",
+    statsAssignments: "assignments",
+    statsActiveOUs: "active OUs",
+    bulkAssignAll: "Assign all",
+    bulkUnassignAll: "Unassign all",
+    bulkInvert: "Invert",
+    syncCheckBtn: "Sync check",
+    syncCheckSingleOnly: "Sync check only works with a single OU selected",
+    syncCheckFailed: "Sync check failed",
+    syncCheckClean: "No drift detected — local config matches AD",
+    syncCheckDrift: "Drift detected: {n} issues",
+    syncDriftTitle: "Sync drift detected",
+    syncDriftDesc: "The local config and the real AD state don't match:",
+    driftInAdNotLocal: "linked in AD, not in local config",
+    driftInLocalNotAd: "assigned locally, not actually linked in AD",
+    cannotAssignNoGpo: "This app has no GPO yet. Deploy it first.",
+    noGpoBadge: "No GPO",
+    pendingBadge: "pending",
+    noAppsMatch: "No apps match your search",
+    noAppsYet: "No apps created yet",
+    matrixEmpty: "Create some apps and OUs to see the matrix",
+    matrixAppsHeader: "Apps",
+    pendingChanges: "{n} pending changes",
+    pendingSummary: "{a} to assign, {u} to unassign",
+    discardBtn: "Discard",
+    applyBtn: "Apply changes",
+    applying: "Applying...",
+    applySuccess: "{n} changes applied",
+    applyPartial: "{ok} succeeded, {fail} failed:",
+    applyErrorsTitle: "Some changes failed",
+    changesDiscarded: "Changes discarded",
+    ctxCopyFrom: "Copy assignments from...",
+    ctxClearAll: "Clear all assignments",
+    ctxSyncCheck: "Sync check",
+    copyFromTitle: "Copy assignments",
+    copyFromDesc: "Copy all assignments from another OU to {ou}",
+    selectSourceOu: "Select source OU...",
+    copyConfirmBtn: "Stage copy",
+    copyStaged: "{n} assignments staged",
+    alreadyEmpty: "This OU has no assignments to clear",
+    clearStaged: "{n} unassignments staged",
+    refresh: "Refresh",
+    showAllOUs: "Show all OUs"
   },
   deployments: {
     title: "Deployments",
@@ -390,7 +472,9 @@ const FALLBACK_EN = {
     folders: "folder(s)",
     lastModified: "Last Modified",
     deployDate: "Deployment Date",
-    close: "Close"
+    close: "Close",
+    search: "Search deployments...",
+    noDeploymentsMatch: "No deployments match your search"
   },
   settings: {
     title: "Settings",
@@ -403,6 +487,10 @@ const FALLBACK_EN = {
     logsHint: "Local path on target PCs to store installation logs.",
     defaultGpo: "Default GPO",
     defaultGpoHint: "Default GPO to pre-select when creating apps.",
+    baseOu: "Base Search OU",
+    baseOuHint: "Distinguished Name to restrict standard AD query scope.",
+    preferredDC: "Domain Controller (multi-DC)",
+    preferredDCHint: "Leave empty to auto-use the PDC emulator. Set to a DC hostname for multi-DC environments.",
     language: "Interface Language",
     languageHint: "Choose the language for the application UI.",
     exportImport: "Configuration Backup",
@@ -435,16 +523,45 @@ const FALLBACK_EN = {
     rsatWarningTitle: "Install GroupPolicy Module",
     rsatWarningMsg: "Although AD is active, GPOs are disabled without this module. Run as Administrator in PowerShell:",
     rsatNotInstalledTitle: "RSAT is not installed",
-    rsatNotInstalledMsg: "Active Directory features are disabled. Run as Administrator in PowerShell:"
+    rsatNotInstalledMsg: "Active Directory features are disabled. Run as Administrator in PowerShell:",
+    details: "Details",
+    clear: "Clear"
+  },
+  catalog: {
+    title: "App Catalog",
+    subtitle: "Search, discover and deploy software packages",
+    searchPlaceholder: "Search apps (e.g. Chrome, 7-Zip, VLC...)",
+    searching: "Searching...",
+    noResults: "No apps found matching your search.",
+    selected: "selected",
+    checkUpdates: "Check Updates",
+    checkingVersions: "Checking latest versions for all catalog apps...",
+    noUpdatesNeeded: "All catalog versions are up to date.",
+    updateResults: "Available Updates",
+    backToResults: "Back to catalog",
+    addToNewApp: "Add to Apps",
+    addToBundle: "Add to Bundle",
+    filterAll: "All",
+    searchingWinget: "Searching in winget CLI...",
+    cat_browsers: "Browsers",
+    cat_tools: "Tools",
+    cat_connectivity: "Connectivity",
+    cat_communication: "Communication",
+    cat_development: "Development",
+    updateApp: "Update",
+    updateAll: "Update All",
+    updatingApp: "Updating...",
+    noAppsToUpdate: "None of your apps need this update"
   }
 };
 
-const DEFAULT_ES = {
+const TRANSLATIONS_ES = {
   nav: {
     dashboard: "Dashboard",
     ous: "Unidades Organizativas",
     gpos: "Gestión de GPOs",
     apps: "Aplicaciones",
+    catalog: "Catálogo",
     bundles: "Bundles",
     deployments: "Despliegues",
     settings: "Configuración"
@@ -453,7 +570,7 @@ const DEFAULT_ES = {
     title: "Configuración Inicial",
     subtitle: "Bienvenido a AD Deploy Manager. Configura los ajustes básicos para continuar.",
     language: "Idioma",
-    languageHint: "Puedes añadir más idiomas en la carpeta lang con archivos .json.",
+    languageHint: "Elige el idioma de la interfaz de la aplicación.",
     networkShare: "Carpeta de Red (Network Share)",
     networkShareHint: "Ruta UNC donde se guardarán instaladores y scripts (ej. \\\\servidor\\share).",
     browse: "Examinar...",
@@ -461,6 +578,10 @@ const DEFAULT_ES = {
     logsDirHint: "Ruta local en los PCs de destino para guardar logs de instalación.",
     defaultGpo: "Nombre GPO por defecto (Opcional)",
     defaultGpoHint: "Si se especifica, se pre-seleccionará al crear apps.",
+    baseOu: "Unidad Organizativa (OU) Base",
+    baseOuHint: "DN de la OU para limitar la carga (ej. OU=Clientes,DC=empresa,DC=com). Opcional.",
+    preferredDC: "Controlador de Dominio (multi-DC)",
+    preferredDCHint: "Deja vacío para usar automáticamente el PDC emulator. En entornos con varios DCs, especifica el DC principal para evitar problemas de replicación.",
     saveAndContinue: "Guardar y Continuar"
   },
   dashboard: {
@@ -527,12 +648,12 @@ const DEFAULT_ES = {
     next: "Siguiente",
     back: "Atrás",
     cancel: "Cancelar",
-    saveAndDeploy: "Guardar y Desplegar",
-    createAndDeploy: "Crear y Desplegar",
+    saveAndDeploy: "Revisar y Guardar",
+    createAndDeploy: "Revisar y Crear",
     appName: "Nombre de la Aplicación",
     installer: "Instalador (EXE/MSI)",
     browse: "Examinar...",
-    silentArgs: "Argumentos silenciosos (opcionales)",
+    silentArgs: "Argumentos (opcionales)",
     commonArgs: "Argumentos comunes",
     version: "Versión",
     notifyUser: "Notificar al usuario durante instalación",
@@ -576,6 +697,22 @@ const DEFAULT_ES = {
     generatingGpo: "Construyendo GPO:",
     gpoCreatedSuccess: "GPO '{gpo}' creada e inyectada con éxito",
     gpoWarningOnlyServer: "Aviso: Archivos alojados en el Server, pero falló la auto-creación GPO:",
+    gpoConflictTitle: "GPO ya existe",
+    gpoConflictBody: "Esta GPO ya existe en Active Directory. Fue creada por este programa.",
+    gpoConflictQuestion: "¿Qué deseas hacer?",
+    gpoConflictUpdate: "Actualizar script",
+    gpoConflictReplace: "Eliminar y recrear",
+    gpoConflictSkipped: "GPO sin cambios.",
+    gpoConflictDeleting: "Eliminando GPO",
+    gpoDeleteError: "Error al eliminar GPO:",
+    bulkDeleteTitle: "Eliminar aplicaciones",
+    bulkDeleteWarning: "Estás a punto de eliminar permanentemente {count} aplicación(es). Esta acción no se puede deshacer.",
+    bulkDeleteCleanFiles: "Eliminar carpeta del share de red",
+    bulkDeleteCleanFilesHint: "Borra install.ps1, version.json e instaladores del share",
+    bulkDeleteCleanGpo: "Eliminar también las GPOs vinculadas en Active Directory",
+    bulkDeleteConfirm: "Eliminar {count} app(s)",
+    bulkDeleting: "Eliminando {count} apps...",
+    bulkDeleteSuccess: "{count} aplicación(es) eliminadas correctamente.",
     scriptCopied: "Script copiado al portapapeles",
     copyBtn: "Copiar",
     deployingLoader: "Desplegando...",
@@ -586,6 +723,7 @@ const DEFAULT_ES = {
     selectGpoFirst: "Selecciona una GPO primero",
     gpoAssignedBulk: "GPO \"{gpo}\" asignada a {count} app(s)",
     nameRequired: "El nombre de la app es obligatorio",
+    installerRequired: "Selecciona un archivo instalador para continuar",
     nameDuplicate: "Ya existe una app con el nombre \"{name}\"",
     errorGeneratingScript: "Error generando script:",
     appSavedDeployError: "App guardada pero error al desplegar:",
@@ -633,7 +771,7 @@ const DEFAULT_ES = {
     detailSectionParams: "Parámetros Personalizados",
     detailTemplate: "Plantilla",
     detailInstallerType: "Tipo de Instalador",
-    detailSilentArgs: "Args. Silenciosos",
+    detailSilentArgs: "Argumentos",
     detailVersion: "Versión",
     detailNotifyUser: "Notificar Usuario",
     detailInstaller: "Instalador",
@@ -666,7 +804,18 @@ const DEFAULT_ES = {
     quickUpdateDowngradeWarn: "Estás haciendo downgrade de v{old} a v{new}. Procede con precaución.",
     quickUpdateConfirm: "Actualizar y Redesplegar",
     quickUpdateSuccess: "App actualizada a v{version}",
-    detailSectionHistory: "Historial de Versiones"
+    detailSectionHistory: "Historial de Versiones",
+    noGroup: "Sin grupo",
+    groupByTemplate: "Agrupar por plantilla",
+    create: "Crear",
+    checkUpdates: "Comprobar Actualizaciones",
+    checkingUpdates: "Comprobando actualizaciones...",
+    noUpdatesFound: "Todas las apps winget están actualizadas",
+    updatesFound: "{count} actualización(es) disponible(s)",
+    updateToVersion: "Actualizar a v{version}",
+    updateAll: "Actualizar todas",
+    updatingApp: "Actualizando...",
+    updateSuccess: "{name} actualizada a v{version}"
   },
   bundles: {
     title: "Bundles",
@@ -714,7 +863,14 @@ const DEFAULT_ES = {
     startupScriptCleaned: "Script de arranque limpiado",
     gpoDeletedSuccess: "GPO \"{gpo}\" eliminada",
     bundleDisabled: "Bundle \"{bundle}\" deshabilitado",
-    bundleScriptTitle: "Script del Bundle"
+    bundleScriptTitle: "Script del Bundle",
+    loadingWizard: "Cargando...",
+    loadingOUs: "Obteniendo unidades organizativas del AD...",
+    alreadyDeploying: "Este bundle ya se está desplegando, por favor espera",
+    deployingStep: "Desplegando bundle...",
+    creatingGpoStep: "Creando GPO en el AD...",
+    search: "Buscar bundles...",
+    noBundlesMatch: "Ningún bundle coincide con la búsqueda"
   },
   gpos: {
     title: "GPOs",
@@ -750,7 +906,9 @@ const DEFAULT_ES = {
     actions: "Acciones",
     name: "Nombre GPO",
     gpoCreated: "GPO {gpo} creada",
-    gpoDeleted: "GPO {gpo} eliminada"
+    gpoDeleted: "GPO {gpo} eliminada",
+    search: "Buscar GPOs...",
+    noGposMatch: "Ninguna GPO coincide con la búsqueda"
   },
   ous: {
     title: "Unidades Organizativas",
@@ -782,7 +940,67 @@ const DEFAULT_ES = {
     appUnassignedSuccess: "App desasignada",
     gpoLinkFailed: "Error al vincular la GPO a la UO",
     gpoUnlinkFailed: "Error al desvincular la GPO de la UO",
-    refresh: "Actualizar"
+    // Assignment-centric redesign
+    treeView: "Árbol",
+    assignmentsView: "Asignaciones",
+    pickerTitle: "Seleccionar UOs a mostrar",
+    pickerSubtitle: "Elige solo las UOs relevantes para el despliegue de software (ej. UOs de usuarios o equipos).",
+    pickerSearch: "Filtrar UOs...",
+    pickerSelectAll: "Seleccionar todas",
+    pickerClear: "Limpiar",
+    pickerConfirm: "Ver asignaciones ({n} UOs)",
+    pickerSelected: "{n} UOs seleccionadas",
+    pickerSelectAtLeastOne: "Selecciona al menos una UO",
+    changeOUs: "Cambiar UOs",
+    assignmentsOUCount: "UOs seleccionadas",
+    searchOUs: "Buscar UOs...",
+    searchApps: "Buscar apps...",
+    ctrlClickHint: "Ctrl+Click para seleccionar varias UOs",
+    selectedOUs: "UOs seleccionadas",
+    statsApps: "apps",
+    statsOUs: "UOs",
+    statsAssignments: "asignaciones",
+    statsActiveOUs: "UOs activas",
+    bulkAssignAll: "Asignar todas",
+    bulkUnassignAll: "Quitar todas",
+    bulkInvert: "Invertir",
+    syncCheckBtn: "Verificar sincronía",
+    syncCheckSingleOnly: "La verificación solo funciona con una sola UO seleccionada",
+    syncCheckFailed: "Error en verificación",
+    syncCheckClean: "Sin discrepancias — config local coincide con AD",
+    syncCheckDrift: "Discrepancias detectadas: {n} problemas",
+    syncDriftTitle: "Discrepancias con AD",
+    syncDriftDesc: "La configuración local y el estado real en AD no coinciden:",
+    driftInAdNotLocal: "vinculada en AD, no en config local",
+    driftInLocalNotAd: "asignada localmente, no vinculada realmente en AD",
+    cannotAssignNoGpo: "Esta app aún no tiene GPO. Despliégala primero.",
+    noGpoBadge: "Sin GPO",
+    pendingBadge: "pendiente",
+    noAppsMatch: "Ninguna app coincide con la búsqueda",
+    noAppsYet: "Aún no hay apps creadas",
+    matrixEmpty: "Crea apps y UOs para ver la matriz",
+    matrixAppsHeader: "Apps",
+    pendingChanges: "{n} cambios pendientes",
+    pendingSummary: "{a} asignaciones, {u} desasignaciones",
+    discardBtn: "Descartar",
+    applyBtn: "Aplicar cambios",
+    applying: "Aplicando...",
+    applySuccess: "{n} cambios aplicados",
+    applyPartial: "{ok} correctos, {fail} fallidos:",
+    applyErrorsTitle: "Algunos cambios fallaron",
+    changesDiscarded: "Cambios descartados",
+    ctxCopyFrom: "Copiar asignaciones desde...",
+    ctxClearAll: "Vaciar asignaciones",
+    ctxSyncCheck: "Verificar sincronía",
+    copyFromTitle: "Copiar asignaciones",
+    copyFromDesc: "Copiar todas las asignaciones de otra UO a {ou}",
+    selectSourceOu: "Selecciona UO origen...",
+    copyConfirmBtn: "Preparar copia",
+    copyStaged: "{n} asignaciones preparadas",
+    alreadyEmpty: "Esta UO no tiene asignaciones",
+    clearStaged: "{n} desasignaciones preparadas",
+    refresh: "Actualizar",
+    showAllOUs: "Mostrar todas las UOs"
   },
   deployments: {
     title: "Despliegues",
@@ -814,7 +1032,9 @@ const DEFAULT_ES = {
     folders: "carpeta(s)",
     lastModified: "Última Modificación",
     deployDate: "Fecha de Despliegue",
-    close: "Cerrar"
+    close: "Cerrar",
+    search: "Buscar despliegues...",
+    noDeploymentsMatch: "Ningún despliegue coincide con la búsqueda"
   },
   settings: {
     title: "Configuración",
@@ -826,7 +1046,11 @@ const DEFAULT_ES = {
     logs: "Ruta local de Logs",
     logsHint: "Ruta en los PCs de destino para guardar logs.",
     defaultGpo: "GPO por defecto",
-    defaultGpoHint: "GPO pre-seleccionada al crear apps.",
+    defaultGpoHint: "GPO pre-seleccionada al crear nuevas aplicaciones.",
+    baseOu: "OU Base de Búsqueda",
+    baseOuHint: "Distinguished Name para acotar el inicio del árbol AD.",
+    preferredDC: "Controlador de Dominio (multi-DC)",
+    preferredDCHint: "Deja vacío para usar el PDC emulator automáticamente. Especifica el DC principal en entornos multi-DC.",
     language: "Idioma de la Interfaz",
     languageHint: "Elige el idioma general de la aplicación.",
     exportImport: "Respaldo y Restauración",
@@ -859,74 +1083,52 @@ const DEFAULT_ES = {
     rsatWarningTitle: "Instala el Módulo GroupPolicy",
     rsatWarningMsg: "Aunque AD está activo, las GPOs están deshabilitadas sin este módulo. Ejecuta como Administrador en PowerShell:",
     rsatNotInstalledTitle: "RSAT no está instalado",
-    rsatNotInstalledMsg: "Las funciones de Active Directory están deshabilitadas. Ejecuta como Administrador en PowerShell:"
+    rsatNotInstalledMsg: "Las funciones de Active Directory están deshabilitadas. Ejecuta como Administrador en PowerShell:",
+    details: "Detalles",
+    clear: "Borrar selección"
+  },
+  catalog: {
+    title: "Catálogo de Apps",
+    subtitle: "Busca, descubre y despliega paquetes de software",
+    searchPlaceholder: "Buscar apps (ej. Chrome, 7-Zip, VLC...)",
+    searching: "Buscando...",
+    noResults: "No se encontraron apps con tu búsqueda.",
+    selected: "seleccionados",
+    checkUpdates: "Comprobar Actualizaciones",
+    checkingVersions: "Comprobando últimas versiones del catálogo...",
+    noUpdatesNeeded: "Todas las versiones del catálogo están actualizadas.",
+    updateResults: "Actualizaciones Disponibles",
+    backToResults: "Volver al catálogo",
+    addToNewApp: "Añadir a Apps",
+    addToBundle: "Añadir a Bundle",
+    filterAll: "Todos",
+    searchingWinget: "Buscando en winget CLI...",
+    cat_browsers: "Navegadores",
+    cat_tools: "Herramientas",
+    cat_connectivity: "Conectividad",
+    cat_communication: "Comunicación",
+    cat_development: "Desarrollo",
+    updateApp: "Actualizar",
+    updateAll: "Actualizar todas",
+    updatingApp: "Actualizando...",
+    noAppsToUpdate: "Ninguna de tus apps necesita esta actualización"
   }
 };
 
 const i18nService = {
   initialize() {
-    const dir = getLangDir();
-    // Create ES file
-    const esFile = path.join(dir, 'es.json');
-    if (!fs.existsSync(esFile)) {
-      fs.writeFileSync(esFile, JSON.stringify(DEFAULT_ES, null, 2), 'utf-8');
-    }
-    // Create EN file
-    const enFile = path.join(dir, 'en.json');
-    if (!fs.existsSync(enFile)) {
-      fs.writeFileSync(enFile, JSON.stringify(FALLBACK_EN, null, 2), 'utf-8');
-    }
+    // No-op: translations are embedded in code only.
   },
 
   getAvailableLanguages() {
-    const dir = getLangDir();
-    if (!fs.existsSync(dir)) return [{ code: 'en', name: 'English' }, { code: 'es', name: 'Español' }];
-    
-    const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
-    return files.map(f => {
-      const code = f.replace('.json', '');
-      return {
-        code,
-        name: code.toUpperCase() // Could read from inside the json if we put a "langName" flag
-      };
-    });
+    return [
+      { code: 'en', name: 'English' },
+      { code: 'es', name: 'Español' }
+    ];
   },
 
   getTranslations(langCode) {
-    // If not found or empty, fallback to internal EN
-    let translations = { ...FALLBACK_EN };
-
-    try {
-      const dir = getLangDir();
-      const file = path.join(dir, langCode + '.json');
-      if (fs.existsSync(file)) {
-        const raw = fs.readFileSync(file, 'utf-8');
-        const parsed = JSON.parse(raw);
-        // Deep merge
-        this._mergeDeep(translations, parsed);
-      }
-    } catch (e) {
-      console.error('Error reading i18n file:', e);
-    }
-
-    return translations;
-  },
-
-  _mergeDeep(target, source) {
-    if (this._isObject(target) && this._isObject(source)) {
-      for (const key in source) {
-        if (this._isObject(source[key])) {
-          if (!target[key]) Object.assign(target, { [key]: {} });
-          this._mergeDeep(target[key], source[key]);
-        } else {
-          Object.assign(target, { [key]: source[key] });
-        }
-      }
-    }
-  },
-
-  _isObject(item) {
-    return (item && typeof item === 'object' && !Array.isArray(item));
+    return langCode === 'es' ? TRANSLATIONS_ES : TRANSLATIONS_EN;
   }
 };
 

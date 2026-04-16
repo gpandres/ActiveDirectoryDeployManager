@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { resolveNamedSubdirectory, resolveWithinBase, sanitizeDeploymentName } = require('./path-utils');
 
 let bundlesFilePath = null;
 
@@ -12,47 +13,12 @@ function getBundlesPath() {
 }
 
 // ─── Share-backed storage (Option A: share is source of truth) ────────
-function getShareMetaPath(filename) {
-  try {
-    const configService = require('./config');
-    const cfg = configService.getConfig();
-    if (!cfg || !cfg.networkSharePath) return null;
-    return path.join(cfg.networkSharePath, '.appdeploy-meta', filename);
-  } catch (e) {
-    return null;
-  }
-}
-
-function tryReadShare(filename) {
-  const sharePath = getShareMetaPath(filename);
-  if (!sharePath) return null;
-  try {
-    if (fs.existsSync(sharePath)) {
-      return JSON.parse(fs.readFileSync(sharePath, 'utf-8'));
-    }
-  } catch (err) {
-    console.warn(`[share] Could not read ${filename} from share:`, err.message);
-  }
-  return null;
-}
-
-function tryWriteShare(filename, data) {
-  const sharePath = getShareMetaPath(filename);
-  if (!sharePath) return false;
-  try {
-    const dir = path.dirname(sharePath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(sharePath, JSON.stringify(data, null, 2), 'utf-8');
-    return true;
-  } catch (err) {
-    console.warn(`[share] Could not write ${filename} to share:`, err.message);
-    return false;
-  }
-}
+const { createShareStore } = require('./share-store');
+const bundlesShareStore = createShareStore('bundles-config.json');
 
 function loadBundles() {
   // Share is authoritative
-  const fromShare = tryReadShare('bundles-config.json');
+  const fromShare = bundlesShareStore.read();
   if (fromShare !== null) {
     try {
       fs.writeFileSync(getBundlesPath(), JSON.stringify(fromShare, null, 2), 'utf-8');
@@ -73,11 +39,27 @@ function loadBundles() {
 
 function saveBundles(bundles) {
   fs.writeFileSync(getBundlesPath(), JSON.stringify(bundles, null, 2), 'utf-8');
-  tryWriteShare('bundles-config.json', bundles);
+  bundlesShareStore.write(bundles);
 }
 
 function generateId() {
   return 'b_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+}
+
+function normalizeDNArray(value) {
+  const raw = Array.isArray(value)
+    ? value
+    : (typeof value === 'string' && value.trim() ? [value.trim()] : []);
+  const seen = new Set();
+  return raw
+    .filter(item => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .filter(item => {
+      if (seen.has(item)) return false;
+      seen.add(item);
+      return true;
+    });
 }
 
 const bundleService = {
@@ -92,6 +74,7 @@ const bundleService = {
 
   create(data) {
     const bundles = loadBundles();
+    const ouDNs = normalizeDNArray(data.ouDNs || data.ouDN);
     const newBundle = {
       id: generateId(),
       name: data.name || 'Nuevo Bundle',
@@ -100,7 +83,8 @@ const bundleService = {
       notifyUser: data.notifyUser || false,
       gpoName: data.gpoName || '',
       createGPO: data.createGPO || false,
-      ouDN: data.ouDN || '',
+      ouDN: ouDNs[0] || '',
+      ouDNs,
       version: data.version || '1.0.0',
       deployed: false,
       deployedPath: '',
@@ -116,7 +100,10 @@ const bundleService = {
     const bundles = loadBundles();
     const idx = bundles.findIndex(b => b.id === id);
     if (idx === -1) return null;
-    bundles[idx] = { ...bundles[idx], ...data, updatedAt: new Date().toISOString() };
+    const ouDNs = normalizeDNArray(
+      data.ouDNs !== undefined ? data.ouDNs : (data.ouDN !== undefined ? data.ouDN : bundles[idx].ouDNs || bundles[idx].ouDN)
+    );
+    bundles[idx] = { ...bundles[idx], ...data, ouDN: ouDNs[0] || '', ouDNs, updatedAt: new Date().toISOString() };
     saveBundles(bundles);
     return bundles[idx];
   },
@@ -134,56 +121,38 @@ const bundleService = {
   },
 
   generateBundleScript(bundle, apps, config) {
+    const safeBundleName = sanitizeDeploymentName(bundle.name, 'Bundle');
     const appEntries = bundle.apps
       .sort((a, b) => a.order - b.order)
       .map(entry => {
         const app = apps.find(a => a.id === entry.appId);
         if (!app) return null;
-        const appFolder = path.join(config.networkSharePath, app.name, 'install.ps1');
-        return { name: app.name, scriptPath: appFolder };
+        const safeAppName = sanitizeDeploymentName(app.name, 'App');
+        const appFolder = path.join(
+          resolveNamedSubdirectory(config.networkSharePath, app.name, 'App').path,
+          'install.ps1'
+        );
+        return { name: safeAppName, scriptPath: appFolder };
       })
       .filter(Boolean);
 
-    const notifyBlock = bundle.notifyUser ? `
-# ── Notificación al usuario ──────────────────────────
-function Send-UserToast {
-    param([string]$Title, [string]$Message, [string]$IconType)
-    try {
-        $LoggedUser = (Get-CimInstance Win32_ComputerSystem).UserName
-        if (-not $LoggedUser) { return }
-        $rnd = Get-Random -Minimum 1000 -Maximum 99999
-        $toastCode = "Add-Type -AssemblyName System.Windows.Forms; " +
-            "\`$b = New-Object System.Windows.Forms.NotifyIcon; " +
-            "\`$b.Icon = [System.Drawing.SystemIcons]::$IconType; " +
-            "\`$b.BalloonTipTitle = '$Title'; " +
-            "\`$b.BalloonTipText = '$Message'; " +
-            "\`$b.Visible = \`$true; " +
-            "\`$b.ShowBalloonTip(10000); " +
-            "Start-Sleep -Seconds 12; " +
-            "\`$b.Dispose()"
-        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -EP Bypass -Command $toastCode"
-        $principal = New-ScheduledTaskPrincipal -UserId $LoggedUser -LogonType Interactive
-        $taskName = "DeployNotify_$rnd"
-        Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Force | Out-Null
-        Start-ScheduledTask -TaskName $taskName
-        Start-Sleep -Seconds 15
-        Unregister-ScheduledTask -TaskName $taskName -Confirm:\`$false -ErrorAction SilentlyContinue
-    } catch {}
-}
-` : '';
+    const { getToastSnippet } = require('./ps-snippets');
+    const notifyBlock = bundle.notifyUser ? getToastSnippet() : '';
+    const startMsg = `Se estan instalando ${bundle.apps.length} aplicaciones del pack. No apague.`;
+    const endMsg = `Todas las apps del pack ${safeBundleName} se han procesado.`;
 
     const notifyStart = bundle.notifyUser
-      ? `Send-UserToast -Title "Instalación en proceso" -Message "Se están instalando ${bundle.apps.length} aplicaciones del pack ${bundle.name}. No apague el equipo." -IconType "Warning"`
+      ? `Send-UserToast -ToastTitle "Instalacion en proceso" -ToastMessage "${startMsg}" -IconType "Warning"`
       : '';
 
     const notifyEnd = bundle.notifyUser
-      ? `Send-UserToast -Title "Instalación completada" -Message "Todas las aplicaciones del pack ${bundle.name} se han procesado. Ya puede continuar." -IconType "Information"`
+      ? `Send-UserToast -ToastTitle "Instalacion completada" -ToastMessage "${endMsg}" -IconType "Information"`
       : '';
 
     const appBlocks = appEntries.map((app, i) => {
       return `
 # ── App ${i + 1}/${appEntries.length}: ${app.name} ──
-$AppScript = "${app.scriptPath}"
+$AppScript = "${app.scriptPath.replace(/"/g, '`"')}"
 if (Test-Path $AppScript) {
     Write-Output "[$(Get-Date -Format 'HH:mm:ss')] Ejecutando: ${app.name}..."
     try {
@@ -198,9 +167,9 @@ if (Test-Path $AppScript) {
     }).join('\n');
 
     return `# =========================================================================
-# BUNDLE: ${bundle.name}
+# BUNDLE: ${safeBundleName}
 # Apps: ${appEntries.map(a => a.name).join(', ')}
-# Versión: ${bundle.version}
+# Version: ${bundle.version}
 # Generado: ${new Date().toISOString()}
 # =========================================================================
 
@@ -208,13 +177,13 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
     Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
 }
 
-$BundleName = "${bundle.name}"
+$BundleName = "${safeBundleName}"
 $LogDir = "C:\\ProgramData\\AppDeploy_Logs"
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 $BundleTracker = "$LogDir\\Tracker_Bundle_$($BundleName -replace '\\s','_').txt"
-$BundleVersion = "${bundle.version}"
+$BundleVersion = "${(bundle.version || '1.0.0').replace(/[^a-zA-Z0-9.]/g, '')}"
 
-# Comprobar si esta versión exacta ya se ejecutó
+# Comprobar si esta version exacta ya se ejecuto
 $LastVersion = if (Test-Path $BundleTracker) { Get-Content $BundleTracker } else { "" }
 if ($LastVersion -eq $BundleVersion) { exit }
 
@@ -229,7 +198,7 @@ ${appBlocks}
 
 ${notifyEnd}
 
-# Marcar versión como ejecutada
+# Marcar version como ejecutada
 Set-Content -Path $BundleTracker -Value $BundleVersion -Force
 Write-Output "=========================================="
 Write-Output "Bundle completado: $(Get-Date)"
@@ -240,8 +209,8 @@ Stop-Transcript
 
   async deployBundle(bundle, apps, config) {
     try {
-      const bundlesDir = path.join(config.networkSharePath, '_bundles');
-      const bundleFolder = path.join(bundlesDir, bundle.name.replace(/\s/g, '_'));
+      const bundlesDir = resolveWithinBase(config.networkSharePath, '_bundles');
+      const { safeName, path: bundleFolder } = resolveNamedSubdirectory(bundlesDir, bundle.name, 'bundle');
 
       if (!fs.existsSync(bundleFolder)) {
         fs.mkdirSync(bundleFolder, { recursive: true });
@@ -250,11 +219,12 @@ Stop-Transcript
       // Generate and write bundle script
       const script = this.generateBundleScript(bundle, apps, config);
       const scriptPath = path.join(bundleFolder, 'bundle_install.ps1');
-      fs.writeFileSync(scriptPath, script, 'utf-8');
+      fs.writeFileSync(scriptPath, '\uFEFF' + script, 'utf-8');
 
       // Write bundle manifest
       const manifest = {
         name: bundle.name,
+        deploymentFolder: safeName,
         version: bundle.version,
         apps: bundle.apps,
         notifyUser: bundle.notifyUser,

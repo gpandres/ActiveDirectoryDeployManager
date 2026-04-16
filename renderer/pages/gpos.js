@@ -1,6 +1,7 @@
 const GposPage = {
   gposCache: null,
   filterAppOnly: true,
+  searchQuery: '',
 
   async render(container) {
     container.innerHTML = `
@@ -9,14 +10,11 @@ const GposPage = {
           <h1 class="page-title">${t('gpos.title')}</h1>
           <p class="page-subtitle">${t('gpos.subtitle')}</p>
         </div>
-        <div style="display: flex; align-items: center; gap: 16px;">
-          <label class="gpo-filter-toggle" style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;">
-            <span style="font-size: 13px; color: var(--text-muted);" id="gpo-filter-label">${t('gpos.filterAll')}</span>
-            <div class="gpo-switch" id="gpo-filter-switch">
-              <input type="checkbox" id="gpo-filter-checkbox" ${this.filterAppOnly ? 'checked' : ''}>
-              <span class="gpo-switch-slider"></span>
-            </div>
-          </label>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="position:relative;">
+            <svg style="position:absolute;left:9px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.4" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" class="form-input" id="gpo-search" placeholder="${t('gpos.search')}" autocomplete="off" style="padding-left:32px;width:200px;">
+          </div>
           <button class="btn btn-primary" id="btn-refresh-gpos">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 1 0 2.13-5.83L2 8"/></svg>
             ${t('gpos.refresh')}
@@ -55,10 +53,8 @@ const GposPage = {
       this.loadGPOs();
     });
 
-    document.getElementById('gpo-filter-checkbox').addEventListener('change', (e) => {
-      this.filterAppOnly = e.target.checked;
-      const label = document.getElementById('gpo-filter-label');
-      label.textContent = this.filterAppOnly ? t('gpos.filterAppOnly') : t('gpos.filterAll');
+    document.getElementById('gpo-search').addEventListener('input', (e) => {
+      this.searchQuery = e.target.value;
       this.loadGPOs();
     });
 
@@ -84,12 +80,14 @@ const GposPage = {
         this.gposCache = result.data.sort((a, b) => a.DisplayName.localeCompare(b.DisplayName));
       }
 
-      const displayList = this.filterAppOnly
-        ? this.gposCache.filter(g => g.DisplayName.startsWith('Deploy_'))
-        : this.gposCache;
+      let displayList = this.gposCache.filter(g => g.DisplayName.startsWith('Deploy_'));
+
+      const q = this.searchQuery.trim().toLowerCase();
+      if (q) displayList = displayList.filter(g => g.DisplayName.toLowerCase().includes(q));
 
       if (displayList.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 40px;">${this.filterAppOnly ? t('gpos.emptyFiltered') : t('gpos.empty')}</td></tr>`;
+        const msg = q ? t('gpos.noGposMatch') : t('gpos.emptyFiltered');
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 40px;">${msg}</td></tr>`;
         return;
       }
 
@@ -100,7 +98,6 @@ const GposPage = {
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
               ${this.esc(g.DisplayName)}
             </div>
-            ${g.DisplayName.startsWith('Deploy_') ? `<span class="badge badge-success mt-sm" style="font-size:10px;">${t('gpos.createdByApp')}</span>` : ''}
           </td>
           <td style="padding: 16px; font-family: monospace; font-size: 13px; color: var(--text-muted);">
             ${this.esc(g.Id)}
