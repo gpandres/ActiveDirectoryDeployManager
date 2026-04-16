@@ -101,7 +101,12 @@ describe('generateScript — generic template', () => {
     const script = svc.generateScript(base({ template: 'generic' }));
     expect(script).toContain('function Test-DeployCachePathSafety');
     expect(script).toContain('Remove-Item -LiteralPath $CacheDir -Recurse -Force -ErrorAction Stop');
-    expect(script).toContain('Invoke-DeployCacheCleanup -CacheDir $CacheDir | Out-Null');
+    expect(script).toContain('Invoke-PendingDeployCacheCleanups -MarkerDirectory $CleanupMarkerDir');
+    expect(script).toContain('function Invoke-DeployCacheCleanupWithFallback');
+    expect(script).toContain('Invoke-DeployCacheCleanupWithFallback -CacheDir $CacheDir -MarkerPath $CleanupMarkerPath | Out-Null');
+    expect(script).toContain('function Register-DeployCacheCleanupPending');
+    expect(script).toContain('function Start-DeployCacheCleanupWorker');
+    expect(script).toContain('-EncodedCommand');
   });
 });
 
@@ -217,6 +222,17 @@ describe('generateScript — odt template', () => {
     expect(script).toContain('Teams');
     expect(script).toContain('Publisher');
   });
+
+  it('skips ODT install when Office is already detected locally', () => {
+    const script = svc.generateScript(base({
+      template: 'odt',
+      odtConfig: { product: 'O365BusinessRetail', channel: 'Current', language: 'en-us', arch: '64' }
+    }));
+    expect(script).toContain('$ClickToRunConfig = Get-ItemProperty "HKLM:\\SOFTWARE\\Microsoft\\Office\\ClickToRun\\Configuration"');
+    expect(script).toContain('$TargetOfficeInstalled = $InstalledOfficeProducts -contains "O365BusinessRetail"');
+    expect(script).toContain("method = 'odt-detected'; product = \"O365BusinessRetail\"");
+    expect(script).not.toContain('$LastTracker');
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -233,6 +249,22 @@ describe('generateScript — crowdstrike template', () => {
   it('uses empty CID when not provided', () => {
     const script = svc.generateScript(base({ template: 'crowdstrike' }));
     expect(script).toContain('CID=');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+describe('generateScript — forticlient template', () => {
+  it('handles existing FortiClient versions before reinstalling', () => {
+    const script = svc.generateScript(base({
+      template: 'forticlient',
+      customParams: { vpnName: 'Corp VPN', vpnServer: 'vpn.example.com:443' }
+    }));
+    expect(script).toContain('function Get-FortiClientInstallation');
+    expect(script).toContain('Convert-FortiClientVersion');
+    expect(script).toContain('Ya hay una version mas reciente de FortiClient instalada');
+    expect(script).toContain('FortiClient existente detectado');
+    expect(script).toContain('"/x $($ExistingFortiClient.ProductCode) REBOOT=ReallySuppress /qn"');
+    expect(script).toContain('Se omite el instalador para evitar error 1638');
   });
 });
 

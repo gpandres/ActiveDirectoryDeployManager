@@ -2649,6 +2649,7 @@ const AppsPage = {
 
   async showWizardConfirmation(state, isEdit, existingApp, renderWizard) {
     const templates = await window.api.scripts.getTemplates();
+    const config = await window.api.config.get().catch(() => ({}));
     const templateInfo = templates.find(tmpl => tmpl.id === state.template)
       || (state.templateDefinition ? { name: state.templateDefinition.name } : { name: state.template });
 
@@ -2666,6 +2667,13 @@ const AppsPage = {
     const installerType = state.template === 'winget' ? 'WINGET'
       : state.template === 'odt' ? 'ODT'
       : this.getInstallerTypeFromPath(state.installerPath, state.template).toUpperCase();
+    const sanitizedAppFolder = String(state.name || '').trim().replace(/[<>:"/\\|?*\x00-\x1F]/g, '');
+    const wingetScriptPath = state.template === 'winget'
+      ? (existingApp?.deployedPath
+        || (config?.networkSharePath && sanitizedAppFolder
+          ? config.networkSharePath.replace(/[\\/]+$/, '') + '\\' + sanitizedAppFolder + '\\install.ps1'
+          : ''))
+      : '';
     const gpoDisplay = state.createGPO
       ? `<span style="color:var(--primary-color);">✨ ${t('apps.confirmAutoGpo')}: Deploy_${this.esc(state.name.trim().replace(/\s/g, '_'))}</span>`
       : (state.gpoName ? this.esc(state.gpoName) : `<span style="color:var(--text-muted);">${t('apps.confirmNoGpo')}</span>`);
@@ -2718,7 +2726,9 @@ const AppsPage = {
         <!-- Paths -->
         <div class="card" style="padding:12px 16px; margin:0;">
           <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionPaths')}</div>
-          ${row(t('apps.detailInstaller'), state.installerPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(state.installerPath) + '</span>' : '-')}
+          ${state.template === 'winget'
+            ? row(t('apps.script'), wingetScriptPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(wingetScriptPath) + '</span>' : '')
+            : row(t('apps.detailInstaller'), state.installerPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(state.installerPath) + '</span>' : '-')}
           ${state.configXmlPath ? row(t('apps.detailConfigXml'), '<span style="font-family:monospace; font-size:12px;">' + this.esc(state.configXmlPath) + '</span>') : ''}
           ${templateFilesHtml}
         </div>

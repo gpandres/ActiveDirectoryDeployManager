@@ -349,6 +349,521 @@ function buildPsArgumentExpression(name, joiner, quoteValue, valueExpression) {
   return `"${prefix}$(${valueExpression})"`;
 }
 
+function getDeployCacheCleanupLogic() {
+  return `
+function Test-DeployCachePathSafety {
+    param([string]$Path)
+    if (-not $Path) { return $false }
+    try {
+        $fullPath = [System.IO.Path]::GetFullPath($Path)
+        $cacheRoot = [System.IO.Path]::GetFullPath("C:\\Temp\\Deploy")
+        return $fullPath.StartsWith($cacheRoot.TrimEnd("\\") + "\\", [System.StringComparison]::OrdinalIgnoreCase) -and $fullPath.Length -gt ($cacheRoot.Length + 1)
+    } catch {
+        return $false
+    }
+}
+
+function Clear-DeployCacheCleanupPending {
+    param([string]$MarkerPath)
+    if (-not $MarkerPath -or -not (Test-Path -LiteralPath $MarkerPath)) { return }
+    try {
+        Remove-Item -LiteralPath $MarkerPath -Force -ErrorAction Stop
+    } catch {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: No se pudo borrar el marcador de limpieza: $_"
+    }
+}
+
+function Register-DeployCacheCleanupPending {
+    param(
+        [string]$CacheDir,
+        [string]$MarkerPath
+    )
+    if (-not (Test-DeployCachePathSafety -Path $CacheDir) -or -not $MarkerPath) {
+        return $false
+    }
+    try {
+        @{
+            cacheDir = $CacheDir
+            createdAt = (Get-Date).ToString('o')
+            computer = $env:COMPUTERNAME
+        } | ConvertTo-Json | Set-Content -LiteralPath $MarkerPath -Force -Encoding UTF8
+        return $true
+    } catch {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: No se pudo registrar la limpieza diferida: $_"
+        return $false
+    }
+}
+
+function Invoke-DeployCacheCleanup {
+    param(
+        [string]$CacheDir,
+        [int]$MaxAttempts = 5,
+        [int]$SleepSeconds = 2,
+        [string]$MarkerPath = ""
+    )
+    if (-not (Test-DeployCachePathSafety -Path $CacheDir)) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Ruta de cache no segura, se omite la limpieza: $CacheDir"
+        return $false
+    }
+    if (-not (Test-Path -LiteralPath $CacheDir)) {
+        if ($MarkerPath) { Clear-DeployCacheCleanupPending -MarkerPath $MarkerPath }
+        return $true
+    }
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            Remove-Item -LiteralPath $CacheDir -Recurse -Force -ErrorAction Stop
+            if ($MarkerPath) { Clear-DeployCacheCleanupPending -MarkerPath $MarkerPath }
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Cache local eliminada: $CacheDir"
+            return $true
+        } catch {
+            if ($attempt -lt $MaxAttempts) {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Cache en uso, reintentando limpieza ($attempt/$MaxAttempts)..."
+                Start-Sleep -Seconds $SleepSeconds
+            } else {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: No se pudo eliminar la cache local: $_"
+            }
+        }
+    }
+    return $false
+}
+
+function Start-DeployCacheCleanupWorker {
+    param(
+        [string]$CacheDir,
+        [string]$MarkerPath
+    )
+    if (-not (Test-DeployCachePathSafety -Path $CacheDir)) {
+        return $false
+    }
+    try {
+        $cacheDirLiteral = $CacheDir.Replace("'", "''")
+        $markerLiteral = ([string]$MarkerPath).Replace("'", "''")
+        $workerScript = @"
+$TargetCacheDir = '$cacheDirLiteral'
+$TargetMarkerPath = '$markerLiteral'
+
+function Test-DeployCachePathSafety {
+    param([string]$Path)
+    if (-not $Path) { return $false }
+    try {
+        $fullPath = [System.IO.Path]::GetFullPath($Path)
+        $cacheRoot = [System.IO.Path]::GetFullPath('C:\\Temp\\Deploy')
+        return $fullPath.StartsWith($cacheRoot.TrimEnd('\\') + '\\', [System.StringComparison]::OrdinalIgnoreCase) -and $fullPath.Length -gt ($cacheRoot.Length + 1)
+    } catch {
+        return $false
+    }
+}
+
+if (-not (Test-DeployCachePathSafety -Path $TargetCacheDir)) { exit 1 }
+
+for ($attempt = 1; $attempt -le 90; $attempt++) {
+    if (-not (Test-Path -LiteralPath $TargetCacheDir)) {
+        if ($TargetMarkerPath -and (Test-Path -LiteralPath $TargetMarkerPath)) {
+            Remove-Item -LiteralPath $TargetMarkerPath -Force -ErrorAction SilentlyContinue
+        }
+        exit 0
+    }
+
+    try {
+        Remove-Item -LiteralPath $TargetCacheDir -Recurse -Force -ErrorAction Stop
+        if ($TargetMarkerPath -and (Test-Path -LiteralPath $TargetMarkerPath)) {
+            Remove-Item -LiteralPath $TargetMarkerPath -Force -ErrorAction SilentlyContinue
+        }
+        exit 0
+    } catch {
+        Start-Sleep -Seconds 10
+    }
+}
+
+exit 1
+"@
+        $encodedWorker = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($workerScript))
+        $workerShell = Join-Path $env:WINDIR "System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+        if (-not (Test-Path -LiteralPath $workerShell)) { $workerShell = "PowerShell.exe" }
+        Start-Process -FilePath $workerShell -ArgumentList @("-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encodedWorker) -WindowStyle Hidden | Out-Null
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Cache ocupada; limpieza diferida iniciada."
+        return $true
+    } catch {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: No se pudo iniciar la limpieza diferida: $_"
+        return $false
+    }
+}
+
+function Invoke-DeployCacheCleanupWithFallback {
+    param(
+        [string]$CacheDir,
+        [string]$MarkerPath
+    )
+    if (Invoke-DeployCacheCleanup -CacheDir $CacheDir -MarkerPath $MarkerPath) {
+        return $true
+    }
+    if (Register-DeployCacheCleanupPending -CacheDir $CacheDir -MarkerPath $MarkerPath) {
+        return (Start-DeployCacheCleanupWorker -CacheDir $CacheDir -MarkerPath $MarkerPath)
+    }
+    return $false
+}
+
+function Invoke-PendingDeployCacheCleanups {
+    param([string]$MarkerDirectory)
+    if (-not $MarkerDirectory -or -not (Test-Path -LiteralPath $MarkerDirectory)) {
+        return
+    }
+    Get-ChildItem -LiteralPath $MarkerDirectory -Filter "*.json" -File -ErrorAction SilentlyContinue | ForEach-Object {
+        $markerFile = $_.FullName
+        try {
+            $pending = Get-Content -LiteralPath $markerFile -Raw -ErrorAction Stop | ConvertFrom-Json
+            $pendingCacheDir = [string]$pending.cacheDir
+        } catch {
+            Remove-Item -LiteralPath $markerFile -Force -ErrorAction SilentlyContinue
+            return
+        }
+
+        if (-not (Test-DeployCachePathSafety -Path $pendingCacheDir)) {
+            Remove-Item -LiteralPath $markerFile -Force -ErrorAction SilentlyContinue
+            return
+        }
+
+        if (Invoke-DeployCacheCleanup -CacheDir $pendingCacheDir -MaxAttempts 2 -SleepSeconds 1 -MarkerPath $markerFile) {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Limpieza diferida completada: $pendingCacheDir"
+        }
+    }
+}
+
+Invoke-PendingDeployCacheCleanups -MarkerDirectory $CleanupMarkerDir
+`.trim();
+}
+
+function getInstallerConflictLogic() {
+  return `
+$InstallDisposition = 'pending'
+
+function Convert-DetectedAppVersion {
+    param([string]$Value)
+    $match = [regex]::Match([string]$Value, '\\d+(\\.\\d+){0,3}')
+    if (-not $match.Success) { return $null }
+    try {
+        return [version]$match.Value
+    } catch {
+        return $null
+    }
+}
+
+function Normalize-DetectedAppName {
+    param([string]$Value)
+    return ([string]$Value).ToLowerInvariant() -replace '[^a-z0-9]+', ''
+}
+
+function Get-InstalledApplicationEntries {
+    if ($script:CachedInstalledApplicationEntries) {
+        return $script:CachedInstalledApplicationEntries
+    }
+
+    $script:CachedInstalledApplicationEntries = @(
+        Get-ItemProperty \`
+            "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*",
+            "HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" \`
+            -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName } |
+            ForEach-Object {
+                $productCode = ''
+                if ([string]$_.PSChildName -match '^\\{[0-9A-F-]+\\}$') {
+                    $productCode = $Matches[0]
+                } elseif ([string]$_.UninstallString -match '\\{[0-9A-F-]+\\}') {
+                    $productCode = $Matches[0]
+                }
+
+                [pscustomobject]@{
+                    DisplayName = [string]$_.DisplayName
+                    NormalizedDisplayName = Normalize-DetectedAppName -Value $_.DisplayName
+                    DisplayVersion = [string]$_.DisplayVersion
+                    VersionObject = Convert-DetectedAppVersion -Value $_.DisplayVersion
+                    ProductCode = $productCode
+                    Publisher = [string]$_.Publisher
+                    PublisherNormalized = Normalize-DetectedAppName -Value $_.Publisher
+                }
+            }
+    )
+
+    return $script:CachedInstalledApplicationEntries
+}
+
+function Get-MsiPackageProperty {
+    param(
+        [string]$Path,
+        [string]$PropertyName
+    )
+
+    $windowsInstaller = $null
+    $database = $null
+    $view = $null
+    $record = $null
+
+    try {
+        $windowsInstaller = New-Object -ComObject WindowsInstaller.Installer
+        $database = $windowsInstaller.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $windowsInstaller, @($Path, 0))
+        $query = "SELECT \`Value\` FROM \`Property\` WHERE \`Property\`='$PropertyName'"
+        $view = $database.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $database, @($query))
+        $view.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $view, $null) | Out-Null
+        $record = $view.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $view, $null)
+        if ($record) {
+            return [string]$record.StringData(1)
+        }
+    } catch {
+        return ''
+    } finally {
+        foreach ($comObject in @($record, $view, $database, $windowsInstaller)) {
+            if ($comObject) {
+                try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($comObject) | Out-Null } catch {}
+            }
+        }
+    }
+
+    return ''
+}
+
+function Get-InstallerDetectionMetadata {
+    param(
+        [string]$InstallerPath,
+        [string]$FallbackDisplayName
+    )
+
+    $extension = [System.IO.Path]::GetExtension([string]$InstallerPath).ToLowerInvariant()
+    $displayCandidates = New-Object System.Collections.Generic.List[string]
+    $normalizedCandidates = New-Object System.Collections.Generic.List[string]
+    $productCode = ''
+    $publisher = ''
+    $productVersionRaw = ''
+
+    $candidateSeed = @()
+    if ($extension -eq '.msi') {
+        $candidateSeed += Get-MsiPackageProperty -Path $InstallerPath -PropertyName 'ProductName'
+        $productVersionRaw = Get-MsiPackageProperty -Path $InstallerPath -PropertyName 'ProductVersion'
+        $publisher = Get-MsiPackageProperty -Path $InstallerPath -PropertyName 'Manufacturer'
+        $productCode = Get-MsiPackageProperty -Path $InstallerPath -PropertyName 'ProductCode'
+    } else {
+        $fileInfo = $null
+        try { $fileInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($InstallerPath) } catch {}
+        if ($fileInfo) {
+            $candidateSeed += [string]$fileInfo.ProductName
+            $candidateSeed += [string]$fileInfo.FileDescription
+            $publisher = [string]$fileInfo.CompanyName
+            $productVersionRaw = [string]$fileInfo.ProductVersion
+        }
+    }
+
+    $candidateSeed += $FallbackDisplayName
+    foreach ($candidate in $candidateSeed) {
+        $candidateText = [string]$candidate
+        if (-not $candidateText) { continue }
+        if (-not $displayCandidates.Contains($candidateText)) {
+            $displayCandidates.Add($candidateText)
+        }
+
+        $normalized = Normalize-DetectedAppName -Value $candidateText
+        if ($normalized -and -not $normalizedCandidates.Contains($normalized)) {
+            $normalizedCandidates.Add($normalized)
+        }
+    }
+
+    [pscustomobject]@{
+        InstallerPath = $InstallerPath
+        Extension = $extension
+        DisplayCandidates = @($displayCandidates.ToArray())
+        NameCandidates = @($normalizedCandidates.ToArray())
+        Publisher = $publisher
+        PublisherNormalized = Normalize-DetectedAppName -Value $publisher
+        ProductCode = $productCode
+        InstallerVersionRaw = $productVersionRaw
+        InstallerVersionObject = Convert-DetectedAppVersion -Value $productVersionRaw
+    }
+}
+
+function Get-InstalledApplicationMatch {
+    param([pscustomobject]$InstallerMetadata)
+
+    $bestMatch = $null
+    $bestScore = -1
+
+    foreach ($entry in Get-InstalledApplicationEntries) {
+        $score = 0
+
+        if ($InstallerMetadata.ProductCode -and $entry.ProductCode -and $InstallerMetadata.ProductCode -eq $entry.ProductCode) {
+            $score = 100
+        }
+
+        foreach ($candidate in @($InstallerMetadata.NameCandidates)) {
+            if (-not $candidate) { continue }
+            if ($entry.NormalizedDisplayName -eq $candidate) {
+                $score = [Math]::Max($score, 85)
+            } elseif ($candidate.Length -ge 8 -and ($entry.NormalizedDisplayName.StartsWith($candidate) -or $candidate.StartsWith($entry.NormalizedDisplayName))) {
+                $score = [Math]::Max($score, 70)
+            }
+        }
+
+        if ($score -gt 0 -and $InstallerMetadata.PublisherNormalized -and $entry.PublisherNormalized -eq $InstallerMetadata.PublisherNormalized) {
+            $score += 5
+        }
+
+        if ($score -gt $bestScore) {
+            $bestScore = $score
+            $bestMatch = $entry
+        }
+    }
+
+    if (-not $bestMatch -or $bestScore -lt 70) {
+        return $null
+    }
+
+    [pscustomobject]@{
+        DisplayName = $bestMatch.DisplayName
+        DisplayVersion = $bestMatch.DisplayVersion
+        VersionObject = $bestMatch.VersionObject
+        ProductCode = $bestMatch.ProductCode
+        MatchScore = $bestScore
+    }
+}
+
+function Resolve-InstallerConflictState {
+    param(
+        [pscustomobject]$InstallerMetadata,
+        [string]$TargetVersion
+    )
+
+    $targetVersionObject = Convert-DetectedAppVersion -Value $TargetVersion
+    if (-not $targetVersionObject -and $InstallerMetadata.InstallerVersionObject) {
+        $targetVersionObject = $InstallerMetadata.InstallerVersionObject
+    }
+
+    $match = Get-InstalledApplicationMatch -InstallerMetadata $InstallerMetadata
+    $skipInstall = $false
+    $canAutoUninstall = $false
+    $reason = ''
+
+    if ($match) {
+        if ($InstallerMetadata.ProductCode -and $match.ProductCode -and $InstallerMetadata.ProductCode -eq $match.ProductCode) {
+            $skipInstall = $true
+            $reason = 'same-product-code'
+        } elseif ($match.VersionObject -and $targetVersionObject -and $match.VersionObject -ge $targetVersionObject) {
+            $skipInstall = $true
+            $reason = 'same-or-newer-version'
+        } elseif ($InstallerMetadata.Extension -eq '.msi' -and $match.ProductCode -and $match.VersionObject -and $targetVersionObject -and $match.VersionObject -lt $targetVersionObject -and $match.MatchScore -ge 85) {
+            $canAutoUninstall = $true
+            $reason = 'older-version-conflict'
+        } else {
+            $reason = 'existing-installation-detected'
+        }
+    }
+
+    [pscustomobject]@{
+        Match = $match
+        TargetVersionObject = $targetVersionObject
+        SkipInstall = $skipInstall
+        CanAutoUninstall = $canAutoUninstall
+        Reason = $reason
+    }
+}
+
+function Get-InstallerConflictLabel {
+    param([pscustomobject]$Conflict)
+
+    if (-not $Conflict -or -not $Conflict.Match) { return '' }
+    if ($Conflict.Match.DisplayVersion) {
+        return "$($Conflict.Match.DisplayName) (v$($Conflict.Match.DisplayVersion))"
+    }
+    return [string]$Conflict.Match.DisplayName
+}
+
+function Invoke-ManagedInstaller {
+    param(
+        [ValidateSet('msi', 'exe', 'ps1')][string]$Kind,
+        [string]$InstallerPath,
+        [string]$ArgumentList = '',
+        [string]$FallbackDisplayName = '',
+        [int[]]$SuccessCodes = @(0, 3010, 1641)
+    )
+
+    if (-not $InstallerPath) {
+        throw 'instalador sin ruta'
+    }
+
+    $installerMetadata = Get-InstallerDetectionMetadata -InstallerPath $InstallerPath -FallbackDisplayName $FallbackDisplayName
+    $conflictState = Resolve-InstallerConflictState -InstallerMetadata $installerMetadata -TargetVersion $CurrentVersion
+
+    if ($conflictState.SkipInstall) {
+        $InstallDisposition = 'skipped'
+        $conflictLabel = Get-InstallerConflictLabel -Conflict $conflictState
+        if ($conflictLabel) {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Ya existe una version igual o mas reciente de $conflictLabel. No se ejecuta el instalador."
+        } else {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Ya existe una version igual o mas reciente. No se ejecuta el instalador."
+        }
+        return [pscustomobject]@{ Status = 'skipped'; ExitCode = 1638 }
+    }
+
+    $launchPath = switch ($Kind) {
+        'msi' { 'msiexec.exe' }
+        'ps1' { 'PowerShell.exe' }
+        default { $InstallerPath }
+    }
+
+    $process = Start-Process -FilePath $launchPath -ArgumentList $ArgumentList -Wait -NoNewWindow -PassThru
+    if ($SuccessCodes -contains $process.ExitCode) {
+        $InstallDisposition = 'installed'
+        return [pscustomobject]@{ Status = 'success'; ExitCode = $process.ExitCode }
+    }
+
+    if ($process.ExitCode -eq 1638) {
+        $conflictState = Resolve-InstallerConflictState -InstallerMetadata $installerMetadata -TargetVersion $CurrentVersion
+
+        if ($conflictState.SkipInstall) {
+            $InstallDisposition = 'skipped'
+            $conflictLabel = Get-InstallerConflictLabel -Conflict $conflictState
+            if ($conflictLabel) {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Conflicto 1638 resuelto. Ya existe una version valida de $conflictLabel."
+            } else {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Conflicto 1638 resuelto. Ya existe una version valida instalada."
+            }
+            return [pscustomobject]@{ Status = 'skipped'; ExitCode = 1638 }
+        }
+
+        if ($Kind -eq 'msi' -and $conflictState.CanAutoUninstall) {
+            $conflictLabel = Get-InstallerConflictLabel -Conflict $conflictState
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Se detecto una version anterior que bloquea la actualizacion ($conflictLabel). Desinstalando y reintentando..."
+            $uninstallArgs = "/x $($conflictState.Match.ProductCode) REBOOT=ReallySuppress /qn"
+            $uninstallProcess = Start-Process -FilePath 'msiexec.exe' -ArgumentList $uninstallArgs -Wait -NoNewWindow -PassThru
+            if ($uninstallProcess.ExitCode -notin @(0, 3010, 1641, 1605)) {
+                throw "desinstalador salio con codigo $($uninstallProcess.ExitCode)"
+            }
+
+            Start-Sleep -Seconds 5
+            $retryProcess = Start-Process -FilePath $launchPath -ArgumentList $ArgumentList -Wait -NoNewWindow -PassThru
+            if ($SuccessCodes -contains $retryProcess.ExitCode) {
+                $InstallDisposition = 'installed'
+                return [pscustomobject]@{ Status = 'success'; ExitCode = $retryProcess.ExitCode; Retried = $true }
+            }
+
+            throw "instalador salio con codigo $($retryProcess.ExitCode) tras reintento por conflicto 1638"
+        }
+
+        $conflictLabel = Get-InstallerConflictLabel -Conflict $conflictState
+        if ($conflictLabel) {
+            throw "instalador salio con codigo 1638: ya existe otra version instalada ($conflictLabel)"
+        }
+        throw 'instalador salio con codigo 1638: ya existe otra version instalada'
+    }
+
+    throw "instalador salio con codigo $($process.ExitCode)"
+}
+`.trim();
+}
+
+function getManagedInstallerInvocation(kind, argumentExpression, options = {}) {
+  const installerPathExpression = options.installerPathExpression || '$Instalador.FullName';
+  const fallbackDisplayNameExpression = options.fallbackDisplayNameExpression || '$NombreApp';
+  const successCodesExpression = options.successCodesExpression || '@(0, 3010, 1641)';
+  return `Invoke-ManagedInstaller -Kind '${kind}' -InstallerPath ${installerPathExpression} -ArgumentList ${argumentExpression} -FallbackDisplayName ${fallbackDisplayNameExpression} -SuccessCodes ${successCodesExpression} | Out-Null`;
+}
+
 function getCustomTemplateValues(template, appConfig) {
   const params = (appConfig && appConfig.customParams && typeof appConfig.customParams === 'object')
     ? appConfig.customParams
@@ -450,9 +965,9 @@ try {
     if ($Instalador.Extension -eq ".msi") {
         $msiArgs = "/i \`"$($Instalador.FullName)\`""
         if ($ArgumentosExe) { $msiArgs += " " + $ArgumentosExe }
-        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('msi', '$msiArgs')}
     } else {
-        Start-Process -FilePath $Instalador.FullName -ArgumentList $ArgumentosExe -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('exe', '$ArgumentosExe')}
     }
 ${customScript}${getTrackerSaveLogic(notify)}
 `;
@@ -497,6 +1012,10 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
     'Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] ====================================================="',
     '',
     '$TrackerFile = "$LogDir\\Tracker_$NombreApp.json"',
+    '$CleanupMarkerDir = Join-Path $LogDir "PendingCacheCleanup"',
+    'if (-not (Test-Path -LiteralPath $CleanupMarkerDir)) { New-Item -ItemType Directory -Path $CleanupMarkerDir -Force | Out-Null }',
+    '$CleanupMarkerPath = Join-Path $CleanupMarkerDir "$NombreApp.json"',
+    getDeployCacheCleanupLogic(),
     '',
     '# ── Leer manifiesto ─────────────────────────────────────────────────────',
     '$VersionFile = Join-Path $PSScriptRoot "version.json"',
@@ -516,6 +1035,8 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
     '    exit 1',
     '}',
     'Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] Version : $CurrentVersion | Hash: $CurrentHash"',
+    '',
+    getInstallerConflictLogic(),
     '',
     '# ── Comprobar si ya instalado ────────────────────────────────────────────',
     'if (Test-Path $TrackerFile) {',
@@ -576,44 +1097,6 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
     '}',
     '',
     '# ── Localizar instalador en cache ────────────────────────────────────────',
-    'function Test-DeployCachePathSafety {',
-    '    param([string]$Path)',
-    '    if (-not $Path) { return $false }',
-    '    try {',
-    '        $fullPath = [System.IO.Path]::GetFullPath($Path)',
-    '        $cacheRoot = [System.IO.Path]::GetFullPath("C:\\Temp\\Deploy")',
-    '        return $fullPath.StartsWith($cacheRoot.TrimEnd("\\") + "\\", [System.StringComparison]::OrdinalIgnoreCase) -and $fullPath.Length -gt ($cacheRoot.Length + 1)',
-    '    } catch {',
-    '        return $false',
-    '    }',
-    '}',
-    '',
-    'function Invoke-DeployCacheCleanup {',
-    '    param([string]$CacheDir)',
-    '    if (-not (Test-DeployCachePathSafety -Path $CacheDir)) {',
-    '        Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] AVISO: Ruta de cache no segura, se omite la limpieza: $CacheDir"',
-    '        return $false',
-    '    }',
-    '    if (-not (Test-Path -LiteralPath $CacheDir)) {',
-    '        return $true',
-    '    }',
-    '    for ($attempt = 1; $attempt -le 5; $attempt++) {',
-    '        try {',
-    '            Remove-Item -LiteralPath $CacheDir -Recurse -Force -ErrorAction Stop',
-    '            Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] Cache local eliminada: $CacheDir"',
-    '            return $true',
-    '        } catch {',
-    '            if ($attempt -lt 5) {',
-    '                Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] AVISO: Cache en uso, reintentando limpieza ($attempt/5)..."',
-    '                Start-Sleep -Seconds 2',
-    '            } else {',
-    '                Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] AVISO: No se pudo eliminar la cache local: $_"',
-    '            }',
-    '        }',
-    '    }',
-    '    return $false',
-    '}',
-    '',
     '$Instalador = $null',
     'if ($PrimaryInstallerName) {',
     '    $PrimaryInstallerCachePath = Join-Path -Path $CacheDir -ChildPath $PrimaryInstallerName',
@@ -651,17 +1134,22 @@ function getTrackerSaveLogic(notifyUser = false) {
     : '';
   return `
     # ── Exito ──────────────────────────────────────────────────────────
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: $NombreApp instalado correctamente (v$CurrentVersion)"
+    if ($InstallDisposition -eq 'skipped') {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Instalador no ejecutado; ya existia una version valida para $NombreApp."
+    } else {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: $NombreApp instalado correctamente (v$CurrentVersion)"
+    }
 ${notifyAfter}
     @{ hash = $CurrentHash; version = $CurrentVersion; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success' } |
         ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
-    Invoke-DeployCacheCleanup -CacheDir $CacheDir | Out-Null
+    Invoke-DeployCacheCleanupWithFallback -CacheDir $CacheDir -MarkerPath $CleanupMarkerPath | Out-Null
 
 } catch {
     # ── Error ──────────────────────────────────────────────────────────
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Fallo instalando $NombreApp - $_"
     @{ hash = $CurrentHash; version = $CurrentVersion; failedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'failed'; error = $_.ToString() } |
         ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+    Invoke-DeployCacheCleanupWithFallback -CacheDir $CacheDir -MarkerPath $CleanupMarkerPath | Out-Null
 }
 Stop-Transcript -ErrorAction SilentlyContinue`;
 }
@@ -685,13 +1173,13 @@ ${getLocalCachingLogic("\\.(exe|msi|ps1)$", notify, safeName)}
 try {
     if ($Instalador.Extension -eq ".msi") {
         $msiArgs = "/i \`"$($Instalador.FullName)\`" " + $ArgumentosExe
-        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('msi', '$msiArgs')}
     } elseif ($Instalador.Extension -eq ".ps1") {
         $psArgs = "-ExecutionPolicy Bypass -File \`"$($Instalador.FullName)\`""
         if ($ArgumentosExe) { $psArgs += " " + $ArgumentosExe }
-        Start-Process -FilePath "PowerShell.exe" -ArgumentList $psArgs -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('ps1', '$psArgs')}
     } else {
-        Start-Process -FilePath $Instalador.FullName -ArgumentList $ArgumentosExe -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('exe', '$ArgumentosExe')}
     }
 ${getTrackerSaveLogic(notify)}
 `;
@@ -715,9 +1203,9 @@ ${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
     if ($Instalador.Extension -eq ".msi") {
         $msiArgs = "/i \`"$($Instalador.FullName)\`" REGISTRATIONTOKEN=\`"$Token\`" /qn /norestart"
-        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('msi', '$msiArgs')}
     } else {
-        Start-Process -FilePath $Instalador.FullName -ArgumentList "/S REGISTRATIONTOKEN=\`"$Token\`"" -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('exe', '"/S REGISTRATIONTOKEN=\`"$Token\`""')}
     }
 ${getTrackerSaveLogic(notify)}
 `;
@@ -739,7 +1227,7 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
 }
 ${getLocalCachingLogic("\\.exe$", notify, sanitizeAppName(cfg.name))}
 try {
-    Start-Process -FilePath $Instalador.FullName -ArgumentList "/S /quiet /install CID=$CID" -Wait -NoNewWindow
+    ${getManagedInstallerInvocation('exe', '"/S /quiet /install CID=$CID"')}
 ${getTrackerSaveLogic(notify)}
 `;
 }
@@ -758,7 +1246,7 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
 }
 ${getLocalCachingLogic("\\.exe$", notify, safeName)}
 try {
-    Start-Process -FilePath $Instalador.FullName -ArgumentList "/silent" -Wait -NoNewWindow
+    ${getManagedInstallerInvocation('exe', '"/silent"')}
 
     $xmlSource = Join-Path -Path $CacheDir -ChildPath "SAPUILandscapeGlobal.xml"
     $xmlDestDir = "C:\\connectionsap"
@@ -807,13 +1295,9 @@ ${getLocalCachingLogic("\\.(exe|msi)$", notify, vpnName)}
 try {
     if ($Instalador.Extension -eq ".msi") {
         $msiArgs = "/i \`"$($Instalador.FullName)\`" REBOOT=ReallySuppress /qn"
-        $installProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow -PassThru
+        ${getManagedInstallerInvocation('msi', '$msiArgs')}
     } else {
-        $installProcess = Start-Process -FilePath $Instalador.FullName -ArgumentList "/S /silent /NORESTART" -Wait -NoNewWindow -PassThru
-    }
-
-    if ($installProcess.ExitCode -notin @(0, 3010, 1641)) {
-        throw "instalador salio con codigo $($installProcess.ExitCode)"
+        ${getManagedInstallerInvocation('exe', '"/S /silent /NORESTART"')}
     }
 
     $vpnPath = "HKLM:\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels\\$FcVpnName"
@@ -845,7 +1329,7 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
 ${getLocalCachingLogic("\\.exe$", notify, sanitizeAppName(cfg.name))}
 try {
     $RutaXML = Join-Path -Path $CacheDir -ChildPath "$configXml"
-    Start-Process -FilePath $Instalador.FullName -ArgumentList "/configure \`"$RutaXML\`"" -Wait -NoNewWindow
+    ${getManagedInstallerInvocation('exe', '"/configure \`"$RutaXML\`""')}
 ${getTrackerSaveLogic(notify)}
 `;
 }
@@ -883,12 +1367,12 @@ try {
         $msiArgs = "/i \`"$($Instalador.FullName)\`" WAZUH_MANAGER=\`"$WazuhManager\`" WAZUH_AGENT_GROUP=\`"$WazuhGroup\`""
         if ($WazuhPwd) { $msiArgs += " WAZUH_REGISTRATION_PASSWORD=\`"$WazuhPwd\`"" }
         $msiArgs += " /qn"
-        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('msi', '$msiArgs')}
     } else {
         $exeArgs = "WAZUH_MANAGER=\`"$WazuhManager\`" WAZUH_AGENT_GROUP=\`"$WazuhGroup\`""
         if ($WazuhPwd) { $exeArgs += " WAZUH_REGISTRATION_PASSWORD=\`"$WazuhPwd\`"" }
         $exeArgs += " /S"
-        Start-Process -FilePath $Instalador.FullName -ArgumentList $exeArgs -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('exe', '$exeArgs')}
     }
 ${getTrackerSaveLogic(notify)}
 `;
@@ -905,9 +1389,10 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\W
 ${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
     if ($Instalador.Extension -eq ".msi") {
-        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$($Instalador.FullName)\`" SITE_TOKEN=\`"$SiteToken\`" /qn" -Wait -NoNewWindow
+        $msiArgs = "/i \`"$($Instalador.FullName)\`" SITE_TOKEN=\`"$SiteToken\`" /qn"
+        ${getManagedInstallerInvocation('msi', '$msiArgs')}
     } else {
-        Start-Process -FilePath $Instalador.FullName -ArgumentList "-t $SiteToken -q" -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('exe', '"-t $SiteToken -q"')}
     }
 ${getTrackerSaveLogic(notify)}
 `;
@@ -926,11 +1411,11 @@ try {
     if ($Instalador.Extension -eq ".msi") {
         $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn"
         if ($CortexDir) { $msiArgs += " INSTALLDIR=\`"$CortexDir\`"" }
-        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('msi', '$msiArgs')}
     } else {
         $exeArgs = "/S /quiet"
         if ($CortexDir) { $exeArgs += " /D=\`"$CortexDir\`"" }
-        Start-Process -FilePath $Instalador.FullName -ArgumentList $exeArgs -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('exe', '$exeArgs')}
     }
 ${getTrackerSaveLogic(notify)}
 `;
@@ -945,9 +1430,10 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\W
 ${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
     if ($Instalador.Extension -eq ".msi") {
-        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$($Instalador.FullName)\`" /qn" -Wait -NoNewWindow
+        $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn"
+        ${getManagedInstallerInvocation('msi', '$msiArgs')}
     } else {
-        Start-Process -FilePath $Instalador.FullName -ArgumentList "/silent" -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('exe', '"/silent"')}
     }
 ${getTrackerSaveLogic(notify)}
 `;
@@ -969,11 +1455,11 @@ try {
     if ($Instalador.Extension -eq ".msi") {
         $msiArgs = "/i \`"$($Instalador.FullName)\`" CLOUDNAME=\`"$ZscCloud\`" STRICTENFORCEMENT=${strict} /qn"
         if ($ZscDomain) { $msiArgs += " USERDOMAIN=\`"$ZscDomain\`"" }
-        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('msi', '$msiArgs')}
     } else {
         $exeArgs = "/S /CLOUDNAME=\`"$ZscCloud\`" /STRICTENFORCEMENT=${strict}"
         if ($ZscDomain) { $exeArgs += " /USERDOMAIN=\`"$ZscDomain\`"" }
-        Start-Process -FilePath $Instalador.FullName -ArgumentList $exeArgs -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('exe', '$exeArgs')}
     }
 ${getTrackerSaveLogic(notify)}
 `;
@@ -991,11 +1477,11 @@ ${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
     if ($Instalador.Extension -eq ".msi") {
         $msiArgs = "/i \`"$($Instalador.FullName)\`" PORTAL=\`"$VpnPortal\`" /qn"
-        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('msi', '$msiArgs')}
     } else {
         $exeArgs = "/s"
         if ($VpnPortal) { $exeArgs += " PORTAL=\`"$VpnPortal\`"" }
-        Start-Process -FilePath $Instalador.FullName -ArgumentList $exeArgs -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('exe', '$exeArgs')}
     }
 ${getTrackerSaveLogic(notify)}
 `;
@@ -1012,9 +1498,10 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\W
 ${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
     if ($Instalador.Extension -eq ".msi") {
-        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$($Instalador.FullName)\`" /qn" -Wait -NoNewWindow
+        $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn"
+        ${getManagedInstallerInvocation('msi', '$msiArgs')}
     } else {
-        Start-Process -FilePath $Instalador.FullName -ArgumentList "/S /s" -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('exe', '"/S /s"')}
     }
 
     $xmlSource = Join-Path -Path $CacheDir -ChildPath $XmlProfile
@@ -1044,7 +1531,7 @@ try {
     $args = "--mode unattended"
     if ($LsServer) { $args += " --server $LsServer --port $LsPort" }
     if ($LsKey)    { $args += " --agentkey $LsKey" }
-    Start-Process -FilePath $Instalador.FullName -ArgumentList $args -Wait -NoNewWindow
+    ${getManagedInstallerInvocation('exe', '$args')}
 ${getTrackerSaveLogic(notify)}
 `;
 }
@@ -1062,11 +1549,11 @@ try {
     if ($Instalador.Extension -eq ".msi") {
         $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn"
         if ($NinjaTk) { $msiArgs += " TOKEN=\`"$NinjaTk\`"" }
-        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('msi', '$msiArgs')}
     } else {
         $exeArgs = "/S /silent"
         if ($NinjaTk) { $exeArgs += " /TOKEN=\`"$NinjaTk\`"" }
-        Start-Process -FilePath $Instalador.FullName -ArgumentList $exeArgs -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('exe', '$exeArgs')}
     }
 ${getTrackerSaveLogic(notify)}
 `;
@@ -1089,12 +1576,12 @@ try {
         if ($TvCid) { $msiArgs += " CUSTOMCONFIGID=\`"$TvCid\`"" }
         if ($TvApi) { $msiArgs += " APITOKEN=\`"$TvApi\`"" }
         $msiArgs += " ASSIGNMENTOPTIONS=\`"--grant-easy-access\`""
-        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('msi', '$msiArgs')}
     } else {
         $exeArgs = "--silent"
         if ($TvCid) { $exeArgs += " --id $TvCid" }
         if ($TvApi) { $exeArgs += " --token $TvApi" }
-        Start-Process -FilePath $Instalador.FullName -ArgumentList $exeArgs -Wait -NoNewWindow
+        ${getManagedInstallerInvocation('exe', '$exeArgs')}
     }
 ${getTrackerSaveLogic(notify)}
 `;
@@ -1109,7 +1596,8 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\W
 ${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
     if ($Instalador.Extension -eq ".msi") {
-        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$($Instalador.FullName)\`" /qn" -Wait -NoNewWindow
+        $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn"
+        Invoke-ManagedInstaller -Kind 'msi' -InstallerPath $Instalador.FullName -ArgumentList $msiArgs -FallbackDisplayName $NombreApp -SuccessCodes @(0, 3010, 1641) | Out-Null
     } else {
         Start-Process -FilePath $Instalador.FullName -ArgumentList "--install --start-with-win --silent" -Wait -NoNewWindow
     }
@@ -1128,9 +1616,10 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") { Try { &"$ENV:WINDIR\\SysNative\\W
 ${getLocalCachingLogic("\\.(exe|msi)$", notify, sanitizeAppName(cfg.name))}
 try {
     if ($Instalador.Extension -eq ".msi") {
-        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$($Instalador.FullName)\`" /qn /norestart" -Wait -NoNewWindow
+        $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn /norestart"
+        Invoke-ManagedInstaller -Kind 'msi' -InstallerPath $Instalador.FullName -ArgumentList $msiArgs -FallbackDisplayName $NombreApp -SuccessCodes @(0, 3010, 1641) | Out-Null
     } else {
-        Start-Process -FilePath $Instalador.FullName -ArgumentList "/silent /norestart" -Wait -NoNewWindow
+        Invoke-ManagedInstaller -Kind 'exe' -InstallerPath $Instalador.FullName -ArgumentList "/silent /norestart" -FallbackDisplayName $NombreApp -SuccessCodes @(0, 3010, 1641) | Out-Null
     }
 
     $xmlSource = Join-Path -Path $CacheDir -ChildPath $XmlProfile
@@ -1158,12 +1647,12 @@ try {
         $msiArgs = "/i \`"$($Instalador.FullName)\`" /qn"
         if ($CpUrl)   { $msiArgs += " DEPLOYMENT_URL=\`"$CpUrl\`"" }
         if ($CpToken) { $msiArgs += " DEPLOYMENT_TOKEN=\`"$CpToken\`"" }
-        Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+        Invoke-ManagedInstaller -Kind 'msi' -InstallerPath $Instalador.FullName -ArgumentList $msiArgs -FallbackDisplayName $NombreApp -SuccessCodes @(0, 3010, 1641) | Out-Null
     } else {
         $exeArgs = "/S"
         if ($CpUrl)   { $exeArgs += " /DEPLOYMENT_URL=\`"$CpUrl\`"" }
         if ($CpToken) { $exeArgs += " /DEPLOYMENT_TOKEN=\`"$CpToken\`"" }
-        Start-Process -FilePath $Instalador.FullName -ArgumentList $exeArgs -Wait -NoNewWindow
+        Invoke-ManagedInstaller -Kind 'exe' -InstallerPath $Instalador.FullName -ArgumentList $exeArgs -FallbackDisplayName $NombreApp -SuccessCodes @(0, 3010, 1641) | Out-Null
     }
 ${getTrackerSaveLogic(notify)}
 `;
@@ -1537,18 +2026,30 @@ try {
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Version : $CurrentVersion"
 
 # ── Comprobar si ya instalado (Office en registro + tracker) ─
-$LastTracker = $null
-if (Test-Path $TrackerFile) {
-    try { $LastTracker = Get-Content $TrackerFile -Raw | ConvertFrom-Json } catch {}
-}
 $OfficeInstalled = Get-ItemProperty \`
     "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*",
     "HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" \`
     -ErrorAction SilentlyContinue |
-    Where-Object { $_.DisplayName -like "*Microsoft Office*" -or $_.DisplayName -like "*Microsoft 365*" } |
+    Where-Object {
+        ($_.DisplayName -like "*Microsoft Office*" -or $_.DisplayName -like "*Microsoft 365*") -and
+        $_.DisplayName -notlike "*Language Pack*" -and
+        $_.DisplayName -notlike "*Proofing Tools*" -and
+        $_.DisplayName -notlike "*Update*"
+    } |
     Select-Object -First 1
-if ($OfficeInstalled -and $LastTracker -and $LastTracker.result -eq 'success' -and $LastTracker.version -eq $CurrentVersion) {
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Office ya instalado - $($OfficeInstalled.DisplayName)"
+$ClickToRunConfig = Get-ItemProperty "HKLM:\\SOFTWARE\\Microsoft\\Office\\ClickToRun\\Configuration" -ErrorAction SilentlyContinue
+$InstalledOfficeProducts = @()
+if ($ClickToRunConfig -and $ClickToRunConfig.ProductReleaseIds) {
+    $InstalledOfficeProducts = @($ClickToRunConfig.ProductReleaseIds -split '[,;]') |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { $_ }
+}
+$TargetOfficeInstalled = $InstalledOfficeProducts -contains "${productId}"
+if ($TargetOfficeInstalled -or $OfficeInstalled) {
+    $OfficeDetectedName = if ($TargetOfficeInstalled) { "${productId}" } else { $OfficeInstalled.DisplayName }
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Office ya instalado - $OfficeDetectedName"
+    @{ version = $CurrentVersion; hash = $CurrentHash; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success'; method = 'odt-detected'; product = "${productId}" } |
+        ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
     Stop-Transcript -ErrorAction SilentlyContinue
     exit 0
 }
