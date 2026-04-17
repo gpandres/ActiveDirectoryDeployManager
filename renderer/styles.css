@@ -1864,6 +1864,55 @@ tr:hover td { background: rgba(108, 99, 255, 0.03); }
   flex-shrink: 0;
 }
 
+.checkbox-wrapper--compact {
+  display: inline-flex;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+}
+
+.checkbox-wrapper--compact input[type="checkbox"] {
+  margin: 0;
+}
+
+.checkbox-panel {
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.checkbox-panel input[type="checkbox"] {
+  margin-top: 2px;
+}
+
+.checkbox-panel--accent {
+  background: rgba(30, 144, 255, 0.1);
+  border-color: rgba(30, 144, 255, 0.2);
+}
+
+.checkbox-panel__content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.checkbox-panel__title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.checkbox-panel__hint {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
 /* ══════════════════════════════════════════════════════
    Code Preview (Script viewer)
    ══════════════════════════════════════════════════════ */

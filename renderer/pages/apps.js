@@ -412,6 +412,39 @@ const AppsPage = {
   },
 
   // ─── Detail Modal ──────────────────────────────────
+  renderDeleteTargetCard({ icon, title, subtitle = '' }) {
+    return `
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-tertiary);border-radius:6px;">
+        <span style="font-size:18px;">${icon}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.esc(title)}</div>
+          ${subtitle ? `<div style="font-size:11px;color:var(--text-muted);">${subtitle}</div>` : ''}
+        </div>
+      </div>`;
+  },
+
+  renderDeleteOptionCard({ id, checked = false, title, hint = '' }) {
+    return `
+      <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;background:var(--bg-secondary);border-radius:8px;cursor:pointer;border:1px solid var(--border-color);">
+        <input type="checkbox" id="${id}" style="margin-top:2px;flex-shrink:0;" ${checked ? 'checked' : ''}>
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${title}</div>
+          ${hint ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${hint}</div>` : ''}
+        </div>
+      </label>`;
+  },
+
+  renderDeleteFooter(confirmId, confirmLabel) {
+    return `
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button class="btn btn-secondary" id="${confirmId}-cancel">${t('common.cancel')}</button>
+        <button class="btn btn-danger" id="${confirmId}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          ${confirmLabel}
+        </button>
+      </div>`;
+  },
+
   async showAppDetail(id) {
     const app = await window.api.apps.get(id);
     if (!app) return;
@@ -756,6 +789,7 @@ const AppsPage = {
       const deployResult = await window.api.scripts.deploy(fullAppData);
 
       if (!deployResult.success) {
+        if (App.isShareError(deployResult.error)) { App.handleShareError(); return; }
         App.toast(`${t('apps.appSavedDeployError')} ${deployResult.error}`, 'error');
         return;
       }
@@ -811,7 +845,7 @@ const AppsPage = {
     );
 
     try {
-      const r = await window.api.catalog.checkSingle(app.wingetId);
+      const r = await window.api.catalog.checkSingle(app.wingetId, app.wingetSource, app.name);
       const latestVersion = r?.latestVersion;
       const statusEl = document.getElementById('wud-status');
       const updateBtn = document.getElementById('wud-update-btn');
@@ -876,7 +910,7 @@ const AppsPage = {
       // Check each winget app's latest version in parallel
       const checks = await Promise.allSettled(
         wingetApps.map(async (app) => {
-          const r = await window.api.catalog.checkSingle(app.wingetId);
+          const r = await window.api.catalog.checkSingle(app.wingetId, app.wingetSource, app.name);
           return { app, latestVersion: r.latestVersion };
         })
       );
@@ -1343,6 +1377,7 @@ const AppsPage = {
       catalogCat: 'Todo',
       template: existingApp?.template || '',
       wingetId: existingApp?.wingetId || '',
+      wingetSource: existingApp?.wingetSource || 'winget',
       odtConfig: existingApp?.odtConfig || {
         product: 'O365BusinessRetail',
         apps: ['Word', 'Excel', 'PowerPoint', 'Outlook', 'OneNote', 'OneDrive'],
@@ -1352,7 +1387,8 @@ const AppsPage = {
       },
       name: existingApp?.name || '',
       silentArgs: existingApp?.silentArgs || '/S',
-      installerPath: initialInstallerPath,
+      templateInstallers: config.templateInstallers || {},
+      installerPath: initialInstallerPath || (!isEdit && existingApp?.template ? (config.templateInstallers?.[existingApp.template] || '') : ''),
       configXmlPath: initialConfigXmlPath,
       customParams: existingApp?.customParams || {},
       templateFiles: initialTemplateFiles,
@@ -1368,7 +1404,8 @@ const AppsPage = {
       notifyUser: existingApp?.notifyUser || false,
       wizardWingetResults: [],
       wizardWingetSearching: false,
-      _wizardWingetTimer: null
+      _wizardWingetTimer: null,
+      _catalogResolutionToken: 0
     };
 
     const renderWizard = () => {
@@ -1461,10 +1498,13 @@ const AppsPage = {
                 <h5 style="font-size:10px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;letter-spacing:.05em;">${this.esc(cat)}</h5>
                 <div class="template-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));">
                   ${grouped2[cat].map(item => {
-                    const isSel = state.template === 'winget' && state.wingetId === item.wingetId;
+                    const isSel = state.template === 'winget'
+                      && state.wingetId === item.wingetId
+                      && (state.wingetSource || 'winget') === (item.wingetSource || 'winget');
                     return `
                       <div class="template-card catalog-item ${isSel ? 'selected' : ''}"
                            data-catalog-type="winget" data-winget-id="${this.esc(item.wingetId)}"
+                           data-winget-source="${this.esc(item.wingetSource || 'winget')}"
                            data-app-name="${this.esc(item.name)}" data-app-version="${this.esc(item.defaultVersion)}"
                            style="cursor:pointer;">
                         <div class="template-card-icon" style="font-size:22px;">${item.icon}</div>
@@ -1492,9 +1532,12 @@ const AppsPage = {
               <h5 style="font-size:10px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;letter-spacing:.05em;">Winget CLI</h5>
               <div class="template-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));">
                 ${state.wizardWingetResults.map(item => {
-                  const isSel = state.template === 'winget' && state.wingetId === item.wingetId;
+                  const isSel = state.template === 'winget'
+                    && state.wingetId === item.wingetId
+                    && (state.wingetSource || 'winget') === (item.wingetSource || 'winget');
                   return `<div class="template-card catalog-item ${isSel ? 'selected' : ''}"
                        data-catalog-type="winget" data-winget-id="${this.esc(item.wingetId)}"
+                       data-winget-source="${this.esc(item.wingetSource || 'winget')}"
                        data-app-name="${this.esc(item.name)}" data-app-version="${this.esc(item.version||'')}"
                        style="cursor:pointer;">
                     <div class="template-card-icon" style="font-size:22px;">📦</div>
@@ -1624,15 +1667,31 @@ const AppsPage = {
           body += `
             <div class="card" style="padding:14px 16px;margin:0 0 14px 0;background:rgba(30,144,255,0.08);border-color:rgba(30,144,255,0.2);">
               <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
-                <div>
-                  <div style="font-size:15px;font-weight:700;color:var(--text-primary);">${this.esc(tmpl.name)}</div>
-                  <p style="margin:6px 0 0 0;font-size:13px;line-height:1.5;color:var(--text-secondary);">${this.esc(tmpl.description || this.tr('apps.customTemplateDefaultDescLong', 'Plantilla reutilizable. Completa solo los valores que cambian en cada despliegue.'))}</p>
+                <div style="display:flex;align-items:flex-start;gap:10px;">
+                  <span style="font-size:28px;line-height:1;">${this.templateIcon(state.template)}</span>
+                  <div>
+                    <div style="font-size:15px;font-weight:700;color:var(--text-primary);">${this.esc(tmpl.name)}</div>
+                    <p style="margin:6px 0 0 0;font-size:13px;line-height:1.5;color:var(--text-secondary);">${this.esc(tmpl.description || this.tr('apps.customTemplateDefaultDescLong', 'Plantilla reutilizable. Completa solo los valores que cambian en cada despliegue.'))}</p>
+                  </div>
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
                   <span class="badge badge-info">${fieldCount} ${this.tr('apps.customTemplateArgsBadge', 'campos')}</span>
                   <span class="badge badge-neutral">${fileCount} ${this.tr('apps.customTemplateFilesBadge', 'archivos')}</span>
                   ${tmpl?.hasCustomScript ? `<span class="badge badge-primary">${this.tr('apps.customTemplateScriptBadge', 'script opcional')}</span>` : ''}
                 </div>
+              </div>
+            </div>`;
+        } else if (!isWinget && !isODT && tmpl) {
+          // Built-in system template banner
+          body += `
+            <div class="card" style="padding:12px 16px;margin:0 0 14px 0;background:var(--bg-secondary);border-color:var(--border-color);">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span style="font-size:28px;line-height:1;">${this.templateIcon(state.template)}</span>
+                <div>
+                  <div style="font-size:14px;font-weight:700;color:var(--text-primary);">${this.esc(tmpl.name)}</div>
+                  ${tmpl.description ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${this.esc(tmpl.description)}</div>` : ''}
+                </div>
+                <span class="badge badge-neutral" style="margin-left:auto;flex-shrink:0;">Sistema</span>
               </div>
             </div>`;
         }
@@ -1646,6 +1705,10 @@ const AppsPage = {
             <div class="form-group" style="margin-bottom:0;">
               <label class="form-label">Winget ID</label>
               <input type="text" class="form-input" value="${this.esc(state.wingetId)}" readonly style="background:var(--bg-tertiary);cursor:default;font-family:monospace;font-size:12px;">
+            </div>
+            <div class="form-group" style="margin-bottom:0;margin-top:8px;">
+              <label class="form-label">Fuente</label>
+              <input type="text" class="form-input" value="${this.esc(state.wingetSource || 'winget')}" readonly style="background:var(--bg-tertiary);cursor:default;font-family:monospace;font-size:12px;">
             </div>
           </div>`;
 
@@ -1790,8 +1853,8 @@ const AppsPage = {
                 </div>
               ` : ''}
             </div>
-            <div class="form-group" style="flex:1;display:flex;align-items:end;padding-bottom:16px">
-              <label class="checkbox-wrapper">
+            <div class="form-group" style="flex:1;display:flex;align-items:stretch;">
+              <label class="checkbox-wrapper checkbox-panel" style="align-items:center;">
                 <input type="checkbox" id="wiz-notify" ${state.notifyUser ? 'checked' : ''}>
                 <span>🔔 ${t('apps.notifyUser')}</span>
               </label>
@@ -1867,8 +1930,8 @@ const AppsPage = {
           </div>
 
           <div class="form-group mb-md">
-            <label class="flex items-center gap-sm" style="cursor:pointer; padding: 12px; background: rgba(30,144,255,0.1); border-radius: 6px; border: 1px solid rgba(30,144,255,0.2);">
-              <input type="checkbox" id="wiz-create-gpo" ${state.createGPO ? 'checked' : ''} style="width:16px;height:16px;">
+            <label class="checkbox-wrapper checkbox-panel checkbox-panel--accent">
+              <input type="checkbox" id="wiz-create-gpo" ${state.createGPO ? 'checked' : ''}>
               <span style="font-weight:600;color:var(--primary-color)">✨ ${t('apps.createGpoCheckbox')}</span>
             </label>
           </div>
@@ -1937,6 +2000,7 @@ const AppsPage = {
         // Clear template selection when switching tabs so user picks fresh
         state.template = '';
         state.wingetId = '';
+        state.wingetSource = 'winget';
         state.customParams = {};
         state.templateFiles = {};
         state.templateDefinition = null;
@@ -1951,6 +2015,7 @@ const AppsPage = {
         e.stopPropagation(); // prevent the generic .template-card handler below
         const catalogType = card.dataset.catalogType;
         const nextTemplate = catalogType === 'odt' ? 'odt' : 'winget';
+        let selectedPackage = null;
         if (state.template !== nextTemplate) {
           state.customParams = {};
           state.templateFiles = {};
@@ -1960,18 +2025,29 @@ const AppsPage = {
         if (catalogType === 'odt') {
           state.template = 'odt';
           state.wingetId = '';
-          if (!state.name) state.name = 'Microsoft Office';
+          state.wingetSource = 'winget';
+          state.name = 'Microsoft Office';
         } else if (catalogType === 'winget') {
           state.template = 'winget';
           state.wingetId = card.dataset.wingetId || '';
-          if (!state.name || state.name === 'Microsoft Office') state.name = card.dataset.appName || '';
+          state.wingetSource = card.dataset.wingetSource || 'winget';
+          state.name = card.dataset.appName || '';
           if (card.dataset.appVersion) state.version = card.dataset.appVersion;
+          selectedPackage = {
+            wingetId: state.wingetId,
+            wingetSource: state.wingetSource,
+            name: card.dataset.appName || state.name,
+            version: card.dataset.appVersion || state.version || ''
+          };
         }
-        // Auto-advance to step 2 (name/config)
+        // Keep the user on step 1 in the New App wizard; the catalog page
+        // still opens this wizard directly on step 2 via a prefilled state.
         if (state._wizardWingetTimer) clearTimeout(state._wizardWingetTimer);
         state.wizardWingetSearching = false;
-        state.step = 2;
         renderWizard();
+        if (selectedPackage?.wingetId) {
+          this.resolveCatalogPackageSelection(state, renderWizard, selectedPackage);
+        }
       });
     });
 
@@ -1986,8 +2062,11 @@ const AppsPage = {
         }
         state.template = card.dataset.template;
         state.wingetId = '';
-        // Auto-advance to step 2 (name/config)
-        state.step = 2;
+        state.wingetSource = 'winget';
+        // Auto-fill installer from template pre-configured installer
+        const preInstaller = state.templateInstallers?.[state.template];
+        if (preInstaller && !state.installerPath) state.installerPath = preInstaller;
+        // Stay on step 1 so the user confirms with "Next" from the New App wizard.
         renderWizard();
       });
     });
@@ -2395,10 +2474,12 @@ const AppsPage = {
             item.name.toLowerCase().includes(query.toLowerCase()) ||
             (item.wingetId || '').toLowerCase().includes(query.toLowerCase())
           )
-          .map(item => (item.wingetId || '').toLowerCase())
+          .map(item => `${(item.wingetId || '').toLowerCase()}|${(item.wingetSource || 'winget').toLowerCase()}`)
           .filter(Boolean)
       );
-      state.wizardWingetResults = results.filter(r => r.wingetId && !curatedIds.has(r.wingetId.toLowerCase()));
+      state.wizardWingetResults = results.filter(r =>
+        r.wingetId && !curatedIds.has(`${r.wingetId.toLowerCase()}|${(r.wingetSource || 'winget').toLowerCase()}`)
+      );
       state.wizardWingetSearching = false;
 
       const ws = document.getElementById('wiz-winget-section');
@@ -2415,6 +2496,7 @@ const AppsPage = {
           ${state.wizardWingetResults.map(item => `
             <div class="template-card catalog-item"
                  data-catalog-type="winget" data-winget-id="${this.esc(item.wingetId)}"
+                 data-winget-source="${this.esc(item.wingetSource || 'winget')}"
                  data-app-name="${this.esc(item.name)}" data-app-version="${this.esc(item.version || '')}"
                  style="cursor:pointer;">
               <div class="template-card-icon" style="font-size:22px;">📦</div>
@@ -2429,13 +2511,19 @@ const AppsPage = {
           e.stopPropagation();
           state.template = 'winget';
           state.wingetId = card.dataset.wingetId || '';
-          if (!state.name || state.name === 'Microsoft Office') state.name = card.dataset.appName || '';
+          state.wingetSource = card.dataset.wingetSource || 'winget';
+          state.name = card.dataset.appName || '';
           if (card.dataset.appVersion) state.version = card.dataset.appVersion;
-          // Auto-advance to step 2
+          // Stay on step 1 in the New App wizard and normalize the selected package in background.
           if (state._wizardWingetTimer) clearTimeout(state._wizardWingetTimer);
           state.wizardWingetSearching = false;
-          state.step = 2;
           renderWizard();
+          this.resolveCatalogPackageSelection(state, renderWizard, {
+            wingetId: state.wingetId,
+            wingetSource: state.wingetSource,
+            name: card.dataset.appName || state.name,
+            version: card.dataset.appVersion || state.version || ''
+          });
         });
       });
     } catch {
@@ -2813,7 +2901,26 @@ const AppsPage = {
 
       // Include wingetId for winget templates
       if (state.template === 'winget' && state.wingetId) {
-        appData.wingetId = state.wingetId;
+        try {
+          const resolvedWinget = await window.api.catalog.resolvePackage({
+            wingetId: state.wingetId,
+            wingetSource: state.wingetSource || 'winget',
+            name: state.name.trim()
+          });
+          if (resolvedWinget?.available && resolvedWinget.wingetId) {
+            appData.wingetId = resolvedWinget.wingetId;
+            appData.wingetSource = resolvedWinget.wingetSource || state.wingetSource || 'winget';
+            if (!state.version && resolvedWinget.latestVersion) {
+              appData.version = resolvedWinget.latestVersion;
+            }
+          } else {
+            appData.wingetId = state.wingetId;
+            appData.wingetSource = state.wingetSource || 'winget';
+          }
+        } catch {
+          appData.wingetId = state.wingetId;
+          appData.wingetSource = state.wingetSource || 'winget';
+        }
       }
       // Include odtConfig for ODT templates
       if (state.template === 'odt' && state.odtConfig) {
@@ -2867,6 +2974,7 @@ const AppsPage = {
           } catch (e) { /* non-fatal — script is deployed even if link fails */ }
         }
       } else {
+        if (App.isShareError(deployResult.error)) { App.handleShareError(); App.closeModal(); App.navigate('apps'); return; }
         App.toast(`${t('apps.appSavedDeployError')} ${deployResult.error}`, 'error');
       }
 
@@ -2974,6 +3082,7 @@ const AppsPage = {
         App.toast(t('apps.deployedToPath').replace('{app}', app.name).replace('{path}', result.path), 'success');
         App.navigate('apps');
       } else {
+        if (App.isShareError(result.error)) { App.handleShareError(); return; }
         App.toast(`Error: ${result.error}`, 'error');
       }
     } catch (err) {
@@ -3107,37 +3216,53 @@ const AppsPage = {
 
     const hasGPO = !!app.gpoName;
     const hasOUs = app.assignedOUs && app.assignedOUs.length > 0;
-
-    App.openModal(t('apps.deleteConfirm'), `
-      <p>${t('apps.deleteMsg').replace('{app}', `<strong>${this.esc(app.name)}</strong>`)}</p>
-      ${hasGPO ? `
-        <div class="form-group mt-md" style="background: rgba(255,50,50,0.08); border: 1px solid rgba(255,50,50,0.25); border-radius:8px; padding:12px;">
-          <p style="margin:0 0 8px 0; color:var(--danger-color); font-weight:600;">🗑️ Limpieza de GPO: "${this.esc(app.gpoName)}"</p>
-          ${hasOUs ? `
-            <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-              <input type="checkbox" id="chk-del-unlink-gpo" checked style="width:auto; cursor:pointer;">
-              <label for="chk-del-unlink-gpo" style="margin:0; cursor:pointer; font-size:14px; color:var(--text-secondary);">${t('apps.cleanGpoOption')}</label>
-            </div>
-          ` : ''}
-          <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-            <input type="checkbox" id="chk-del-clean-script" checked style="width:auto; cursor:pointer;">
-            <label for="chk-del-clean-script" style="margin:0; cursor:pointer; font-size:14px; color:var(--text-secondary);">${t('apps.cleanSysvolOption')}</label>
-          </div>
-          <div style="display:flex; align-items:center; gap:8px;">
-            <input type="checkbox" id="chk-del-delete-gpo" checked style="width:auto; cursor:pointer;">
-            <label for="chk-del-delete-gpo" style="margin:0; cursor:pointer; font-size:14px; color:var(--text-secondary);">${t('apps.deleteGpoOption')}</label>
+    const body = `
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div style="padding:10px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;">
+          <div style="font-size:13px;font-weight:700;color:var(--accent-danger);">${t('apps.deleteConfirm')}</div>
+          <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">
+            ${t('apps.deleteMsg').replace('{app}', `<strong>${this.esc(app.name)}</strong>`)}
           </div>
         </div>
-      ` : ''}
-      <div class="form-group mt-md" style="display:flex; align-items:center; gap:8px;">
-        <input type="checkbox" id="chk-delete-files" style="width:auto; cursor:pointer;" checked>
-        <label for="chk-delete-files" style="margin:0; cursor:pointer; font-size:14px; color:var(--text-muted);">${t('apps.keepFilesOption')}</label>
+        ${this.renderDeleteTargetCard({
+          icon: this.templateIcon(app.template),
+          title: app.name,
+          subtitle: app.gpoName ? `GPO: ${this.esc(app.gpoName)}` : ''
+        })}
+        ${hasGPO && hasOUs ? this.renderDeleteOptionCard({
+          id: 'chk-del-unlink-gpo',
+          checked: true,
+          title: t('apps.cleanGpoOption'),
+          hint: this.tr('apps.cleanGpoOptionHint', 'Quita la vinculacion de la GPO en las OUs asignadas')
+        }) : ''}
+        ${hasGPO ? this.renderDeleteOptionCard({
+          id: 'chk-del-clean-script',
+          checked: true,
+          title: t('apps.cleanSysvolOption'),
+          hint: this.tr('apps.cleanSysvolOptionHint', 'Elimina el script de inicio asociado en SYSVOL')
+        }) : ''}
+        ${hasGPO ? this.renderDeleteOptionCard({
+          id: 'chk-del-delete-gpo',
+          checked: true,
+          title: t('apps.deleteGpoOption'),
+          hint: this.tr('apps.deleteGpoOptionHint', 'Borra la GPO de Active Directory si ya no se necesita')
+        }) : ''}
+        ${this.renderDeleteOptionCard({
+          id: 'chk-delete-files',
+          checked: true,
+          title: t('apps.keepFilesOption'),
+          hint: this.tr('apps.keepFilesOptionHint', 'Desmarca esta opcion si tambien quieres borrar la carpeta del share')
+        })}
       </div>
-    `, `
-      <button class="btn btn-secondary" onclick="App.closeModal()">${t('common.cancel')}</button>
-      <button class="btn btn-danger" id="btn-confirm-delete">${t('common.delete')}</button>
-    `);
+    `;
 
+    App.openModal(
+      t('apps.deleteConfirm'),
+      body,
+      this.renderDeleteFooter('btn-confirm-delete', t('common.delete'))
+    );
+
+    document.getElementById('btn-confirm-delete-cancel')?.addEventListener('click', () => App.closeModal());
     document.getElementById('btn-confirm-delete').addEventListener('click', async () => {
       const btn = document.getElementById('btn-confirm-delete');
       btn.style.width = btn.offsetWidth + 'px';
@@ -3146,13 +3271,11 @@ const AppsPage = {
       btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;"></span>';
 
       try {
-        // Checkbox = "keep files" (checked by default), so invert to get deleteFiles
         const deleteFiles = !document.getElementById('chk-delete-files').checked;
         const unlinkGPO = document.getElementById('chk-del-unlink-gpo')?.checked ?? false;
         const cleanScript = document.getElementById('chk-del-clean-script')?.checked ?? false;
         const deleteGPO = document.getElementById('chk-del-delete-gpo')?.checked ?? false;
 
-        // GPO cleanup before deleting the app
         if (hasGPO && unlinkGPO && hasOUs) {
           for (const ouDN of app.assignedOUs) {
             await window.api.ad.unlinkGPOfromOU(app.gpoName, ouDN);
@@ -3172,7 +3295,7 @@ const AppsPage = {
       } catch (err) {
         App.toast('Error: ' + err.message, 'error');
         btn.disabled = false;
-        btn.textContent = t('apps.deleteAllBtn');
+        btn.innerHTML = t('common.delete');
       }
     });
   },
@@ -3180,6 +3303,45 @@ const AppsPage = {
   tr(key, fallback) {
     const value = t(key);
     return value === key ? fallback : value;
+  },
+
+  async resolveCatalogPackageSelection(state, renderWizard, reference) {
+    if (!reference?.wingetId) return;
+
+    state._catalogResolutionToken = (state._catalogResolutionToken || 0) + 1;
+    const token = state._catalogResolutionToken;
+    const selectedVersion = String(reference.version || '');
+    const selectedName = String(reference.name || '');
+    const selectedSource = reference.wingetSource || 'winget';
+
+    try {
+      const resolved = await window.api.catalog.resolvePackage({
+        wingetId: reference.wingetId,
+        wingetSource: selectedSource,
+        name: selectedName
+      });
+
+      if (state._catalogResolutionToken !== token) return;
+      if (state.template !== 'winget') return;
+      if (!resolved?.available || !resolved.wingetId) return;
+
+      const currentKey = `${state.wingetId || ''}|${state.wingetSource || 'winget'}`;
+      const originalKey = `${reference.wingetId || ''}|${selectedSource}`;
+      const resolvedKey = `${resolved.wingetId || ''}|${resolved.wingetSource || selectedSource}`;
+      if (currentKey !== originalKey && currentKey !== resolvedKey) return;
+
+      const canReplaceName = !state.name || state.name === selectedName || state.name === 'Microsoft Office';
+      const canReplaceVersion = !state.version || state.version === '1.0.0' || (selectedVersion && state.version === selectedVersion);
+
+      state.wingetId = resolved.wingetId;
+      state.wingetSource = resolved.wingetSource || selectedSource;
+      if (canReplaceName && resolved.name) state.name = resolved.name;
+      if (resolved.latestVersion && canReplaceVersion) state.version = resolved.latestVersion;
+
+      if (state.step <= 2) renderWizard();
+    } catch {
+      // Non-blocking: keep the original catalog selection if resolution fails.
+    }
   },
 
   describeTemplateFile(fileField) {
@@ -3443,15 +3605,36 @@ const AppsPage = {
   renderTemplateManager(state, onClose) {
     const draft = state.draft || this.createEmptyTemplateDraft();
     const templates = Array.isArray(state.templates) ? state.templates : [];
+    const builtInTemplates = Array.isArray(state.builtInTemplates) ? state.builtInTemplates : [];
+    const templateInstallers = state.templateInstallers || {};
     const deleteUsageCount = Number.isFinite(state.deleteUsageCount) ? state.deleteUsageCount : 0;
-    const listHtml = templates.length > 0
-      ? templates.map(template => `
+
+    const builtInListHtml = builtInTemplates.map(tmpl => {
+      const hasInstaller = !!templateInstallers[tmpl.id];
+      const isActive = state.selectedBuiltIn === tmpl.id;
+      return `
+        <button class="template-manager-item ${isActive ? 'active' : ''}" type="button" data-builtin-id="${this.esc(tmpl.id)}">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-size:14px;">${this.templateIcon(tmpl.id)}</span>
+            <div style="font-weight:600;color:var(--text-primary);font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${this.esc(tmpl.name)}</div>
+            ${hasInstaller ? `<span style="font-size:9px;background:rgba(34,197,94,.15);color:var(--accent-success,#22c55e);padding:1px 5px;border-radius:3px;flex-shrink:0;">✓</span>` : ''}
+          </div>
+        </button>`;
+    }).join('');
+
+    const userListHtml = templates.length > 0
+      ? templates.map(template => {
+          const hasInstaller = !!templateInstallers[template.id];
+          return `
           <button class="template-manager-item ${state.selectedId === template.id ? 'active' : ''}" type="button" data-template-id="${this.esc(template.id)}">
-            <div style="font-weight:600;color:var(--text-primary);font-size:13px;">${this.esc(template.name)}</div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div style="font-weight:600;color:var(--text-primary);font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${this.esc(template.name)}</div>
+              ${hasInstaller ? `<span style="font-size:9px;background:rgba(34,197,94,.15);color:var(--accent-success,#22c55e);padding:1px 5px;border-radius:3px;flex-shrink:0;">✓</span>` : ''}
+            </div>
             <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">${this.esc(template.description || this.tr('apps.customTemplateDefaultDesc', 'Plantilla definida por el administrador'))}</div>
-          </button>
-        `).join('')
-      : `<div style="padding:14px;border:1px dashed var(--border-color);border-radius:8px;color:var(--text-muted);font-size:12px;">${this.tr('apps.customTemplatesEmpty', 'Todavia no hay plantillas personalizadas. Crea una para reutilizar argumentos, archivos auxiliares y pasos post-instalacion.')}</div>`;
+          </button>`;
+        }).join('')
+      : `<div style="padding:14px;border:1px dashed var(--border-color);border-radius:8px;color:var(--text-muted);font-size:12px;">${this.tr('apps.customTemplatesEmpty', 'Todavia no hay plantillas personalizadas.')}</div>`;
 
     const argumentRows = draft.arguments.map((arg, index) => `
       <div class="tmpl-arg-row" data-index="${index}" style="border:1px solid var(--border-color);border-radius:8px;padding:12px;margin-bottom:10px;background:var(--bg-secondary);">
@@ -3509,8 +3692,7 @@ const AppsPage = {
           <div class="form-group" style="margin-bottom:0;">
             <label class="form-label">${this.tr('apps.customTemplateFileType', 'Tipo')}</label>
             <select class="form-select" data-field="storageKind">
-              <option value="file" ${!this.isInstallerTemplateFile(file) ? 'selected' : ''}>${this.tr('apps.customTemplateFileTypeFile', 'Archivo auxiliar')}</option>
-              <option value="installer" ${this.isInstallerTemplateFile(file) ? 'selected' : ''}>${this.tr('apps.customTemplateFileTypeInstaller', 'Instalador adjunto')}</option>
+              <option value="file" selected>${this.tr('apps.customTemplateFileTypeFile', 'Archivo auxiliar')}</option>
             </select>
           </div>
           <div class="form-group" style="margin-bottom:0;">
@@ -3566,13 +3748,59 @@ const AppsPage = {
       </div>
     ` : '';
 
+    // Shared installer config panel
+    const activeTemplateId = state.selectedBuiltIn || state.selectedId || null;
+    const currentInstallerPath = activeTemplateId ? (templateInstallers[activeTemplateId] || '') : '';
+    const installerFileName = currentInstallerPath ? currentInstallerPath.replace(/.*[\\/]/, '') : '';
+    const installerPanel = `
+      <div class="card template-builder-section" style="border-color:rgba(30,144,255,0.25);background:rgba(30,144,255,0.04);">
+        <div style="font-weight:700;color:var(--text-primary);margin-bottom:6px;">📦 Instalador preconfigurado</div>
+        <p class="form-hint" style="margin:0 0 10px 0;">Si adjuntas el instalador aqui, se completara automaticamente cada vez que alguien cree una app con esta plantilla.</p>
+        ${currentInstallerPath ? `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.35);border-radius:6px;padding:4px 10px;margin-bottom:10px;font-size:12px;color:#16a34a;max-width:100%;overflow:hidden;">
+          <span style="flex-shrink:0;">✓</span>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:monospace;" title="${this.esc(currentInstallerPath)}">${this.esc(installerFileName)}</span>
+        </div>` : ''}
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input class="form-input" id="tmpl-installer-path" value="${this.esc(currentInstallerPath)}" placeholder="Sin instalador preconfigurado" readonly style="flex:1;font-family:monospace;font-size:12px;">
+          <button class="btn btn-secondary btn-sm" type="button" id="btn-browse-tmpl-installer">Seleccionar</button>
+          ${currentInstallerPath ? `<button class="btn btn-ghost btn-sm" type="button" id="btn-clear-tmpl-installer">✕</button>` : ''}
+        </div>
+        <div id="tmpl-installer-status" style="display:none;margin-top:10px;padding:8px 12px;border-radius:6px;font-size:13px;"></div>
+      </div>`;
+
+    // Built-in template view (read-only, just installer config)
+    const selectedBuiltInInfo = state.selectedBuiltIn ? builtInTemplates.find(t => t.id === state.selectedBuiltIn) : null;
+    const builtInView = selectedBuiltInInfo ? `
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:12px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border-color);">
+        <span style="font-size:32px;">${this.templateIcon(selectedBuiltInInfo.id)}</span>
+        <div>
+          <div style="font-size:16px;font-weight:700;color:var(--text-primary);">${this.esc(selectedBuiltInInfo.name)}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${this.esc(selectedBuiltInInfo.description || '')}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;opacity:.7;">Plantilla del sistema · Solo lectura</div>
+        </div>
+      </div>
+      ${installerPanel}
+    ` : '';
+
     const body = `
       <div class="template-manager-shell">
         <div class="template-manager-sidebar">
-          <button class="btn btn-primary" type="button" id="btn-new-template" style="width:100%;margin-bottom:10px;">${this.tr('apps.newCustomTemplate', 'Nueva plantilla')}</button>
-          ${listHtml}
+          ${builtInTemplates.length > 0 ? `
+            <button type="button" id="btn-toggle-system-section" style="display:flex;align-items:center;justify-content:space-between;width:100%;background:none;border:none;cursor:pointer;padding:4px 4px 6px;margin-bottom:2px;">
+              <span style="font-size:10px;text-transform:uppercase;color:var(--text-muted);letter-spacing:.06em;font-weight:600;">Sistema</span>
+              <svg id="icon-system-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-muted);transform:${state.systemExpanded ? 'rotate(180deg)' : 'rotate(0deg)'};transition:transform .2s;"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <div id="system-section-list" style="display:${state.systemExpanded ? 'block' : 'none'};">
+              ${builtInListHtml}
+            </div>
+            <div style="height:1px;background:var(--border-color);margin:8px 0;"></div>
+          ` : ''}
+          <div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);letter-spacing:.06em;padding:4px 4px 6px;font-weight:600;">Personalizadas</div>
+          <button class="btn btn-primary" type="button" id="btn-new-template" style="width:100%;margin-bottom:8px;">${this.tr('apps.newCustomTemplate', 'Nueva plantilla')}</button>
+          ${userListHtml}
         </div>
         <div class="template-manager-main">
+          ${state.selectedBuiltIn ? builtInView : `
           ${deletePanel}
           <div class="form-group" style="margin-bottom:0;">
             <label class="form-label">${this.tr('apps.customTemplateName', 'Nombre de la plantilla')}</label>
@@ -3582,6 +3810,7 @@ const AppsPage = {
             <label class="form-label">${this.tr('apps.customTemplateDescription', 'Descripcion')}</label>
             <textarea class="form-input" id="tmpl-description" rows="2" placeholder="${this.esc(this.tr('apps.customTemplateDescriptionPlaceholder', 'Explica que hace esta plantilla y que espera del operador.'))}">${this.esc(draft.description)}</textarea>
           </div>
+          ${installerPanel}
           <div class="card template-builder-section">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;">
               <div style="font-weight:700;color:var(--text-primary);">${this.tr('apps.customTemplateArgsTitle', 'Argumentos')}</div>
@@ -3603,6 +3832,7 @@ const AppsPage = {
             <textarea class="form-input" id="tmpl-script" rows="8" style="font-family:monospace;" placeholder="${this.esc(this.tr('apps.customTemplateScriptPlaceholder', 'Ejemplo:\nWrite-Host "Configuracion adicional aplicada"'))}">${this.esc(draft.script)}</textarea>
             <p class="form-hint" style="margin-top:8px;">${this.tr('apps.customTemplateScriptHint', 'Variables disponibles: $TemplateValues.<clave>, $TemplateFiles.<clave>, $TemplateFileNames.<clave>, $ConfigXmlPath (si la plantilla incluye un XML), $Instalador y $CacheDir. Este script se ejecuta despues del instalador.')}</p>
           </div>
+          `}
         </div>
       </div>
     `;
@@ -3610,13 +3840,14 @@ const AppsPage = {
     const footer = `
       <button class="btn btn-secondary" type="button" id="btn-close-template-manager">${this.tr('common.close', 'Cerrar')}</button>
       <div style="flex:1"></div>
-      ${state.selectedId ? `<button class="btn btn-danger" type="button" id="btn-delete-template">${this.tr('common.delete', 'Borrar')}</button>` : ''}
-      <button class="btn btn-success" type="button" id="btn-save-template">${this.tr('common.save', 'Guardar')}</button>
+      ${!state.selectedBuiltIn && state.selectedId ? `<button class="btn btn-danger" type="button" id="btn-delete-template">${this.tr('common.delete', 'Borrar')}</button>` : ''}
+      ${!state.selectedBuiltIn ? `<button class="btn btn-success" type="button" id="btn-save-template">${this.tr('common.save', 'Guardar')}</button>` : ''}
+      ${state.selectedBuiltIn ? `<button class="btn ${state.installerSaved ? 'btn-secondary' : 'btn-success'}" type="button" id="btn-save-tmpl-installer">${state.installerSaved ? this.tr('common.close', 'Cerrar') : 'Guardar instalador'}</button>` : ''}
     `;
 
     App.openModal(this.tr('apps.manageTemplates', 'Plantillas'), body, footer, { size: 'full' });
     this.bindTemplateManagerEvents(state, onClose);
-    if (!state.selectedId) {
+    if (!state.selectedId && !state.selectedBuiltIn) {
       requestAnimationFrame(() => document.getElementById('tmpl-name')?.focus());
     }
   },
@@ -3630,22 +3861,105 @@ const AppsPage = {
     document.getElementById('btn-new-template')?.addEventListener('click', () => {
       state.draft = this.createEmptyTemplateDraft();
       state.selectedId = null;
+      state.selectedBuiltIn = null;
       state.deleteConfirm = false;
       state.deleteUsageCount = 0;
       this.renderTemplateManager(state, onClose);
     });
 
-    document.querySelectorAll('.template-manager-item').forEach(item => {
+    // Toggle Sistema section
+    document.getElementById('btn-toggle-system-section')?.addEventListener('click', () => {
+      state.systemExpanded = !state.systemExpanded;
+      const list = document.getElementById('system-section-list');
+      const chevron = document.getElementById('icon-system-chevron');
+      if (list) list.style.display = state.systemExpanded ? 'block' : 'none';
+      if (chevron) chevron.style.transform = state.systemExpanded ? 'rotate(180deg)' : 'rotate(0deg)';
+    });
+
+    // Built-in template selection
+    document.querySelectorAll('[data-builtin-id]').forEach(item => {
+      item.addEventListener('click', () => {
+        state.selectedBuiltIn = item.dataset.builtinId;
+        state.selectedId = null;
+        state.deleteConfirm = false;
+        this.renderTemplateManager(state, onClose);
+      });
+    });
+
+    // User template selection
+    document.querySelectorAll('[data-template-id]').forEach(item => {
       item.addEventListener('click', async () => {
         state.draft = this.readTemplateDraftFromDom(state);
         const templateId = item.dataset.templateId;
         const template = state.templates.find(entry => entry.id === templateId);
         state.selectedId = templateId;
+        state.selectedBuiltIn = null;
         state.draft = this.cloneTemplateDraft(template);
         state.deleteConfirm = false;
         state.deleteUsageCount = 0;
         this.renderTemplateManager(state, onClose);
       });
+    });
+
+    // Browse installer button (for both built-in and user templates)
+    document.getElementById('btn-browse-tmpl-installer')?.addEventListener('click', async () => {
+      const file = await window.api.config.selectFile([{ name: 'Instalador (EXE/MSI)', extensions: ['exe', 'msi'] }]);
+      if (!file) return;
+      state.installerSaved = false; // new file selected — re-enable save button
+      document.getElementById('tmpl-installer-path').value = file;
+      this.renderTemplateManager(state, onClose);
+    });
+
+    document.getElementById('btn-clear-tmpl-installer')?.addEventListener('click', () => {
+      const activeId = state.selectedBuiltIn || state.selectedId;
+      if (!activeId) return;
+      state.templateInstallers = { ...state.templateInstallers };
+      delete state.templateInstallers[activeId];
+      this.renderTemplateManager(state, onClose);
+      window.api.config.set({ templateInstallers: state.templateInstallers }).catch(() => {});
+    });
+
+    // Save installer for built-in template (also acts as "Cerrar" after a successful save)
+    document.getElementById('btn-save-tmpl-installer')?.addEventListener('click', async () => {
+      if (state.installerSaved) {
+        App.closeModal();
+        if (onClose) await onClose();
+        return;
+      }
+      const activeId = state.selectedBuiltIn;
+      if (!activeId) return;
+      const localPath = document.getElementById('tmpl-installer-path')?.value?.trim() || '';
+      if (!localPath) {
+        App.toast('Selecciona un instalador primero', 'warning');
+        return;
+      }
+      const btn = document.getElementById('btn-save-tmpl-installer');
+      const statusDiv = document.getElementById('tmpl-installer-status');
+      const showStatus = (msg, color) => {
+        if (!statusDiv) return;
+        statusDiv.style.display = 'block';
+        statusDiv.style.background = color === 'error' ? 'rgba(239,68,68,0.1)' : color === 'success' ? 'rgba(34,197,94,0.1)' : 'rgba(59,130,246,0.1)';
+        statusDiv.style.border = `1px solid ${color === 'error' ? 'rgba(239,68,68,0.3)' : color === 'success' ? 'rgba(34,197,94,0.3)' : 'rgba(59,130,246,0.3)'}`;
+        statusDiv.style.color = color === 'error' ? '#dc2626' : color === 'success' ? '#16a34a' : 'var(--text-primary)';
+        statusDiv.innerHTML = msg;
+      };
+      if (btn) { btn.disabled = true; btn.textContent = 'Copiando...'; }
+      showStatus('<span style="display:inline-flex;align-items:center;gap:8px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite;flex-shrink:0;"><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" opacity=".25"/><path d="M21 12a9 9 0 00-9-9"/></svg>Copiando instalador al share, espera un momento...</span>', 'info');
+      try {
+        const result = await window.api.templates.saveInstaller(activeId, localPath);
+        if (!result?.success) {
+          showStatus(`<span>✗ Error al copiar: ${result?.error || 'No se pudo copiar al share'}</span>`, 'error');
+          App.toast(`Error: ${result?.error || 'No se pudo copiar al share'}`, 'error');
+          return;
+        }
+        state.templateInstallers = { ...state.templateInstallers, [activeId]: result.sharePath };
+        await window.api.config.set({ templateInstallers: state.templateInstallers });
+        state.installerSaved = true;
+        App.toast('Instalador guardado en el share', 'success');
+        this.renderTemplateManager(state, onClose);
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Guardar instalador'; }
+      }
     });
 
     document.getElementById('btn-add-template-arg')?.addEventListener('click', () => {
@@ -3708,22 +4022,7 @@ const AppsPage = {
       input.addEventListener('change', () => this.refreshTemplateDraftPreview());
     });
 
-    document.querySelectorAll('.tmpl-file-row [data-field="storageKind"]').forEach(input => {
-      input.addEventListener('change', () => {
-        state.draft = this.readTemplateDraftFromDom(state);
-        const row = input.closest('.tmpl-file-row');
-        const index = Number(row?.dataset.index);
-        if (Number.isFinite(index) && state.draft.files[index]) {
-          const currentExtensions = String(state.draft.files[index].extensions || '').trim().toLowerCase();
-          if (state.draft.files[index].storageKind === 'installer' && (!currentExtensions || currentExtensions === 'xml')) {
-            state.draft.files[index].extensions = 'exe,msi,ps1';
-          } else if (state.draft.files[index].storageKind !== 'installer' && !currentExtensions) {
-            state.draft.files[index].extensions = 'xml';
-          }
-        }
-        this.renderTemplateManager(state, onClose);
-      });
-    });
+    // storageKind is now always 'file' — no change handler needed
 
     this.refreshTemplateDraftPreview();
 
@@ -3792,6 +4091,25 @@ const AppsPage = {
         return;
       }
 
+      // Save pre-configured installer (copy to share if local path selected)
+      const installerInputPath = document.getElementById('tmpl-installer-path')?.value?.trim() || '';
+      if (installerInputPath) {
+        const currentSharePath = state.templateInstallers[saved.id] || '';
+        const isAlreadyOnShare = installerInputPath === currentSharePath;
+        if (!isAlreadyOnShare) {
+          try {
+            const result = await window.api.templates.saveInstaller(saved.id, installerInputPath);
+            if (result?.success) {
+              state.templateInstallers = { ...state.templateInstallers, [saved.id]: result.sharePath };
+            }
+          } catch (e) { /* non-fatal */ }
+        }
+      } else {
+        state.templateInstallers = { ...state.templateInstallers };
+        delete state.templateInstallers[saved.id];
+      }
+      await window.api.config.set({ templateInstallers: state.templateInstallers });
+
       state.templates = await window.api.templates.getAll();
       state.selectedId = saved.id;
       state.draft = this.cloneTemplateDraft(saved);
@@ -3802,10 +4120,20 @@ const AppsPage = {
   },
 
   async openTemplateManager(onClose = null) {
-    const templates = await window.api.templates.getAll().catch(() => []);
+    const [templates, config, allTemplates] = await Promise.all([
+      window.api.templates.getAll().catch(() => []),
+      window.api.config.get().catch(() => ({})),
+      window.api.scripts.getTemplates().catch(() => [])
+    ]);
+    const builtInTemplates = allTemplates.filter(t => !t.isUserDefined && !t.noInstaller && t.id !== 'generic' && t.id !== 'custom' && t.id !== 'office');
     const state = {
       templates,
+      builtInTemplates,
+      templateInstallers: config.templateInstallers || {},
       selectedId: null,
+      selectedBuiltIn: null,
+      systemExpanded: false,
+      installerSaved: false,
       draft: this.createEmptyTemplateDraft(),
       deleteConfirm: false,
       deleteUsageCount: 0

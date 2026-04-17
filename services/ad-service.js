@@ -385,6 +385,30 @@ const adService = {
     }
   },
 
+  async getGPOLinkCounts() {
+    try {
+      const config = require('./config').getConfig();
+      const json = await runPowerShell(
+        `Import-Module ActiveDirectory; Import-Module GroupPolicy; ${dcSnippet(config.preferredDC)};
+$ous = Get-ADOrganizationalUnit -Filter * -Properties gPLink -Server $adServer
+$map = @{}
+foreach ($ou in $ous) {
+  if ($ou.gPLink) {
+    [regex]::Matches($ou.gPLink, '\\{([^}]+)\\}') | ForEach-Object {
+      $g = $_.Groups[1].Value.ToLower()
+      if ($map.ContainsKey($g)) { $map[$g]++ } else { $map[$g] = 1 }
+    }
+  }
+}
+$map | ConvertTo-Json -Compress`
+      );
+      const parsed = JSON.parse(json || '{}');
+      return { success: true, data: parsed };
+    } catch (err) {
+      return { success: false, error: err.message, data: {} };
+    }
+  },
+
   async checkGPOConflicts(ouDN) {
     try {
       const config = require('./config').getConfig();

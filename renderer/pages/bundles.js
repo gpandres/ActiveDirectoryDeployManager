@@ -9,6 +9,7 @@ const BundlesPage = {
   _wizardOpening: false,       // prevents double-click opening multiple wizards
   _deployingIds: new Set(),    // prevents concurrent deploy of the same bundle
   _viewMode: 'grid',
+  _wizOuTree: [],
 
   async render(container) {
     this.apps = await window.api.apps.getAll();
@@ -56,7 +57,7 @@ const BundlesPage = {
           </div>
           <div style="display:flex; align-items:center; gap:var(--space-sm); flex:1; justify-content:flex-end;">
             <label class="checkbox-wrapper" style="margin-right: 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
-              <input type="checkbox" class="checkbox-select" id="select-all-bundles" style="position:static" onchange="BundlesPage.toggleSelectAll(this.checked)">
+              <input type="checkbox" id="select-all-bundles" onchange="BundlesPage.toggleSelectAll(this.checked)">
               <span style="font-size:var(--font-sm); color:var(--text-secondary);">${t('apps.selectAll') || 'Seleccionar Todo'}</span>
             </label>
             <div style="position:relative; min-width:180px; max-width:280px; flex:1;">
@@ -267,6 +268,39 @@ const BundlesPage = {
     `).join('');
   },
 
+  renderDeleteTargetCard({ icon, title, subtitle = '' }) {
+    return `
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-tertiary);border-radius:6px;">
+        <span style="font-size:18px;">${icon}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.esc(title)}</div>
+          ${subtitle ? `<div style="font-size:11px;color:var(--text-muted);">${subtitle}</div>` : ''}
+        </div>
+      </div>`;
+  },
+
+  renderDeleteOptionCard({ id, checked = false, title, hint = '' }) {
+    return `
+      <label class="checkbox-wrapper checkbox-panel" style="background:var(--bg-secondary);">
+        <input type="checkbox" id="${id}" ${checked ? 'checked' : ''}>
+        <span class="checkbox-panel__content">
+          <span class="checkbox-panel__title" style="font-size:13px;">${title}</span>
+          ${hint ? `<span class="checkbox-panel__hint" style="font-size:11px;">${hint}</span>` : ''}
+        </span>
+      </label>`;
+  },
+
+  renderDeleteFooter(confirmId, confirmLabel) {
+    return `
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button class="btn btn-secondary" id="${confirmId}-cancel">${t('common.cancel')}</button>
+        <button class="btn btn-danger" id="${confirmId}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          ${confirmLabel}
+        </button>
+      </div>`;
+  },
+
   // ─── Bulk Logic ────────────────────────────────────
   toggleSelect(id, checked) {
     if (checked) this.selectedIds.add(id);
@@ -276,7 +310,7 @@ const BundlesPage = {
 
   clearSelection() {
     this.selectedIds.clear();
-    document.querySelectorAll('.checkbox-select').forEach(cb => cb.checked = false);
+    document.querySelectorAll('.bundle-card-cb').forEach(cb => cb.checked = false);
     const selectAll = document.getElementById('select-all-bundles');
     if (selectAll) selectAll.checked = false;
     this.updateBulkBar();
@@ -519,9 +553,11 @@ const BundlesPage = {
     );
 
     let flatOUs = [];
+    let ouTree = [];
     try {
       const ouResult = await window.api.ad.getOUs();
       if (ouResult.success && ouResult.data) {
+        ouTree = ouResult.data;
         flatOUs = this._flattenOUs(ouResult.data);
       }
     } catch (e) {
@@ -581,10 +617,10 @@ const BundlesPage = {
             ${this.apps.map((app, i) => {
               const isSelected = state.selectedApps.some(s => s.appId === app.id);
               return `
-                <label class="checkbox-wrapper" style="padding:8px;border-radius:var(--radius-sm);${isSelected ? 'background:var(--accent-primary-dim)' : ''}">
+                <label class="checkbox-wrapper checkbox-panel" style="align-items:center;margin-bottom:8px;${isSelected ? 'background:var(--accent-primary-dim);border-color:var(--accent-primary);' : ''}">
                   <input type="checkbox" data-app-id="${app.id}" data-app-name="${this.esc(app.name)}"
                     ${isSelected ? 'checked' : ''} onchange="BundlesPage._toggleApp(this)">
-                  <span>${this.esc(app.name)}</span>
+                  <span style="flex:1;min-width:0;">${this.esc(app.name)}</span>
                   <span class="badge badge-primary" style="margin-left:auto">${this.esc(app.template)}</span>
                   <span class="badge badge-info">v${this.esc(app.version || '1.0.0')}</span>
                 </label>
@@ -596,7 +632,7 @@ const BundlesPage = {
       } else if (state.step === 3) {
         body += `
           <div class="form-group">
-            <label class="checkbox-wrapper">
+            <label class="checkbox-wrapper checkbox-panel">
               <input type="checkbox" id="wiz-bundle-notify" ${state.notifyUser ? 'checked' : ''}>
               <span>🔔 ${t('bundles.notifyUserLabel')}</span>
             </label>
@@ -605,8 +641,8 @@ const BundlesPage = {
           <hr style="border-color:var(--border-color);margin:16px 0">
 
           <div class="form-group mb-md">
-            <label class="flex items-center gap-sm" style="cursor:pointer; padding: 12px; background: rgba(30,144,255,0.1); border-radius: 6px; border: 1px solid rgba(30,144,255,0.2);">
-              <input type="checkbox" id="wiz-bundle-create-gpo" ${state.createGPO ? 'checked' : ''} style="width:16px;height:16px;">
+            <label class="checkbox-wrapper checkbox-panel checkbox-panel--accent">
+              <input type="checkbox" id="wiz-bundle-create-gpo" ${state.createGPO ? 'checked' : ''}>
               <span style="font-weight:600;color:var(--primary-color)">✨ ${t('bundles.createGpo')}</span>
             </label>
           </div>
@@ -616,24 +652,20 @@ const BundlesPage = {
             <input class="form-input" id="wiz-bundle-gpo" value="${this.esc(state.gpoName)}" placeholder="Deploy_Bundle_Pack">
           </div>
 
-          ${flatOUs.length > 0 ? `
-            <div class="form-group">
-              <label class="form-label">${t('apps.selectOus')}</label>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <select class="form-select" id="wiz-bundle-ou-option" style="flex:1;">
-                  <option value="">${t('bundles.cancelOption')}</option>
-                  ${flatOUs.map(ou => `<option value="${this.esc(ou.dn)}">${'  '.repeat(ou.depth)}${ou.depth > 0 ? '↳ ' : ''}${this.esc(ou.name)}</option>`).join('')}
-                </select>
-                <button type="button" class="btn btn-secondary btn-sm" id="btn-bundle-ou-add">
-                  + ${t('common.add') || 'Agregar'}
-                </button>
-              </div>
+          <div class="form-group">
+            <label class="form-label">${t('apps.selectOus')}</label>
+            <div style="position:relative;margin-bottom:8px;">
+              <svg style="position:absolute;left:9px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.4" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" class="form-input" id="wiz-bundle-ou-search" placeholder="${t('ous.searchOUs')}" autocomplete="off" style="padding-left:32px;">
+            </div>
+            <div id="wiz-bundle-ou-tree" style="max-height:190px;overflow-y:auto;border:1px solid var(--border-color);border-radius:6px;padding:4px 6px;background:var(--bg-secondary);">
+              ${this._wizOuTree?.length ? App.ouPickerTreeHTML(this._wizOuTree, '', state.selectedOUs || []) : `<p style="padding:8px;font-size:13px;color:var(--text-muted);">${t('ous.noOusFound')}</p>`}
+            </div>
               <div id="wiz-bundle-ou-selected" style="margin-top:8px;display:flex;flex-wrap:wrap;align-items:center;gap:6px;">
                 ${this.renderOUChips(state.selectedOUs || [])}
               </div>
               <input type="hidden" id="wiz-bundle-ou" value="${JSON.stringify(state.selectedOUs || []).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">
             </div>
-          ` : ''}
 
           <div style="margin-top:16px;padding:12px;background:var(--bg-input);border-radius:var(--radius-sm)">
             <div style="font-size:var(--font-sm);color:var(--text-muted);margin-bottom:8px">${t('apps.reviewSummary')}:</div>
@@ -657,13 +689,14 @@ const BundlesPage = {
       `);
 
       if (state.step === 3) {
-        this.bindBundleOUSelector(state);
+        this.bindBundleOUTree(state);
       }
     };
 
     this._wizState = state;
     this._wizRender = renderWizard;
     this._wizOus = flatOUs;
+    this._wizOuTree = ouTree;
     App._modalLocked = false;  // unlock before rendering the interactive wizard
     renderWizard();
     // Release guard — wizard modal is now open and controls itself
@@ -750,6 +783,96 @@ const BundlesPage = {
     sync();
   },
 
+  bindBundleOUTree(state) {
+    const searchInput = document.getElementById('wiz-bundle-ou-search');
+    const treeContainer = document.getElementById('wiz-bundle-ou-tree');
+    const hiddenEl = document.getElementById('wiz-bundle-ou');
+    const selectedEl = document.getElementById('wiz-bundle-ou-selected');
+    if (!treeContainer || !hiddenEl || !selectedEl) return;
+
+    const renderSelectedDisplay = () => {
+      hiddenEl.value = JSON.stringify(state.selectedOUs || []);
+      const chips = this.renderOUChips(state.selectedOUs || []);
+      const clearBtn = (state.selectedOUs || []).length > 0
+        ? `<button type="button" class="btn btn-ghost btn-sm" id="btn-bundle-ou-clear" style="font-size:11px;margin-left:4px;opacity:.7;">${t('common.clear') || 'Borrar selección'}</button>`
+        : '';
+      selectedEl.innerHTML = chips + clearBtn;
+
+      selectedEl.querySelectorAll('.btn-remove-bundle-ou').forEach(btn => {
+        btn.onclick = (e) => {
+          e.preventDefault();
+          const dn = btn.dataset.dn;
+          state.selectedOUs = this.normalizeOUDNs((state.selectedOUs || []).filter(item => item !== dn));
+          state.ouDN = state.selectedOUs[0] || '';
+          hiddenEl.value = JSON.stringify(state.selectedOUs || []);
+          treeContainer.innerHTML = App.ouPickerTreeHTML(
+            this._wizOuTree || [], searchInput?.value || '', state.selectedOUs || []
+          );
+          bindNodes();
+          renderSelectedDisplay();
+        };
+      });
+
+      const clearAllBtn = document.getElementById('btn-bundle-ou-clear');
+      if (clearAllBtn) {
+        clearAllBtn.onclick = (e) => {
+          e.preventDefault();
+          state.selectedOUs = [];
+          state.ouDN = '';
+          hiddenEl.value = '[]';
+          treeContainer.innerHTML = App.ouPickerTreeHTML(this._wizOuTree || [], searchInput?.value || '', []);
+          bindNodes();
+          renderSelectedDisplay();
+        };
+      }
+    };
+
+    const bindNodes = () => {
+      treeContainer.querySelectorAll('.tree-toggle:not(.empty)').forEach(btn => {
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          const li = btn.closest('.tree-item');
+          const children = li?.querySelector('.tree-children');
+          if (children) {
+            children.classList.toggle('collapsed');
+            btn.classList.toggle('expanded');
+          }
+        };
+      });
+
+      treeContainer.querySelectorAll('.tree-node').forEach(node => {
+        node.onclick = (e) => {
+          if (e.target.closest('.tree-toggle')) return;
+          const dn = node.dataset.dn;
+          const current = Array.isArray(state.selectedOUs) ? state.selectedOUs : [];
+          state.selectedOUs = current.includes(dn)
+            ? current.filter(item => item !== dn)
+            : [...current, dn];
+          state.selectedOUs = this.normalizeOUDNs(state.selectedOUs);
+          state.ouDN = state.selectedOUs[0] || '';
+          hiddenEl.value = JSON.stringify(state.selectedOUs || []);
+          treeContainer.innerHTML = App.ouPickerTreeHTML(
+            this._wizOuTree || [], searchInput?.value || '', state.selectedOUs || []
+          );
+          bindNodes();
+          renderSelectedDisplay();
+        };
+      });
+    };
+
+    bindNodes();
+    renderSelectedDisplay();
+
+    if (searchInput) {
+      searchInput.oninput = () => {
+        treeContainer.innerHTML = App.ouPickerTreeHTML(
+          this._wizOuTree || [], searchInput.value, state.selectedOUs || []
+        );
+        bindNodes();
+      };
+    }
+  },
+
   _toggleApp(checkbox) {
     const id = checkbox.dataset.appId;
     const name = checkbox.dataset.appName;
@@ -833,34 +956,51 @@ const BundlesPage = {
     if (!bundle) return;
 
     const hasGPO = !!bundle.gpoName;
-
-    App.openModal(t('apps.deleteConfirm'), `
-      <p>${t('bundles.deleteBundleMsg').replace('{bundle}', `<strong>${this.esc(bundle.name)}</strong>`)}</p>
-      <p style="color:var(--text-muted);font-size:var(--font-sm);margin-top:8px">${t('bundles.individualAppsNotDeleted')}</p>
-      ${hasGPO ? `
-        <div class="form-group mt-md" style="background: rgba(255,50,50,0.08); border: 1px solid rgba(255,50,50,0.25); border-radius:8px; padding:12px;">
-          <p style="margin:0 0 8px 0; color:var(--danger-color); font-weight:600;">🗑️ GPO: "${this.esc(bundle.gpoName)}"</p>
-          ${this.getBundleOUs(bundle).length > 0 ? `
-            <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-              <input type="checkbox" id="chk-bdel-unlink" checked style="width:auto; cursor:pointer;">
-              <label for="chk-bdel-unlink" style="margin:0; cursor:pointer; font-size:14px; color:var(--text-secondary);">${t('apps.cleanGpoOption')}</label>
-            </div>
-          ` : ''}
-          <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-            <input type="checkbox" id="chk-bdel-clean" checked style="width:auto; cursor:pointer;">
-            <label for="chk-bdel-clean" style="margin:0; cursor:pointer; font-size:14px; color:var(--text-secondary);">${t('apps.cleanSysvolOption')}</label>
-          </div>
-          <div style="display:flex; align-items:center; gap:8px;">
-            <input type="checkbox" id="chk-bdel-gpo" checked style="width:auto; cursor:pointer;">
-            <label for="chk-bdel-gpo" style="margin:0; cursor:pointer; font-size:14px; color:var(--text-secondary);">${t('apps.deleteGpoOption')}</label>
+    const bundleOUs = this.getBundleOUs(bundle);
+    const body = `
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div style="padding:10px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;">
+          <div style="font-size:13px;font-weight:700;color:var(--accent-danger);">${t('apps.deleteConfirm')}</div>
+          <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">
+            ${t('bundles.deleteBundleMsg').replace('{bundle}', `<strong>${this.esc(bundle.name)}</strong>`)}
           </div>
         </div>
-      ` : ''}
-    `, `
-      <button class="btn btn-secondary" onclick="App.closeModal()">${t('common.cancel')}</button>
-      <button class="btn btn-danger" id="btn-bundle-confirm-delete">${t('common.delete')}</button>
-    `);
+        ${this.renderDeleteTargetCard({
+          icon: '📦',
+          title: bundle.name,
+          subtitle: bundle.gpoName ? `GPO: ${this.esc(bundle.gpoName)}` : ''
+        })}
+        <div style="padding:10px 14px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;font-size:12px;color:var(--text-muted);">
+          ${t('bundles.individualAppsNotDeleted')}
+        </div>
+        ${hasGPO && bundleOUs.length > 0 ? this.renderDeleteOptionCard({
+          id: 'chk-bdel-unlink',
+          checked: true,
+          title: t('apps.cleanGpoOption'),
+          hint: 'Quita la vinculacion de la GPO en las OUs asociadas'
+        }) : ''}
+        ${hasGPO ? this.renderDeleteOptionCard({
+          id: 'chk-bdel-clean',
+          checked: true,
+          title: t('apps.cleanSysvolOption'),
+          hint: 'Elimina el script de inicio del bundle en SYSVOL'
+        }) : ''}
+        ${hasGPO ? this.renderDeleteOptionCard({
+          id: 'chk-bdel-gpo',
+          checked: true,
+          title: t('apps.deleteGpoOption'),
+          hint: 'Borra la GPO de Active Directory si ya no se necesita'
+        }) : ''}
+      </div>
+    `;
 
+    App.openModal(
+      t('apps.deleteConfirm'),
+      body,
+      this.renderDeleteFooter('btn-bundle-confirm-delete', t('common.delete'))
+    );
+
+    document.getElementById('btn-bundle-confirm-delete-cancel')?.addEventListener('click', () => App.closeModal());
     document.getElementById('btn-bundle-confirm-delete').addEventListener('click', async () => {
       const btn = document.getElementById('btn-bundle-confirm-delete');
       btn.style.width = btn.offsetWidth + 'px';
@@ -874,8 +1014,8 @@ const BundlesPage = {
           const cleanScript = document.getElementById('chk-bdel-clean')?.checked ?? false;
           const deleteGPO = document.getElementById('chk-bdel-gpo')?.checked ?? false;
 
-          if (unlinkGPO && this.getBundleOUs(bundle).length > 0) {
-            for (const ouDN of this.getBundleOUs(bundle)) {
+          if (unlinkGPO && bundleOUs.length > 0) {
+            for (const ouDN of bundleOUs) {
               await window.api.ad.unlinkGPOfromOU(bundle.gpoName, ouDN);
             }
           }
@@ -958,7 +1098,9 @@ const BundlesPage = {
         App.toast(t('apps.deploySuccess'), 'success');
         App.navigate('bundles');
       } else {
-        App.toast(t('common.error') + ': ' + result.error, 'error');
+        if (App.isShareError(result.error)) { App.handleShareError(); } else {
+          App.toast(t('common.error') + ': ' + result.error, 'error');
+        }
       }
     } catch (err) {
       App.toast(t('common.error') + ': ' + err.message, 'error');

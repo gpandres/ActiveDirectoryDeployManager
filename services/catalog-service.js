@@ -19,7 +19,7 @@ const CURATED_CATALOG = [
   {
     id: 'firefox', name: 'Mozilla Firefox', wingetId: 'Mozilla.Firefox',
     category: 'Browsers', icon: '🦊', defaultVersion: '127.0',
-    versionCheck: { method: 'winget' }
+    versionCheck: { method: 'winget' },
   },
   {
     id: 'microsoft-edge', name: 'Microsoft Edge', wingetId: 'Microsoft.Edge',
@@ -49,7 +49,7 @@ const CURATED_CATALOG = [
     versionCheck: { method: 'winget' }
   },
   {
-    id: 'pdf24', name: 'PDF24 Creator', wingetId: 'geekSoftware.PDF24Creator',
+    id: 'pdf24', name: 'PDF24 Creator', wingetId: 'geeksoftwareGmbH.PDF24Creator',
     category: 'Tools', icon: '📋', defaultVersion: '11.20',
     versionCheck: { method: 'winget' }
   },
@@ -77,6 +77,7 @@ const CURATED_CATALOG = [
   // ─── Conectividad ─────────────────────────────────────────
   {
     id: 'filezilla', name: 'FileZilla', wingetId: 'TimKosse.FileZilla.Client',
+    catalogDisabled: true,
     category: 'Connectivity', icon: '📁', defaultVersion: '3.67',
     versionCheck: { method: 'winget' }
   },
@@ -123,7 +124,7 @@ const CURATED_CATALOG = [
     versionCheck: { method: 'winget' }
   },
   {
-    id: 'whatsapp', name: 'WhatsApp', wingetId: 'WhatsApp.WhatsApp',
+    id: 'whatsapp', name: 'WhatsApp', wingetId: '9NKSQGP7F2NH', wingetSource: 'msstore',
     category: 'Communication', icon: '📱', defaultVersion: '2.2',
     versionCheck: { method: 'winget' }
   },
@@ -236,7 +237,33 @@ function checkVersionGitHub(repo) {
   });
 }
 
-const WINGET_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9+._-]*(\.[A-Za-z0-9][A-Za-z0-9+._-]*)+$/;
+const DEFAULT_WINGET_SOURCE = 'winget';
+const WINGET_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9+._-]{0,255}$/;
+const packageResolutionCache = new Map();
+
+function sanitizeWingetSource(source) {
+  if (typeof source !== 'string') return '';
+  const normalized = source.trim().toLowerCase();
+  return /^[a-z0-9._-]{1,64}$/.test(normalized) ? normalized : '';
+}
+
+function normalizePackageLabel(value) {
+  if (typeof value !== 'string') return '';
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function getVisibleCuratedCatalog() {
+  return CURATED_CATALOG
+    .filter(item => item?.catalogDisabled !== true)
+    .map(item => ({
+      ...item,
+      wingetSource: sanitizeWingetSource(item?.wingetSource) || DEFAULT_WINGET_SOURCE
+    }));
+}
 
 function isValidWingetId(wingetId) {
   return typeof wingetId === 'string'
@@ -267,24 +294,237 @@ function runWinget(args, timeout) {
   });
 }
 
-function checkVersionWinget(wingetId) {
-  return new Promise((resolve) => {
-    if (!isValidWingetId(wingetId)) {
-      resolve(null);
-      return;
-    }
+function parseWingetShowOutput(stdout) {
+  if (!stdout || !stdout.trim()) return null;
+  const clean = stdout.replace(/\x1B\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
+  if (/No package found|No se encontro|No se encontró/i.test(clean)) return null;
 
-    runWinget(['show', '--id', wingetId.trim(), '--source', 'winget', '--accept-source-agreements'], 15000)
-      .then(stdout => {
-        if (!stdout) { resolve(null); return; }
-        const match = stdout.match(/Version\s*:\s*([^\r\n]+)/i);
-        if (match) {
-          resolve(match[1].trim() || null);
-        } else {
-          resolve(null);
-        }
-      });
+  const versionMatch = clean.match(/^(?:Version|Versi[oó]n)\s*:\s*([^\n]+)/im);
+  const sourceMatch = clean.match(/^(?:Source|Origen)\s*:\s*([^\n]+)/im);
+
+  return {
+    version: versionMatch?.[1]?.trim() || null,
+    source: sanitizeWingetSource(sourceMatch?.[1] || '')
+  };
+}
+
+function fetchWingetManifest(wingetId, wingetSource) {
+  if (!isValidWingetId(wingetId)) return Promise.resolve(null);
+
+  const args = ['show', '--id', wingetId.trim(), '--accept-source-agreements'];
+  const normalizedSource = sanitizeWingetSource(wingetSource);
+  if (normalizedSource) args.push('--source', normalizedSource);
+
+  return runWinget(args, 15000).then(stdout => parseWingetShowOutput(stdout));
+}
+
+function checkVersionWinget(wingetId, wingetSource) {
+  if (!isValidWingetId(wingetId)) return Promise.resolve(null);
+  return fetchWingetManifest(wingetId, wingetSource)
+    .then(manifest => manifest?.version || null);
+}
+
+function isLikelyMsStoreId(token) {
+  return typeof token === 'string'
+    && /^[A-Z0-9]{10,16}$/i.test(token)
+    && /\d/.test(token);
+}
+
+function isLikelyWingetSearchId(token) {
+  if (!isValidWingetId(token)) return false;
+  if (isLikelyWingetVersion(token)) return false;
+  return token.includes('.')
+    || token.includes('-')
+    || token.includes('_')
+    || token.includes('+')
+    || isLikelyMsStoreId(token);
+}
+
+function isLikelyWingetVersion(token) {
+  return typeof token === 'string'
+    && (/^unknown$/i.test(token) || /^[vV]?\d[\w.+-]*$/.test(token));
+}
+
+function parseWingetSearchResultLine(line) {
+  const trimmed = String(line || '').trim();
+  if (!trimmed) return null;
+
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  if (tokens.length < 3) return null;
+
+  const wingetSource = sanitizeWingetSource(tokens[tokens.length - 1]);
+  if (!wingetSource) return null;
+
+  const bodyTokens = tokens.slice(0, -1);
+  let idIndex = -1;
+  for (let i = bodyTokens.length - 1; i >= 0; i -= 1) {
+    if (isLikelyWingetSearchId(bodyTokens[i])) {
+      idIndex = i;
+      break;
+    }
+  }
+
+  if (idIndex <= 0) return null;
+
+  const wingetId = bodyTokens[idIndex];
+  const name = bodyTokens.slice(0, idIndex).join(' ').trim() || wingetId;
+  const tailTokens = bodyTokens.slice(idIndex + 1);
+  const version = tailTokens[0] && isLikelyWingetVersion(tailTokens[0]) && !/^unknown$/i.test(tailTokens[0])
+    ? tailTokens[0]
+    : '';
+  const match = (version ? tailTokens.slice(1) : tailTokens).join(' ').trim();
+
+  return {
+    id: wingetId.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+    name,
+    wingetId,
+    wingetSource,
+    version,
+    match,
+    category: 'Winget',
+    icon: 'ðŸ“¦',
+    source: 'winget-cli'
+  };
+}
+
+function parseWingetSearchResults(stdout) {
+  if (!stdout || !stdout.trim()) return [];
+  const clean = stdout.replace(/\x1B\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
+  const lines = clean.split('\n').filter(line => line.trim());
+  const sepIdx = lines.findIndex(line => /^[\-─]{3,}/.test(line.trim()));
+  if (sepIdx < 1) return [];
+
+  return lines.slice(sepIdx + 1)
+    .map(line => {
+      const cols = line.split(/\s{2,}/).map(part => part.trim()).filter(Boolean);
+      if (cols.length < 2) return null;
+
+      const wingetId = cols[1];
+      if (!isValidWingetId(wingetId)) return null;
+
+      const wingetSource = sanitizeWingetSource(cols[cols.length - 1]) || DEFAULT_WINGET_SOURCE;
+      const version = cols[2] && !/^unknown$/i.test(cols[2]) ? cols[2] : '';
+      const match = wingetSource ? cols.slice(3, -1).join(' ') : cols.slice(3).join(' ');
+
+      return {
+        id: wingetId.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        name: cols[0] || wingetId,
+        wingetId,
+        wingetSource,
+        version,
+        match,
+        category: 'Winget',
+        icon: '📦',
+        source: 'winget-cli'
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 30);
+}
+
+function pickPreferredPackageCandidate(results, reference) {
+  if (!Array.isArray(results) || results.length === 0) return null;
+
+  const preferredId = typeof reference?.wingetId === 'string' ? reference.wingetId.trim().toLowerCase() : '';
+  const preferredSource = sanitizeWingetSource(reference?.wingetSource);
+  const preferredName = normalizePackageLabel(reference?.name || '');
+
+  if (preferredId) {
+    const exactSameSource = results.find(item =>
+      item.wingetId.toLowerCase() === preferredId
+      && (!preferredSource || item.wingetSource === preferredSource)
+    );
+    if (exactSameSource) return exactSameSource;
+
+    const exactAnySource = results.find(item => item.wingetId.toLowerCase() === preferredId);
+    if (exactAnySource) return exactAnySource;
+  }
+
+  const exactNameMatches = results.filter(item => normalizePackageLabel(item.name) === preferredName);
+  if (exactNameMatches.length === 0) return null;
+
+  const sourcePriority = [preferredSource, DEFAULT_WINGET_SOURCE, 'msstore'].filter(Boolean);
+  exactNameMatches.sort((left, right) => {
+    const leftRank = sourcePriority.indexOf(left.wingetSource);
+    const rightRank = sourcePriority.indexOf(right.wingetSource);
+    return (leftRank === -1 ? Number.MAX_SAFE_INTEGER : leftRank)
+      - (rightRank === -1 ? Number.MAX_SAFE_INTEGER : rightRank);
   });
+
+  return exactNameMatches[0] || null;
+}
+
+async function resolvePackageReference(reference) {
+  const cacheKey = JSON.stringify({
+    id: typeof reference?.wingetId === 'string' ? reference.wingetId.trim() : '',
+    source: sanitizeWingetSource(reference?.wingetSource),
+    name: typeof reference?.name === 'string' ? reference.name.trim().toLowerCase() : ''
+  });
+  if (packageResolutionCache.has(cacheKey)) {
+    return { ...packageResolutionCache.get(cacheKey) };
+  }
+
+  const normalizedId = typeof reference?.wingetId === 'string' ? reference.wingetId.trim() : '';
+  const normalizedSource = sanitizeWingetSource(reference?.wingetSource) || DEFAULT_WINGET_SOURCE;
+  const normalizedName = normalizeWingetQuery(reference?.name || '');
+
+  let resolved = {
+    wingetId: normalizedId,
+    wingetSource: normalizedSource,
+    latestVersion: null,
+    name: reference?.name || '',
+    available: false
+  };
+
+  if (isValidWingetId(normalizedId)) {
+    const manifest = await fetchWingetManifest(normalizedId, normalizedSource);
+    if (manifest) {
+      resolved = {
+        wingetId: normalizedId,
+        wingetSource: manifest.source || normalizedSource,
+        latestVersion: manifest.version || null,
+        name: reference?.name || '',
+        available: true
+      };
+      packageResolutionCache.set(cacheKey, resolved);
+      return { ...resolved };
+    }
+  }
+
+  if (normalizedName.length >= 2) {
+    const searchResults = await searchWingetCLI(normalizedName);
+    const candidate = pickPreferredPackageCandidate(searchResults, reference);
+    if (candidate) {
+      resolved = {
+        wingetId: candidate.wingetId,
+        wingetSource: candidate.wingetSource || normalizedSource,
+        latestVersion: candidate.version || null,
+        name: candidate.name || reference?.name || '',
+        available: true
+      };
+    }
+  }
+
+  packageResolutionCache.set(cacheKey, resolved);
+  return { ...resolved };
+}
+
+async function resolveCatalogWingetItem(item) {
+  if (item?.versionCheck?.method !== 'winget') return { ...item };
+
+  const resolved = await resolvePackageReference(item);
+  if (!resolved?.available || !resolved.wingetId) return { ...item };
+
+  return {
+    ...item,
+    name: resolved.name || item.name,
+    wingetId: resolved.wingetId,
+    wingetSource: resolved.wingetSource || item.wingetSource || DEFAULT_WINGET_SOURCE
+  };
+}
+
+async function resolveCuratedCatalog() {
+  return getVisibleCuratedCatalog().map(item => ({ ...item }));
 }
 
 // ─── CLI Winget Search ───────────────────────────────────────
@@ -295,8 +535,10 @@ function searchWingetCLI(query) {
     const safeQuery = normalizeWingetQuery(query);
     if (!safeQuery || safeQuery.length < 2) { resolve([]); return; }
 
-    runWinget(['search', '--query', safeQuery, '--source', 'winget', '--accept-source-agreements'], 25000)
+    runWinget(['search', '--query', safeQuery, '--accept-source-agreements'], 25000)
       .then(stdout => {
+        resolve(parseWingetSearchResults(stdout));
+        return;
     // Note: --disable-interactivity was added in winget 1.5 — omit for compatibility
 
         if (!stdout || !stdout.trim()) { resolve([]); return; }
@@ -344,14 +586,92 @@ function searchWingetCLI(query) {
 
 // ─── Main Service ───────────────────────────────────────────
 
+// Clean parser overrides kept in ASCII so the catalog remains stable even if
+// this file has legacy mojibake in comments or older helper implementations.
+function parseWingetShowOutput(stdout) {
+  if (!stdout || !stdout.trim()) return null;
+
+  const clean = stdout.replace(/\x1B\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
+  if (/No package found|No se encontr/i.test(clean)) return null;
+
+  const versionMatch = clean.match(/^(?:Version|Versi.n)\s*:\s*([^\n]+)/im);
+  const sourceMatch = clean.match(/^(?:Source|Origen)\s*:\s*([^\n]+)/im);
+
+  return {
+    version: versionMatch?.[1]?.trim() || null,
+    source: sanitizeWingetSource(sourceMatch?.[1] || '')
+  };
+}
+
+function parseWingetSearchResults(stdout) {
+  if (!stdout || !stdout.trim()) return [];
+
+  const clean = stdout.replace(/\x1B\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
+  const lines = clean.split('\n').filter(line => line.trim());
+  const sepIdx = lines.findIndex(line => /^[-\u2500-\u257f]{3,}/.test(line.trim()));
+  if (sepIdx < 1) return [];
+
+  return lines.slice(sepIdx + 1)
+    .map(line => {
+      const cols = line.split(/\s{2,}/).map(part => part.trim()).filter(Boolean);
+      if (cols.length < 2) return null;
+
+      const wingetId = cols[1];
+      if (!isValidWingetId(wingetId)) return null;
+
+      const wingetSource = sanitizeWingetSource(cols[cols.length - 1]) || DEFAULT_WINGET_SOURCE;
+      const version = cols[2] && !/^unknown$/i.test(cols[2]) ? cols[2] : '';
+      const match = wingetSource ? cols.slice(3, -1).join(' ') : cols.slice(3).join(' ');
+
+      return {
+        id: wingetId.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        name: cols[0] || wingetId,
+        wingetId,
+        wingetSource,
+        version,
+        match,
+        category: 'Winget',
+        icon: '📦',
+        source: 'winget-cli'
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 30);
+}
+
+function searchWingetCLI(query) {
+  const safeQuery = normalizeWingetQuery(query);
+  if (!safeQuery || safeQuery.length < 2) return Promise.resolve([]);
+
+  return runWinget(['search', '--query', safeQuery, '--accept-source-agreements'], 25000)
+    .then(stdout => parseWingetSearchResults(stdout));
+}
+
+// Final parser override: newer winget builds can collapse the spaces between
+// "Name", "Id", "Version" and "Source", so splitting on 2+ spaces drops valid
+// results like PDF24 or WhatsApp. Parse from the right-most source/id instead.
+function parseWingetSearchResults(stdout) {
+  if (!stdout || !stdout.trim()) return [];
+
+  const clean = stdout.replace(/\x1B\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
+  const lines = clean.split('\n').filter(line => line.trim());
+  const sepIdx = lines.findIndex(line => /^[-\u2500-\u257f]{3,}/.test(line.trim()));
+  if (sepIdx < 1) return [];
+
+  return lines.slice(sepIdx + 1)
+    .map(line => parseWingetSearchResultLine(line))
+    .filter(Boolean)
+    .slice(0, 30);
+}
+
 const catalogService = {
   /**
    * Returns the curated catalog + ODT data (for the app wizard and catalog page).
    * Backward-compatible with the old wingetService.getCatalog() shape.
    */
-  getCatalog() {
+  async getCatalog() {
     return {
-      catalog: CURATED_CATALOG,
+      catalog: await resolveCuratedCatalog(),
       odtProducts: ODT_PRODUCTS,
       odtApps: ODT_APPS,
       odtLanguages: ODT_LANGUAGES,
@@ -368,16 +688,27 @@ const catalogService = {
   async search(query, category) {
     const q = (query || '').toLowerCase().trim();
     const cat = category || 'Todo';
+    const visibleCatalog = await resolveCuratedCatalog();
 
     // 1. Filter curated catalog
-    let curated = CURATED_CATALOG.filter(item => {
+    let curated = visibleCatalog.filter(item => {
       const matchCat = cat === 'Todo' || item.category === cat;
       const matchQ = !q
         || item.name.toLowerCase().includes(q)
         || item.wingetId.toLowerCase().includes(q)
+        || (item.wingetSource || '').includes(q)
         || item.category.toLowerCase().includes(q);
       return matchCat && matchQ;
     }).map(item => ({ ...item, source: 'curated' }));
+
+    if (q.length >= 2) {
+      curated = await Promise.all(
+        curated.map(async item => ({
+          ...(await resolveCatalogWingetItem(item)),
+          source: 'curated'
+        }))
+      );
+    }
 
     // 2. If query is provided, also search via winget CLI for extended results
     let cliResults = [];
@@ -385,8 +716,10 @@ const catalogService = {
       try {
         cliResults = await searchWingetCLI(q);
         // Remove duplicates already present in curated
-        const curatedIds = new Set(curated.map(c => c.wingetId.toLowerCase()));
-        cliResults = cliResults.filter(r => !curatedIds.has((r.wingetId || '').toLowerCase()));
+        const curatedIds = new Set(curated.map(c => `${(c.wingetId || '').toLowerCase()}|${(c.wingetSource || DEFAULT_WINGET_SOURCE).toLowerCase()}`));
+        cliResults = cliResults.filter(r =>
+          !curatedIds.has(`${(r.wingetId || '').toLowerCase()}|${(r.wingetSource || DEFAULT_WINGET_SOURCE).toLowerCase()}`)
+        );
       } catch { /* winget not available — return curated only */ }
     }
 
@@ -399,27 +732,33 @@ const catalogService = {
    * @returns {Promise<Array<{id, wingetId, latestVersion}>>}
    */
   async checkVersions(catalogIds) {
+    const visibleCatalog = await resolveCuratedCatalog();
     const items = (catalogIds || [])
-      .map(id => CURATED_CATALOG.find(a => a.id === id))
+      .map(id => visibleCatalog.find(a => a.id === id))
       .filter(Boolean);
 
     const results = await Promise.allSettled(
       items.map(async (item) => {
         let latestVersion = null;
+        let resolvedItem = { ...item };
         try {
           if (item.versionCheck.method === 'github') {
             latestVersion = await checkVersionGitHub(item.versionCheck.repo);
           } else if (item.versionCheck.method === 'winget') {
-            latestVersion = await checkVersionWinget(item.wingetId);
+            resolvedItem = await resolveCatalogWingetItem(item);
+            latestVersion = resolvedItem.versionCheck?.method === 'winget'
+              ? (await checkVersionWinget(resolvedItem.wingetId, resolvedItem.wingetSource))
+              : null;
           }
         } catch { /* ignore individual failures */ }
         return {
-          id: item.id,
-          wingetId: item.wingetId,
-          name: item.name,
-          icon: item.icon,
-          catalogVersion: item.defaultVersion,
-          latestVersion: latestVersion || item.defaultVersion
+          id: resolvedItem.id,
+          wingetId: resolvedItem.wingetId,
+          wingetSource: resolvedItem.wingetSource || DEFAULT_WINGET_SOURCE,
+          name: resolvedItem.name,
+          icon: resolvedItem.icon,
+          catalogVersion: resolvedItem.defaultVersion,
+          latestVersion: latestVersion || resolvedItem.defaultVersion
         };
       })
     );
@@ -444,31 +783,53 @@ const catalogService = {
    * @param {string} wingetId
    * @returns {Promise<{wingetId, latestVersion}>}
    */
-  async checkSingle(wingetId) {
-    if (!isValidWingetId(wingetId)) {
-      return {
-        wingetId,
-        latestVersion: null
-      };
+  async checkSingle(wingetId, wingetSource, name) {
+    const safeId = typeof wingetId === 'string' ? wingetId.trim() : '';
+    const safeName = typeof name === 'string' ? name.trim() : '';
+    const safeNameNormalized = safeName.toLowerCase();
+    if (!safeId && !safeName) {
+      return { wingetId: null, wingetSource: null, latestVersion: null };
     }
 
-    const item = CURATED_CATALOG.find(a => a.wingetId === wingetId);
+    const resolved = await resolvePackageReference({
+      wingetId: safeId,
+      wingetSource,
+      name: safeName
+    });
+    const visibleCatalog = await resolveCuratedCatalog();
+    const item = visibleCatalog.find(entry =>
+      (resolved?.wingetId
+        && entry.wingetId === resolved.wingetId
+        && (entry.wingetSource || DEFAULT_WINGET_SOURCE) === (resolved.wingetSource || DEFAULT_WINGET_SOURCE))
+      || (safeId && entry.wingetId === safeId)
+      || (safeNameNormalized && entry.name.toLowerCase() === safeNameNormalized)
+    );
     let latestVersion = null;
     
-    if (item) {
-      if (item.versionCheck.method === 'github') {
-        latestVersion = await checkVersionGitHub(item.versionCheck.repo);
-      } else {
-        latestVersion = await checkVersionWinget(wingetId);
-      }
-    } else {
+    if (item?.versionCheck?.method === 'github') {
+      latestVersion = await checkVersionGitHub(item.versionCheck.repo);
+    } else if (resolved?.wingetId) {
       // Not in curated list — use winget CLI directly
-      latestVersion = await checkVersionWinget(wingetId);
+      latestVersion = resolved.latestVersion || await checkVersionWinget(resolved.wingetId, resolved.wingetSource);
+    } else if (safeId && isValidWingetId(safeId)) {
+      latestVersion = await checkVersionWinget(safeId, wingetSource);
     }
 
     return {
-      wingetId,
-      latestVersion: latestVersion || (item ? item.defaultVersion : null)
+      wingetId: resolved?.wingetId || safeId || null,
+      wingetSource: resolved?.wingetSource || sanitizeWingetSource(wingetSource) || null,
+      latestVersion: latestVersion || item?.defaultVersion || null
+    };
+  },
+
+  async resolvePackage(reference) {
+    const resolved = await resolvePackageReference(reference || {});
+    return {
+      wingetId: resolved?.wingetId || '',
+      wingetSource: resolved?.wingetSource || sanitizeWingetSource(reference?.wingetSource) || DEFAULT_WINGET_SOURCE,
+      latestVersion: resolved?.latestVersion || null,
+      name: resolved?.name || reference?.name || '',
+      available: !!resolved?.available
     };
   }
 };

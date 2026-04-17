@@ -90,6 +90,7 @@ const appService = {
       installerPath: data.installerPath || '',
       configXmlPath: data.configXmlPath || '',
       wingetId: data.wingetId || '',
+      wingetSource: data.wingetSource || '',
       odtConfig: data.odtConfig || null,
       customParams: data.customParams || {},
       templateFiles: data.templateFiles || {},

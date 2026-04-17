@@ -20,6 +20,12 @@ function sanitizeAppName(str) {
   return str.replace(/[^a-zA-Z0-9\s\-_.,()[\]@#]/g, '').trim().substring(0, 128);
 }
 
+function sanitizeWingetSource(str) {
+  if (typeof str !== 'string') return '';
+  const normalized = str.trim().toLowerCase();
+  return /^[a-z0-9._-]{1,64}$/.test(normalized) ? normalized : '';
+}
+
 function isInstallerArtifactName(fileName) {
   const normalized = String(fileName || '').toLowerCase();
   return normalized.endsWith('.exe')
@@ -29,7 +35,7 @@ function isInstallerArtifactName(fileName) {
 
 const TEMPLATES = {
   generic: { category: 'General', name: 'Generic (MSI/EXE)', description: 'Universal Drop & Run template for any installer', fields: [] },
-  office: { category: 'General', name: 'Microsoft Office (XML)', description: 'Executes setup.exe with an existing XML file', fields: [{ key: 'configXml', label: 'Config XML Name', default: 'config_office.xml', hint: 'Must be placed in the same folder' }] },
+  office: { category: 'General', name: 'Microsoft Office (XML)', description: 'Executes setup.exe with an existing XML file', fields: [] },
   custom: { category: 'General', name: 'Custom Script', description: 'Write your own raw PowerShell code', fields: [{ key: 'customScript', label: 'PowerShell Code', type: 'textarea', default: '# Write your PowerShell code here\\n', hint: 'This code will not be wrapped. Use with caution.' }] },
   winget: { category: 'General', name: 'Winget Package', description: 'Installs from Windows Package Manager', fields: [], noInstaller: true },
   odt: { category: 'General', name: 'Microsoft Office (ODT)', description: 'Office 365/LTSC without manual download — generates XML automatically', fields: [], noInstaller: true },
@@ -133,8 +139,33 @@ const scriptService = {
 
   async deployScript(appConfig) {
     try {
+      // Fast-fail if share is known to be down
+      const shareHealth = require('./share-health');
+      const health = await shareHealth.check();
+      if (!health.available) {
+        return { success: false, error: 'SHARE_UNAVAILABLE' };
+      }
+
       // Sweep orphaned temp PS scripts before each deploy
       try { require('./app-service').cleanupTempFiles(); } catch (e) {}
+
+      if (appConfig?.template === 'winget') {
+        try {
+          const catalogService = require('./catalog-service');
+          const resolvedPackage = await catalogService.resolvePackage({
+            wingetId: appConfig.wingetId,
+            wingetSource: appConfig.wingetSource,
+            name: appConfig.name
+          });
+          if (resolvedPackage?.available && resolvedPackage.wingetId) {
+            appConfig = {
+              ...appConfig,
+              wingetId: resolvedPackage.wingetId,
+              wingetSource: resolvedPackage.wingetSource || appConfig.wingetSource || 'winget'
+            };
+          }
+        } catch (e) { /* keep configured package reference if resolution fails */ }
+      }
 
       const config = configService.getConfig();
       const { safeName, path: appFolder } = resolveNamedSubdirectory(
@@ -635,6 +666,8 @@ function Get-InstallerDetectionMetadata {
     $productVersionRaw = ''
 
     $candidateSeed = @()
+    $fileBaseName = [System.IO.Path]::GetFileNameWithoutExtension([string]$InstallerPath)
+    $fileBaseNameWithoutVersion = ($fileBaseName -replace '([._-]?\d+(\.\d+){1,4}.*)$', '')
     if ($extension -eq '.msi') {
         $candidateSeed += Get-MsiPackageProperty -Path $InstallerPath -PropertyName 'ProductName'
         $productVersionRaw = Get-MsiPackageProperty -Path $InstallerPath -PropertyName 'ProductVersion'
@@ -646,11 +679,15 @@ function Get-InstallerDetectionMetadata {
         if ($fileInfo) {
             $candidateSeed += [string]$fileInfo.ProductName
             $candidateSeed += [string]$fileInfo.FileDescription
+            $candidateSeed += [System.IO.Path]::GetFileNameWithoutExtension([string]$fileInfo.OriginalFilename)
+            $candidateSeed += [string]$fileInfo.InternalName
             $publisher = [string]$fileInfo.CompanyName
             $productVersionRaw = [string]$fileInfo.ProductVersion
         }
     }
 
+    $candidateSeed += $fileBaseName
+    $candidateSeed += $fileBaseNameWithoutVersion
     $candidateSeed += $FallbackDisplayName
     foreach ($candidate in $candidateSeed) {
         $candidateText = [string]$candidate
@@ -683,9 +720,11 @@ function Get-InstalledApplicationMatch {
 
     $bestMatch = $null
     $bestScore = -1
+    $bestPublisherMatched = $false
 
     foreach ($entry in Get-InstalledApplicationEntries) {
         $score = 0
+        $publisherMatched = $false
 
         if ($InstallerMetadata.ProductCode -and $entry.ProductCode -and $InstallerMetadata.ProductCode -eq $entry.ProductCode) {
             $score = 100
@@ -700,13 +739,17 @@ function Get-InstalledApplicationMatch {
             }
         }
 
-        if ($score -gt 0 -and $InstallerMetadata.PublisherNormalized -and $entry.PublisherNormalized -eq $InstallerMetadata.PublisherNormalized) {
-            $score += 5
+        if ($InstallerMetadata.PublisherNormalized -and $entry.PublisherNormalized -eq $InstallerMetadata.PublisherNormalized) {
+            $publisherMatched = $true
+            if ($score -gt 0) {
+                $score += 5
+            }
         }
 
         if ($score -gt $bestScore) {
             $bestScore = $score
             $bestMatch = $entry
+            $bestPublisherMatched = $publisherMatched
         }
     }
 
@@ -720,6 +763,7 @@ function Get-InstalledApplicationMatch {
         VersionObject = $bestMatch.VersionObject
         ProductCode = $bestMatch.ProductCode
         MatchScore = $bestScore
+        PublisherMatched = $bestPublisherMatched
     }
 }
 
@@ -740,13 +784,18 @@ function Resolve-InstallerConflictState {
     $reason = ''
 
     if ($match) {
+        $trustedUpgradeMatch = $match.ProductCode -and (
+            $match.MatchScore -ge 85 -or
+            ($match.PublisherMatched -and $match.MatchScore -ge 75)
+        )
+
         if ($InstallerMetadata.ProductCode -and $match.ProductCode -and $InstallerMetadata.ProductCode -eq $match.ProductCode) {
             $skipInstall = $true
             $reason = 'same-product-code'
         } elseif ($match.VersionObject -and $targetVersionObject -and $match.VersionObject -ge $targetVersionObject) {
             $skipInstall = $true
             $reason = 'same-or-newer-version'
-        } elseif ($InstallerMetadata.Extension -eq '.msi' -and $match.ProductCode -and $match.VersionObject -and $targetVersionObject -and $match.VersionObject -lt $targetVersionObject -and $match.MatchScore -ge 85) {
+        } elseif ($trustedUpgradeMatch -and $match.VersionObject -and $targetVersionObject -and $match.VersionObject -lt $targetVersionObject) {
             $canAutoUninstall = $true
             $reason = 'older-version-conflict'
         } else {
@@ -826,7 +875,7 @@ function Invoke-ManagedInstaller {
             return [pscustomobject]@{ Status = 'skipped'; ExitCode = 1638 }
         }
 
-        if ($Kind -eq 'msi' -and $conflictState.CanAutoUninstall) {
+        if ($conflictState.CanAutoUninstall) {
             $conflictLabel = Get-InstallerConflictLabel -Conflict $conflictState
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Se detecto una version anterior que bloquea la actualizacion ($conflictLabel). Desinstalando y reintentando..."
             $uninstallArgs = "/x $($conflictState.Match.ProductCode) REBOOT=ReallySuppress /qn"
@@ -1316,7 +1365,9 @@ ${getTrackerSaveLogic(notify)}
 }
 
 function generateOffice(cfg) {
-  const configXml = sanitizeAppName(cfg.customParams?.configXml || 'config_office.xml');
+  const configXml = cfg.configXmlPath
+    ? sanitizeTemplateFileName(path.basename(cfg.configXmlPath))
+    : (sanitizeTemplateFileName(cfg.customParams?.configXml || 'config_office.xml') || 'config_office.xml');
   const notify = cfg.notifyUser || false;
   return `# =========================================================================
 # MICROSOFT OFFICE - DROP & RUN
@@ -1328,7 +1379,7 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
 }
 ${getLocalCachingLogic("\\.exe$", notify, sanitizeAppName(cfg.name))}
 try {
-    $RutaXML = Join-Path -Path $CacheDir -ChildPath "$configXml"
+    $RutaXML = Join-Path -Path $CacheDir -ChildPath "${configXml}"
     ${getManagedInstallerInvocation('exe', '"/configure \`"$RutaXML\`""')}
 ${getTrackerSaveLogic(notify)}
 `;
@@ -1660,6 +1711,7 @@ ${getTrackerSaveLogic(notify)}
 
 function generateWinget(cfg) {
   const wingetId = sanitizePSForEmbedding(cfg.wingetId || '');
+  const wingetSource = sanitizePSForEmbedding(sanitizeWingetSource(cfg.wingetSource || 'winget'));
   const version  = sanitizePSForEmbedding(cfg.version || '1.0.0');
   const notify   = cfg.notifyUser || false;
   const config   = configService.getConfig();
@@ -1680,6 +1732,7 @@ function generateWinget(cfg) {
 # Generado: ${new Date().toISOString()}
 # =========================================================================
 $wingetId = "${wingetId}"
+$wingetSource = "${wingetSource}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
     Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
 }
@@ -1697,7 +1750,7 @@ $LogFile   = "$LogDir\\Install_$($NombreApp)_$(Get-Date -Format 'yyyyMMdd_HHmmss
 Start-Transcript -Path $LogFile -Force -ErrorAction SilentlyContinue
 
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ===== AppDeploy Manager ============================="
-Write-Host "[$(Get-Date -Format 'HH:mm:ss')] App     : $NombreApp [winget: $wingetId]"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] App     : $NombreApp [winget: $wingetId | source: $wingetSource]"
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Equipo  : $env:COMPUTERNAME"
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Usuario : $env:USERNAME"
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ====================================================="
@@ -1732,17 +1785,6 @@ if (Test-Path $VersionFile) {
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Version : $CurrentVersion"
 
 # ── Salir si ya esta instalado en esta version ───────────
-if (Test-Path $TrackerFile) {
-    try {
-        $t = Get-Content $TrackerFile -Raw | ConvertFrom-Json
-        if ($t.version -eq $CurrentVersion -and $t.result -in @('success', 'scheduled')) {
-            if ($t.result -eq 'success') { Clear-UserWingetArtifacts -Quiet }
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Ya instalado/programado (v$CurrentVersion, estado: $($t.result))"
-            Stop-Transcript -ErrorAction SilentlyContinue
-            exit 0
-        }
-    } catch {}
-}
 ${notifyPrefix}
 
 # ── Localizar winget (contexto SYSTEM / GPO startup) ─────
@@ -1787,6 +1829,79 @@ if (-not $Winget) {
 }
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] winget: $Winget"
 
+function Test-WingetPackageInstalled {
+    param(
+        [string]$WingetPath,
+        [string]$PackageId,
+        [string]$PackageSource = ''
+    )
+
+    try {
+        $listArgs = @('list', '--id', "$PackageId", '--exact', '--accept-source-agreements', '--disable-interactivity')
+        if ($PackageSource) { $listArgs += @('--source', "$PackageSource") }
+        $output = & $WingetPath @listArgs 2>&1 | Out-String
+        return ($LASTEXITCODE -eq 0 -and $output -match [regex]::Escape($PackageId))
+    } catch {
+        return $false
+    }
+}
+
+function Wait-WingetPackageInstalled {
+    param(
+        [string]$WingetPath,
+        [string]$PackageId,
+        [string]$PackageSource = '',
+        [int]$MaxAttempts = 5,
+        [int]$SleepSeconds = 3
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        if (Test-WingetPackageInstalled -WingetPath $WingetPath -PackageId $PackageId -PackageSource $PackageSource) {
+            return $true
+        }
+        if ($attempt -lt $MaxAttempts) {
+            Start-Sleep -Seconds $SleepSeconds
+        }
+    }
+    return $false
+}
+
+function Test-WingetUserTaskPending {
+    try {
+        return [bool](Get-ScheduledTask -TaskName $UserTaskName -ErrorAction SilentlyContinue)
+    } catch {
+        return $false
+    }
+}
+
+if (Test-Path $TrackerFile) {
+    try {
+        $t = Get-Content $TrackerFile -Raw | ConvertFrom-Json
+        if ($t.version -eq $CurrentVersion -and $t.result -in @('success', 'scheduled')) {
+            $installedNow = Wait-WingetPackageInstalled -WingetPath $Winget -PackageId $wingetId -PackageSource $wingetSource -MaxAttempts 2 -SleepSeconds 2
+            if ($installedNow) {
+                Clear-UserWingetArtifacts -Quiet
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Ya instalado (v$CurrentVersion, estado real verificado)"
+                Stop-Transcript -ErrorAction SilentlyContinue
+                exit 0
+            }
+
+            if ($t.result -eq 'scheduled' -and (Test-WingetUserTaskPending)) {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Instalacion programada pendiente para $wingetId"
+                Stop-Transcript -ErrorAction SilentlyContinue
+                exit 0
+            }
+
+            if ($t.result -eq 'success') {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Tracker marcaba exito, pero $wingetId no aparece instalado. Se reintentara."
+            } else {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Tracker marcaba instalacion programada, pero no hay app ni tarea pendiente. Se reintentara."
+            }
+            Clear-UserWingetArtifacts -Quiet
+        }
+    } catch {}
+}
+
 # Actualizar fuentes (necesario en contexto SYSTEM; ignorar error si falla)
 try { & $Winget source update --disable-interactivity 2>&1 | Out-Null } catch {}
 
@@ -1802,19 +1917,34 @@ $WingetSuccess = @(0, 1618, -1978335212, -1978335189, -1978335140)
 $WingetNoScope = @(-1978335160, -1978335215, -1978335216)  # no machine-scope installer → retry sin scope
 $WingetUserOnly = @(-1978335146, -1978335215, -1978335216) # app solo usuario → instalar via tarea programada
 try {
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Ejecutando: winget install --id $wingetId --scope machine"
-    & $Winget install --id "$wingetId" --silent --accept-package-agreements --accept-source-agreements --scope machine 2>&1 | Out-Null
+    $packageInstalled = $false
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Ejecutando: winget install --id $wingetId --source $wingetSource --scope machine"
+    & $Winget install --id "$wingetId" --source "$wingetSource" --silent --accept-package-agreements --accept-source-agreements --scope machine 2>&1 | Out-Null
     $ec = $LASTEXITCODE
     if ($ec -in $WingetNoScope) {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: --scope machine no soportado (codigo $ec). Reintentando sin --scope..."
-        & $Winget install --id "$wingetId" --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
+        & $Winget install --id "$wingetId" --source "$wingetSource" --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
         $ec = $LASTEXITCODE
+    }
+    if ($ec -in $WingetSuccess) {
+        $packageInstalled = Wait-WingetPackageInstalled -WingetPath $Winget -PackageId $wingetId -PackageSource $wingetSource
+        if (-not $packageInstalled) {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: winget devolvio codigo de exito ($ec), pero $wingetId no quedo detectable. Se intentara resolver en contexto de usuario."
+            $ec = -1
+        }
     }
     if ($ec -notin $WingetSuccess) {
         # Último intento: --scope user (apps solo usuario)
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Reintentando con --scope user (app solo usuario, codigo $ec)..."
-        & $Winget install --id "$wingetId" --silent --accept-package-agreements --accept-source-agreements --scope user 2>&1 | Out-Null
+        & $Winget install --id "$wingetId" --source "$wingetSource" --silent --accept-package-agreements --accept-source-agreements --scope user 2>&1 | Out-Null
         $ec = $LASTEXITCODE
+        if ($ec -in $WingetSuccess) {
+            $packageInstalled = Wait-WingetPackageInstalled -WingetPath $Winget -PackageId $wingetId -PackageSource $wingetSource -MaxAttempts 3 -SleepSeconds 2
+            if (-not $packageInstalled) {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: winget devolvio codigo de exito en --scope user ($ec), pero la app no quedo detectable en SYSTEM. Se programara la instalacion en la siguiente sesion."
+                $ec = -1
+            }
+        }
     }
     if ($ec -notin $WingetSuccess) {
         # App solo usuario que no puede instalarse en contexto SYSTEM → programar tarea de usuario
@@ -1827,6 +1957,7 @@ try {
             $userInstallScript = @'
 $taskName = '__TASKNAME__'
 $wingetId = '__WINGET_ID__'
+$wingetSource = '__WINGET_SOURCE__'
 $trackerFile = '__TRACKER_FILE__'
 $currentVersion = '__CURRENT_VERSION__'
 $helperPs1 = '__HELPER_PS1__'
@@ -1861,15 +1992,38 @@ function Complete-UserWingetTask {
 function Test-WingetPackageInstalled {
     param(
         [string]$WingetPath,
-        [string]$PackageId
+        [string]$PackageId,
+        [string]$PackageSource = ''
     )
 
     try {
-        $output = & $WingetPath list --id "$PackageId" --exact --accept-source-agreements --disable-interactivity 2>&1 | Out-String
+        $listArgs = @('list', '--id', "$PackageId", '--exact', '--accept-source-agreements', '--disable-interactivity')
+        if ($PackageSource) { $listArgs += @('--source', "$PackageSource") }
+        $output = & $WingetPath @listArgs 2>&1 | Out-String
         return ($LASTEXITCODE -eq 0 -and $output -match [regex]::Escape($PackageId))
     } catch {
         return $false
     }
+}
+
+function Wait-WingetPackageInstalled {
+    param(
+        [string]$WingetPath,
+        [string]$PackageId,
+        [string]$PackageSource = '',
+        [int]$MaxAttempts = 5,
+        [int]$SleepSeconds = 3
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        if (Test-WingetPackageInstalled -WingetPath $WingetPath -PackageId $PackageId -PackageSource $PackageSource) {
+            return $true
+        }
+        if ($attempt -lt $MaxAttempts) {
+            Start-Sleep -Seconds $SleepSeconds
+        }
+    }
+    return $false
 }
 
 $WingetUser = (Get-Command winget.exe -ErrorAction SilentlyContinue).Source
@@ -1883,19 +2037,20 @@ if (-not $WingetUser) {
 }
 if (-not $WingetUser) { exit 1 }
 
-if (Test-WingetPackageInstalled -WingetPath $WingetUser -PackageId $wingetId) {
+if (Test-WingetPackageInstalled -WingetPath $WingetUser -PackageId $wingetId -PackageSource $wingetSource) {
     Complete-UserWingetTask -Method 'winget-usertask-detected'
 }
 
-& $WingetUser install --id "$wingetId" --silent --accept-package-agreements --accept-source-agreements --scope user 2>&1 | Out-Null
+& $WingetUser install --id "$wingetId" --source "$wingetSource" --silent --accept-package-agreements --accept-source-agreements --scope user 2>&1 | Out-Null
 $ec = $LASTEXITCODE
-if ($ec -in $successCodes -or (Test-WingetPackageInstalled -WingetPath $WingetUser -PackageId $wingetId)) {
+if (($ec -in $successCodes) -and (Wait-WingetPackageInstalled -WingetPath $WingetUser -PackageId $wingetId -PackageSource $wingetSource)) {
     Complete-UserWingetTask
 }
 exit $ec
 '@
             $userInstallScript = $userInstallScript.Replace('__TASKNAME__', $taskName)
             $userInstallScript = $userInstallScript.Replace('__WINGET_ID__', $wingetId)
+            $userInstallScript = $userInstallScript.Replace('__WINGET_SOURCE__', $wingetSource)
             $userInstallScript = $userInstallScript.Replace('__TRACKER_FILE__', $TrackerFile)
             $userInstallScript = $userInstallScript.Replace('__CURRENT_VERSION__', $CurrentVersion)
             $userInstallScript = $userInstallScript.Replace('__HELPER_PS1__', $userInstallPs1)
@@ -1929,6 +2084,10 @@ shell.Run "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass
         } catch {
             throw "No se pudo crear la tarea programada '$taskName': $($_.Exception.Message)"
         }
+    }
+
+    if (-not $packageInstalled) {
+        throw "winget finalizo sin error bloqueante, pero no se pudo confirmar la instalacion real de $wingetId"
     }
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: $NombreApp instalado correctamente (v$CurrentVersion)"

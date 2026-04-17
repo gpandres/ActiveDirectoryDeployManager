@@ -6,6 +6,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const shareHealth = require('./share-health');
 
 function createShareStore(filename) {
   function getShareMetaPath() {
@@ -18,6 +19,7 @@ function createShareStore(filename) {
 
   return {
     read() {
+      if (!shareHealth.isAvailableSync()) return null; // fast-fail
       const sharePath = getShareMetaPath();
       if (!sharePath) return null;
       try {
@@ -30,6 +32,7 @@ function createShareStore(filename) {
     },
 
     write(data) {
+      if (!shareHealth.isAvailableSync()) return false; // fast-fail
       const sharePath = getShareMetaPath();
       if (!sharePath) return false;
       try {

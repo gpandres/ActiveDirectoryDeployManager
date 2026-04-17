@@ -209,6 +209,8 @@ Stop-Transcript
 
   async deployBundle(bundle, apps, config) {
     try {
+      const shareHealth = require('./share-health');
+      if (!shareHealth.isAvailableSync()) return { success: false, error: 'SHARE_UNAVAILABLE' };
       const bundlesDir = resolveWithinBase(config.networkSharePath, '_bundles');
       const { safeName, path: bundleFolder } = resolveNamedSubdirectory(bundlesDir, bundle.name, 'bundle');
 

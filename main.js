@@ -61,6 +61,7 @@ app.whenReady().then(() => {
   const i18nService = require('./services/i18n');
   const catalogService = require('./services/catalog-service');
   const templateService = require('./services/template-service');
+  const shareHealth = require('./services/share-health');
 
   console.log('Initialize i18n...');
   i18nService.initialize();
@@ -77,6 +78,12 @@ app.whenReady().then(() => {
   createWindow();
   console.log('Window created');
 
+  // Run initial share health check (non-blocking) so the cache is warm
+  // before the renderer starts making sync share calls.
+  shareHealth.check().then(s => {
+    console.log(`[share-health] Initial check: ${s.available ? 'OK' : 'UNAVAILABLE'} ${s.error || ''}`);
+  });
+
   // ─── Window Controls (frameless) ───────────────────────────────
   ipcMain.on('window:minimize', () => mainWindow.minimize());
   ipcMain.on('window:maximize', () => {
@@ -85,12 +92,19 @@ app.whenReady().then(() => {
   });
   ipcMain.on('window:close', () => mainWindow.close());
 
+  // ─── IPC Handlers: Share Health ───────────────────────────────────
+  ipcMain.handle('share:checkHealth', () => shareHealth.check());
+  ipcMain.handle('share:getStatus', () => shareHealth.getStatus());
+
   // ─── IPC Handlers: Config ────────────────────────────────────────
   ipcMain.handle('config:get', () => configService.getConfig());
   ipcMain.handle('config:set', (_, data) => {
     try { assertObject(data, 'data'); }
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
-    return configService.setConfig(data);
+    const result = configService.setConfig(data);
+    // If share path changed, invalidate the health cache
+    if (data?.networkSharePath !== undefined) shareHealth.invalidate();
+    return result;
   });
   ipcMain.handle('config:selectFolder', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -120,6 +134,7 @@ app.whenReady().then(() => {
     return adService.getOUs(ignoreBaseOU);
   });
   ipcMain.handle('ad:getGPOs', () => adService.getGPOs());
+  ipcMain.handle('ad:getGPOLinkCounts', () => adService.getGPOLinkCounts());
   ipcMain.handle('ad:createGPO', (_, name, scriptPath, ouDN) => {
     try {
       assertString(name, 'name');
@@ -240,6 +255,28 @@ app.whenReady().then(() => {
     return templateService.remove(id);
   });
 
+  ipcMain.handle('templates:saveInstaller', async (_, templateId, localPath) => {
+    try {
+      const fs = require('fs');
+      const pathMod = require('path');
+      assertId(templateId, 'templateId');
+      if (typeof localPath !== 'string' || !localPath.trim()) return { success: false, error: 'Invalid path' };
+      if (!fs.existsSync(localPath)) return { success: false, error: 'File not found' };
+      const health = await shareHealth.check();
+      if (!health.available) return { success: false, error: 'SHARE_UNAVAILABLE' };
+      const config = configService.getConfig();
+      if (!config.networkSharePath) return { success: false, error: 'Network share not configured' };
+      const destDir = pathMod.join(config.networkSharePath, '_templates', String(templateId).replace(/[^a-zA-Z0-9_\-]/g, '_'));
+      await fs.promises.mkdir(destDir, { recursive: true });
+      const fileName = pathMod.basename(localPath);
+      const destPath = pathMod.join(destDir, fileName);
+      await fs.promises.copyFile(localPath, destPath);
+      return { success: true, sharePath: destPath };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
   // ─── IPC Handlers: Catalog Service (replaces old winget handlers) ──
   // Backward-compatible aliases (used by apps.js wizard)
   ipcMain.handle('winget:getCatalog', () => catalogService.getCatalog());
@@ -266,10 +303,19 @@ app.whenReady().then(() => {
     catch (e) { return []; }
     return catalogService.checkVersions(catalogIds);
   });
-  ipcMain.handle('catalog:checkSingle', (_, wingetId) => {
-    try { assertString(wingetId, 'wingetId', 256); }
-    catch (e) { return { wingetId: null, latestVersion: null }; }
-    return catalogService.checkSingle(wingetId);
+  ipcMain.handle('catalog:checkSingle', (_, wingetId, wingetSource, name) => {
+    try {
+      if (wingetId !== undefined && wingetId !== null) assertString(wingetId, 'wingetId', 256);
+      if (wingetSource !== undefined && wingetSource !== null) assertString(wingetSource, 'wingetSource', 64);
+      if (name !== undefined && name !== null) assertString(name, 'name', 256);
+    }
+    catch (e) { return { wingetId: null, wingetSource: null, latestVersion: null }; }
+    return catalogService.checkSingle(wingetId, wingetSource, name);
+  });
+  ipcMain.handle('catalog:resolvePackage', (_, reference) => {
+    try { assertObject(reference, 'reference'); }
+    catch (e) { return { wingetId: '', wingetSource: 'winget', latestVersion: null, name: '', available: false }; }
+    return catalogService.resolvePackage(reference);
   });
 
   // ─── IPC Handlers: File Service ──────────────────────────────────
