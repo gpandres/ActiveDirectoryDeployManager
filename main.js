@@ -266,12 +266,49 @@ app.whenReady().then(() => {
       if (!health.available) return { success: false, error: 'SHARE_UNAVAILABLE' };
       const config = configService.getConfig();
       if (!config.networkSharePath) return { success: false, error: 'Network share not configured' };
-      const destDir = pathMod.join(config.networkSharePath, '_templates', String(templateId).replace(/[^a-zA-Z0-9_\-]/g, '_'));
+      const templatesRoot = pathMod.resolve(config.networkSharePath, '_templates');
+      const destDir = pathMod.resolve(templatesRoot, String(templateId).replace(/[^a-zA-Z0-9_\-]/g, '_'));
+      const relativeDestDir = pathMod.relative(templatesRoot, destDir);
+      if (relativeDestDir.startsWith('..') || pathMod.isAbsolute(relativeDestDir)) {
+        return { success: false, error: 'Invalid template path' };
+      }
       await fs.promises.mkdir(destDir, { recursive: true });
       const fileName = pathMod.basename(localPath);
+      const tempName = `.__uploading__${Date.now()}_${fileName}`;
+      const tempPath = pathMod.join(destDir, tempName);
       const destPath = pathMod.join(destDir, fileName);
-      await fs.promises.copyFile(localPath, destPath);
+      await fs.promises.copyFile(localPath, tempPath);
+
+      const entries = await fs.promises.readdir(destDir, { withFileTypes: true }).catch(() => []);
+      for (const entry of entries) {
+        if (entry.name === tempName) continue;
+        await fs.promises.rm(pathMod.join(destDir, entry.name), { recursive: true, force: true });
+      }
+
+      await fs.promises.rename(tempPath, destPath);
       return { success: true, sharePath: destPath };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('templates:deleteInstaller', async (_, templateId) => {
+    try {
+      const fs = require('fs');
+      const pathMod = require('path');
+      assertId(templateId, 'templateId');
+      const health = await shareHealth.check();
+      if (!health.available) return { success: false, error: 'SHARE_UNAVAILABLE' };
+      const config = configService.getConfig();
+      if (!config.networkSharePath) return { success: false, error: 'Network share not configured' };
+      const templatesRoot = pathMod.resolve(config.networkSharePath, '_templates');
+      const destDir = pathMod.resolve(templatesRoot, String(templateId).replace(/[^a-zA-Z0-9_\-]/g, '_'));
+      const relativeDestDir = pathMod.relative(templatesRoot, destDir);
+      if (relativeDestDir.startsWith('..') || pathMod.isAbsolute(relativeDestDir)) {
+        return { success: false, error: 'Invalid template path' };
+      }
+      await fs.promises.rm(destDir, { recursive: true, force: true });
+      return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
     }

@@ -45,8 +45,8 @@ const GposPage = {
             <thead>
               <tr style="border-bottom: 2px solid var(--border-color); text-align: left;">
                 <th style="padding: 16px; width: 40px;">
-                  <label class="checkbox-wrapper checkbox-wrapper--compact" style="width:18px;margin:0 auto;">
-                    <input type="checkbox" id="gpo-select-all">
+                  <label class="checkbox-wrapper checkbox-wrapper--compact" style="width:22px;margin:0 auto;">
+                    <input type="checkbox" class="checkbox-select" id="gpo-select-all">
                     <span class="sr-only">Seleccionar todas las GPOs</span>
                   </label>
                 </th>
@@ -206,8 +206,8 @@ const GposPage = {
       return `
         <tr style="border-bottom: 1px solid var(--border-color); transition: background 0.2s;${isSelected ? 'background:rgba(59,130,246,0.06);' : ''}">
           <td style="padding: 16px;">
-            <label class="checkbox-wrapper checkbox-wrapper--compact" style="width:18px;margin:0 auto;">
-              <input type="checkbox" class="gpo-cb" data-id="${this.esc(g.Id)}" ${isSelected ? 'checked' : ''}>
+            <label class="checkbox-wrapper checkbox-wrapper--compact" style="width:22px;margin:0 auto;">
+              <input type="checkbox" class="checkbox-select gpo-cb" data-id="${this.esc(g.Id)}" ${isSelected ? 'checked' : ''}>
               <span class="sr-only">Seleccionar ${this.esc(g.DisplayName)}</span>
             </label>
           </td>

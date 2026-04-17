@@ -64,7 +64,8 @@ contextBridge.exposeInMainWorld('api', {
     create: (data) => ipcRenderer.invoke('templates:create', data),
     update: (id, data) => ipcRenderer.invoke('templates:update', id, data),
     delete: (id) => ipcRenderer.invoke('templates:delete', id),
-    saveInstaller: (templateId, localPath) => ipcRenderer.invoke('templates:saveInstaller', templateId, localPath)
+    saveInstaller: (templateId, localPath) => ipcRenderer.invoke('templates:saveInstaller', templateId, localPath),
+    deleteInstaller: (templateId) => ipcRenderer.invoke('templates:deleteInstaller', templateId)
   },
 
   // Files

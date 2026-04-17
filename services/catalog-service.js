@@ -382,7 +382,7 @@ function parseWingetSearchResultLine(line) {
     version,
     match,
     category: 'Winget',
-    icon: 'ðŸ“¦',
+    icon: '&#128230;',
     source: 'winget-cli'
   };
 }

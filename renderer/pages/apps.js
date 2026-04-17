@@ -1,6 +1,6 @@
-// ═══════════════════════════════════════════════════════
-// Apps Page – CRUD, Wizard, Bulk GPO Assignment
-// ═══════════════════════════════════════════════════════
+﻿// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Apps Page â€“ CRUD, Wizard, Bulk GPO Assignment
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 const AppsPage = {
   selectedIds: new Set(),
@@ -226,7 +226,7 @@ const AppsPage = {
         <div class="app-card-badges">
           <span class="badge badge-info app-card-version">v${this.esc(app.version || '1.0.0')}</span>
           ${app.gpoName ? `<span class="badge badge-info" title="GPO">${this.esc(app.gpoName)}</span>` : ''}
-          ${(() => { const n = Array.isArray(app.assignedOUs) ? app.assignedOUs.length : (app.ouDN ? 1 : 0); return n > 0 ? `<span class="badge badge-neutral" title="${t('apps.detailAssignedOUs')}">🏢 ${n} OU${n > 1 ? 's' : ''}</span>` : ''; })()}
+          ${(() => { const n = Array.isArray(app.assignedOUs) ? app.assignedOUs.length : (app.ouDN ? 1 : 0); return n > 0 ? `<span class="badge badge-neutral" title="${t('apps.detailAssignedOUs')}">&#127970; ${n} OU${n > 1 ? 's' : ''}</span>` : ''; })()}
         </div>
         <div class="app-card-footer" onclick="event.stopPropagation()">
           <div class="app-card-deploy-info">
@@ -352,16 +352,36 @@ const AppsPage = {
     }
   },
 
-  // ─── Helpers ───────────────────────────────────────
+  // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   templateIcon(template) {
+    const key = String(template || '').trim().toLowerCase();
+    if (key.startsWith('user-')) return '&#129513;';
     const icons = {
-      generic: '📦', office: '📎', custom: '⚙️', winget: '🪟', odt: '📎',
-      wazuh: '🛡️', sentinelone: '🔰', cortexxdr: '🔷', bitdefender: '🔴',
-      crowdstrike: '🦅', zscaler: '☁️', globalprotect: '🌍', ciscosecureclient: '🔐',
-      forticlient: '🏰', lansweeper: '📡', ninjaone: '🥷', freshservice: '🍀',
-      teamviewer: '📺', anydesk: '🖥️', veeam: '💾', crashplan: '☁️', 'sap-gui': '🔷'
+      generic: '&#128230;',
+      office: '&#128203;',
+      custom: '&#9881;&#65039;',
+      winget: '&#128230;',
+      odt: '&#128203;',
+      wazuh: '&#128737;&#65039;',
+      sentinelone: '&#128274;',
+      cortexxdr: '&#128737;&#65039;',
+      bitdefender: '&#128308;',
+      crowdstrike: '&#129413;',
+      zscaler: '&#9729;&#65039;',
+      globalprotect: '&#127760;',
+      ciscosecureclient: '&#128274;',
+      forticlient: '&#128737;&#65039;',
+      lansweeper: '&#128225;',
+      ninjaone: '&#129302;',
+      freshservice: '&#128295;',
+      teamviewer: '&#8596;&#65039;',
+      anydesk: '&#128187;',
+      veeam: '&#128190;',
+      crashplan: '&#9729;&#65039;',
+      chrome: '&#127760;',
+      'sap-gui': '&#128188;'
     };
-    return icons[template] || '📦';
+    return icons[key] || '&#128230;';
   },
 
   esc(str) {
@@ -411,7 +431,7 @@ const AppsPage = {
     }
   },
 
-  // ─── Detail Modal ──────────────────────────────────
+  // â”€â”€â”€ Detail Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   renderDeleteTargetCard({ icon, title, subtitle = '' }) {
     return `
       <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-tertiary);border-radius:6px;">
@@ -575,7 +595,7 @@ const AppsPage = {
     `);
   },
 
-  // ─── Quick Update ─────────────────────────────────
+  // â”€â”€â”€ Quick Update â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   compareVersions(a, b) {
     const pa = (a || '0').split('.').map(n => parseInt(n) || 0);
     const pb = (b || '0').split('.').map(n => parseInt(n) || 0);
@@ -672,7 +692,7 @@ const AppsPage = {
               ${state.newHash ? `
                 <div style="display:flex; justify-content:space-between; padding:8px 0 0 0; font-size:11px; font-family:monospace; color:var(--text-muted);">
                   <span>${this.esc((app.lastDeployHash || '').substring(0, 16))}...</span>
-                  <span>→</span>
+                  <span>&#8594;</span>
                   <span>${this.esc(state.newHash.substring(0, 16))}...</span>
                 </div>
               ` : ''}
@@ -681,7 +701,7 @@ const AppsPage = {
             ${state.sameFile ? `
               <div style="padding:12px; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); border-radius:8px;">
                 <p style="margin:0; color:var(--danger-color); font-size:13px; font-weight:500;">
-                  ⚠️ ${t('apps.quickUpdateSameFile')}
+                  &#9888;&#65039; ${t('apps.quickUpdateSameFile')}
                 </p>
               </div>
             ` : ''}
@@ -689,7 +709,7 @@ const AppsPage = {
             ${state.isDowngrade && !state.sameFile ? `
               <div style="padding:12px; background:rgba(251,191,36,0.08); border:1px solid rgba(251,191,36,0.3); border-radius:8px;">
                 <p style="margin:0; color:var(--warning-color); font-size:13px; font-weight:500;">
-                  ⚠️ ${t('apps.quickUpdateDowngradeWarn').replace('{old}', app.version || '1.0.0').replace('{new}', state.newVersion)}
+                  &#9888;&#65039; ${t('apps.quickUpdateDowngradeWarn').replace('{old}', app.version || '1.0.0').replace('{new}', state.newVersion)}
                 </p>
               </div>
             ` : ''}
@@ -816,7 +836,7 @@ const AppsPage = {
     }
   },
 
-  // ─── Winget Single-App Update Dialog ───────────────
+  // â”€â”€â”€ Winget Single-App Update Dialog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async wingetUpdateDialog(id) {
     const app = await window.api.apps.get(id);
     if (!app || !app.wingetId) return;
@@ -824,14 +844,14 @@ const AppsPage = {
     const body = `
       <div style="display:flex;flex-direction:column;gap:12px;">
         <div style="display:flex;align-items:center;gap:12px;">
-          <div style="width:44px;height:44px;border-radius:10px;background:var(--accent-primary-dim);display:flex;align-items:center;justify-content:center;font-size:24px;">🪟</div>
+          <div style="width:44px;height:44px;border-radius:10px;background:var(--accent-primary-dim);display:flex;align-items:center;justify-content:center;font-size:24px;">&#128230;</div>
           <div>
             <div style="font-size:17px;font-weight:700;color:var(--text-primary);">${this.esc(app.name)}</div>
             <div style="font-size:12px;color:var(--text-muted);font-family:monospace;">${this.esc(app.wingetId)}</div>
           </div>
         </div>
         <div style="padding:10px 14px;background:var(--bg-input);border-radius:8px;display:flex;justify-content:space-between;font-size:13px;">
-          <span style="color:var(--text-muted);">Versión actual</span>
+          <span style="color:var(--text-muted);">VersiÃ³n actual</span>
           <span style="font-weight:600;">v${this.esc(app.version || '1.0.0')}</span>
         </div>
         <div id="wud-status" style="text-align:center;padding:16px;">
@@ -851,7 +871,7 @@ const AppsPage = {
       const updateBtn = document.getElementById('wud-update-btn');
 
       if (!latestVersion) {
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted);font-size:13px;">No se pudo verificar la versión más reciente</span>';
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted);font-size:13px;">No se pudo verificar la versiÃ³n mÃ¡s reciente</span>';
         return;
       }
 
@@ -886,7 +906,7 @@ const AppsPage = {
     }
   },
 
-  // ─── Winget Update Check ────────────────────────────
+  // â”€â”€â”€ Winget Update Check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async checkUpdates() {
     const panel = document.getElementById('apps-updates-panel');
     if (!panel) return;
@@ -957,7 +977,7 @@ const AppsPage = {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-secondary)" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
             <span style="font-size:var(--font-sm);color:var(--text-secondary);">${t('apps.noUpdatesFound')}</span>
           </div>
-          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('apps-updates-panel').style.display='none'">✕</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('apps-updates-panel').style.display='none'">&times;</button>
         </div>`;
     }
 
@@ -969,7 +989,7 @@ const AppsPage = {
         </div>
         <div style="font-size:var(--font-sm);white-space:nowrap;">
           <span style="color:var(--text-muted);">v${this.esc(r.currentVersion)}</span>
-          <span style="color:var(--accent-primary);margin:0 6px;">→</span>
+          <span style="color:var(--accent-primary);margin:0 6px;">&#8594;</span>
           <span style="color:var(--accent-secondary);font-weight:600;">v${this.esc(r.latestVersion)}</span>
         </div>
         <button class="btn btn-primary btn-sm update-app-btn" data-idx="${i}" style="white-space:nowrap;min-width:90px;">
@@ -989,7 +1009,7 @@ const AppsPage = {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg>
             ${t('apps.updateAll')}
           </button>` : ''}
-          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('apps-updates-panel').style.display='none'" style="margin-left:4px;">✕</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('apps-updates-panel').style.display='none'" style="margin-left:4px;">&times;</button>
         </div>
         <div style="display:flex;flex-direction:column;gap:8px;">
           ${rows}
@@ -1082,7 +1102,7 @@ const AppsPage = {
     }
   },
 
-  // ─── Selection ─────────────────────────────────────
+  // â”€â”€â”€ Selection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   toggleSelect(id, checked) {
     if (checked) this.selectedIds.add(id); else this.selectedIds.delete(id);
     const card = document.querySelector(`.app-card[data-id="${id}"]`);
@@ -1246,7 +1266,7 @@ const AppsPage = {
         t('apps.bulkDeleteTitle'),
         `<div style="display:flex;flex-direction:column;gap:12px;">
           <div style="padding:10px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;font-size:13px;color:var(--text-secondary);">
-            <strong style="color:var(--accent-danger);">⚠ ${t('apps.bulkDeleteWarning').replace('{count}', validApps.length)}</strong>
+            <strong style="color:var(--accent-danger);">&#9888;&#65039; ${t('apps.bulkDeleteWarning').replace('{count}', validApps.length)}</strong>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto;">
             ${listHtml}
@@ -1304,7 +1324,7 @@ const AppsPage = {
     }
   },
 
-  // ─── Wizard ────────────────────────────────────────
+  // â”€â”€â”€ Wizard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async openWizard(existingApp = null) {
     if (this._wizardOpening) return;
     this._wizardOpening = true;
@@ -1332,7 +1352,7 @@ const AppsPage = {
         if (fallbackTemplate) templates.push(fallbackTemplate);
       }
 
-      // Pre-fetch OUs — always refresh for new apps so stale tree/baseOU change is reflected
+      // Pre-fetch OUs â€” always refresh for new apps so stale tree/baseOU change is reflected
       if (!isEdit) { this.ousTreeCache = null; this.ousCache = null; }
       if (App.rsatAvailable && !App.rsatMissingGPMC && !this.ousTreeCache) {
         try {
@@ -1341,7 +1361,7 @@ const AppsPage = {
             this.ousTreeCache = ouResult.data;
             this.ousCache = this.flattenOUs(ouResult.data);
           }
-        } catch (e) { /* AD unavailable – OU list will be empty */ }
+        } catch (e) { /* AD unavailable â€“ OU list will be empty */ }
       }
 
       // When editing, prefer the installer path on the share (where it actually
@@ -1429,18 +1449,18 @@ const AppsPage = {
       if (state.step === 1) {
         const catalog = catalogData?.catalog || [];
 
-        // ── Tab bar ──────────────────────────────────────────────────
+        // â”€â”€ Tab bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         const tabStyle = (active) => `padding:8px 18px;background:none;border:none;border-bottom:2px solid ${active ? 'var(--primary-color)' : 'transparent'};cursor:pointer;font-size:13px;font-weight:600;color:${active ? 'var(--primary-color)' : 'var(--text-secondary)'};margin-bottom:-1px;transition:color .15s,border-color .15s;`;
         body += `
           <div style="display:flex;gap:0;border-bottom:1px solid var(--border-color);margin-bottom:var(--space-md);">
-            <button class="wiz-tab" data-tab="catalog" style="${tabStyle(state.catalogTab==='catalog')}">🛒 Catálogo</button>
-            <button class="wiz-tab" data-tab="plantilla" style="${tabStyle(state.catalogTab==='plantilla')}">📋 Plantilla</button>
-            <button class="wiz-tab" data-tab="manual" style="${tabStyle(state.catalogTab==='manual')}">📦 Manual</button>
+            <button class="wiz-tab" data-tab="catalog" style="${tabStyle(state.catalogTab==='catalog')}">&#128722; Catálogo</button>
+            <button class="wiz-tab" data-tab="plantilla" style="${tabStyle(state.catalogTab==='plantilla')}">&#128203; Plantilla</button>
+            <button class="wiz-tab" data-tab="manual" style="${tabStyle(state.catalogTab==='manual')}">&#128230; Manual</button>
           </div>
         `;
 
         if (state.catalogTab === 'catalog') {
-          // ── Search + category filter ─────────────────────────────
+          // â”€â”€ Search + category filter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
           const cats = ['Todo', ...new Set(catalog.map(c => c.category))];
           const catBtnStyle = (active) => `padding:4px 10px;border-radius:20px;border:1px solid var(--border-color);background:${active ? 'var(--primary-color)' : 'transparent'};color:${active ? '#fff' : 'var(--text-secondary)'};cursor:pointer;font-size:11px;white-space:nowrap;`;
           const activeCat = state.catalogCat || 'Todo';
@@ -1471,7 +1491,7 @@ const AppsPage = {
                 <h5 style="font-size:10px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;letter-spacing:.05em;">Microsoft Office</h5>
                 <div class="template-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));">
                   <div class="template-card catalog-item ${odtSel ? 'selected' : ''}" data-catalog-type="odt" style="cursor:pointer;" tabindex="0">
-                    <div class="template-card-icon" style="font-size:22px;">🏢</div>
+                    <div class="template-card-icon" style="font-size:22px;">&#127970;</div>
                     <div class="template-card-name" style="font-size:11px;">Microsoft Office</div>
                     <div class="template-card-desc" style="font-size:10px;">365 / LTSC 2021 / 2019</div>
                   </div>
@@ -1540,7 +1560,7 @@ const AppsPage = {
                        data-winget-source="${this.esc(item.wingetSource || 'winget')}"
                        data-app-name="${this.esc(item.name)}" data-app-version="${this.esc(item.version||'')}"
                        style="cursor:pointer;">
-                    <div class="template-card-icon" style="font-size:22px;">📦</div>
+                    <div class="template-card-icon" style="font-size:22px;">&#128230;</div>
                     <div class="template-card-name" style="font-size:11px;">${this.esc(item.name)}</div>
                     ${item.version ? `<div class="template-card-desc" style="font-size:10px;">v${this.esc(item.version)}</div>` : ''}
                   </div>`;
@@ -1552,7 +1572,7 @@ const AppsPage = {
           }
 
         } else if (state.catalogTab === 'plantilla') {
-          // ── Plantilla tab: Non-General templates + Office XML ─────
+          // â”€â”€ Plantilla tab: Non-General templates + Office XML â”€â”€â”€â”€â”€
           const preferredPlantillaCats = ['Security', 'Connectivity', 'RMM', 'Backups', 'Corporate', 'Custom'];
           const plantillaCats = [
             ...preferredPlantillaCats.filter(cat => templates.some(tmpl => tmpl.category === cat && tmpl.id !== 'office')),
@@ -1625,7 +1645,7 @@ const AppsPage = {
           body += `</div>`;
 
         } else {
-          // ── Manual tab: only Genérica and Script Custom ──
+          // â”€â”€ Manual tab: only GenÃ©rica and Script Custom â”€â”€
           const manualTmpls = templates.filter(tmpl => tmpl.id === 'generic' || tmpl.id === 'custom');
           body += `
             <div style="max-height:360px;overflow-y:auto;padding-right:2px;">
@@ -1697,10 +1717,10 @@ const AppsPage = {
         }
 
         if (isWinget) {
-          // ── Winget mode: info panel + wingetId display ──────────
+          // â”€â”€ Winget mode: info panel + wingetId display â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
           body += `
           <div style="padding:12px 14px;background:rgba(108,99,255,0.07);border:1px solid rgba(108,99,255,0.25);border-radius:8px;margin-bottom:12px;">
-            <div style="font-weight:600;font-size:13px;margin-bottom:4px;color:var(--primary-color);">📦 Windows Package Manager</div>
+            <div style="font-weight:600;font-size:13px;margin-bottom:4px;color:var(--primary-color);">&#128230; Windows Package Manager</div>
             <p style="margin:0 0 8px 0;font-size:12px;color:var(--text-secondary);">Se instalará automáticamente usando winget. No es necesario descargar ningún instalador.</p>
             <div class="form-group" style="margin-bottom:0;">
               <label class="form-label">Winget ID</label>
@@ -1713,7 +1733,7 @@ const AppsPage = {
           </div>`;
 
         } else if (isODT) {
-          // ── ODT mode: product radio-cards + app chip-toggles + options row ──
+          // â”€â”€ ODT mode: product radio-cards + app chip-toggles + options row â”€â”€
           const odtProds = catalogData?.odtProducts || [];
           const odtApps2 = catalogData?.odtApps || [];
           const odtLangs = catalogData?.odtLanguages || [];
@@ -1726,7 +1746,7 @@ const AppsPage = {
           body += `
           <div class="odt-wizard">
             <div class="odt-header">
-              <div class="odt-header-icon">🏢</div>
+              <div class="odt-header-icon">&#127970;</div>
               <div>
                 <div class="odt-header-title">Microsoft Office</div>
                 <div class="odt-header-sub">Office Deployment Tool · Sin descarga manual</div>
@@ -1794,13 +1814,13 @@ const AppsPage = {
                 <span class="odt-summary-val" id="odt-sum-opts">${this.esc(curChan?.label || cfg.channel)} · ${this.esc(curLang?.label || cfg.language)} · ${cfg.arch} bits</span>
               </div>
               <div class="odt-summary-warning">
-                ⏱ La instalación puede tardar entre 20 y 60 minutos en los equipos cliente
+                â± La instalaciÃ³n puede tardar entre 20 y 60 minutos en los equipos cliente
               </div>
             </div>
           </div>`;
 
         } else {
-          // ── Standard installer mode ─────────────────────────────
+          // â”€â”€ Standard installer mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
           body += `
           ${state.template !== 'custom' ? `
             <div class="form-group">
@@ -1834,7 +1854,7 @@ const AppsPage = {
                     ${t('apps.commonArgs')}
                   </button>
                 </div>
-                ${isUserTemplate ? `<p class="form-hint">${this.tr('apps.customTemplateSilentHint', 'Estos argumentos base se anaden antes de los argumentos definidos en la plantilla.')}</p>` : ''}
+                ${isUserTemplate ? `<p class="form-hint">${this.tr('apps.customTemplateSilentHint', 'Estos argumentos base se añaden antes de los argumentos definidos en la plantilla.')}</p>` : ''}
               </div>
             </div>
           ` : ''}`;
@@ -1855,8 +1875,8 @@ const AppsPage = {
             </div>
             <div class="form-group" style="flex:1;display:flex;align-items:stretch;">
               <label class="checkbox-wrapper checkbox-panel" style="align-items:center;">
-                <input type="checkbox" id="wiz-notify" ${state.notifyUser ? 'checked' : ''}>
-                <span>🔔 ${t('apps.notifyUser')}</span>
+                <input type="checkbox" class="checkbox-select" id="wiz-notify" ${state.notifyUser ? 'checked' : ''}>
+                <span>&#128276; ${t('apps.notifyUser')}</span>
               </label>
             </div>
           </div>
@@ -1907,7 +1927,7 @@ const AppsPage = {
           ${isUserTemplate && tmpl?.hasCustomScript ? `
             <div style="padding:12px 14px;background:rgba(30,144,255,0.08);border:1px solid rgba(30,144,255,0.2);border-radius:8px;margin-top:8px;">
               <div style="font-weight:600;font-size:13px;color:var(--text-primary);margin-bottom:4px;">${this.tr('apps.customTemplatePostScriptTitle', 'Script adicional')}</div>
-              <p style="margin:0;font-size:12px;color:var(--text-secondary);">${this.tr('apps.customTemplatePostScriptHint', 'La plantilla incluye un script opcional que se ejecutara despues del instalador con acceso a los valores y archivos auxiliares definidos.')}</p>
+              <p style="margin:0;font-size:12px;color:var(--text-secondary);">${this.tr('apps.customTemplatePostScriptHint', 'La plantilla incluye un script opcional que se ejecutará después del instalador con acceso a los valores y archivos auxiliares definidos.')}</p>
             </div>
           ` : ''}
         `;
@@ -1931,8 +1951,8 @@ const AppsPage = {
 
           <div class="form-group mb-md">
             <label class="checkbox-wrapper checkbox-panel checkbox-panel--accent">
-              <input type="checkbox" id="wiz-create-gpo" ${state.createGPO ? 'checked' : ''}>
-              <span style="font-weight:600;color:var(--primary-color)">✨ ${t('apps.createGpoCheckbox')}</span>
+              <input type="checkbox" class="checkbox-select" id="wiz-create-gpo" ${state.createGPO ? 'checked' : ''}>
+              <span style="font-weight:600;color:var(--primary-color)">âœ¨ ${t('apps.createGpoCheckbox')}</span>
             </label>
           </div>
 
@@ -1952,7 +1972,7 @@ const AppsPage = {
             </div>
           </div>
           <div class="code-header">
-            <span>📄 install.ps1</span>
+            <span>&#128196; install.ps1</span>
             <button class="btn btn-ghost btn-sm" onclick="AppsPage.copyScript()">${t('apps.copyBtn')}</button>
           </div>
           <pre class="code-preview" id="script-preview">${t('apps.generatingScript')}</pre>`;
@@ -1993,7 +2013,7 @@ const AppsPage = {
   },
 
   bindWizardEvents(state, templates, renderWizard, isEdit, existingApp) {
-    // ── Tab switching (catalog / agentes / manual) ──────────────
+    // â”€â”€ Tab switching (catalog / agentes / manual) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     document.querySelectorAll('.wiz-tab').forEach(tab => {
       tab.addEventListener('click', () => {
         state.catalogTab = tab.dataset.tab;
@@ -2009,7 +2029,7 @@ const AppsPage = {
       });
     });
 
-    // ── Catalog item selection (winget / ODT cards in catalog tab) ──
+    // â”€â”€ Catalog item selection (winget / ODT cards in catalog tab) â”€â”€
     document.querySelectorAll('.catalog-item').forEach(card => {
       card.addEventListener('click', (e) => {
         e.stopPropagation(); // prevent the generic .template-card handler below
@@ -2051,7 +2071,7 @@ const AppsPage = {
       });
     });
 
-    // ── Template selection (plantilla / manual tabs) ──────────────
+    // â”€â”€ Template selection (plantilla / manual tabs) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     document.querySelectorAll('.template-card:not(.catalog-item)').forEach(card => {
       card.addEventListener('click', () => {
         if (state.template !== card.dataset.template) {
@@ -2090,7 +2110,7 @@ const AppsPage = {
       });
     }
 
-    // ── Catalog search input (two-phase: curated + winget CLI) ──
+    // â”€â”€ Catalog search input (two-phase: curated + winget CLI) â”€â”€
     const catalogSearchInput = document.getElementById('catalog-search');
     if (catalogSearchInput) {
       // Enter: fire CLI search immediately (don't let it bubble to Next button)
@@ -2131,7 +2151,7 @@ const AppsPage = {
       });
     }
 
-    // ── Plantilla search input ────────────────────────────────
+    // â”€â”€ Plantilla search input â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const plantillaSearchInput = document.getElementById('plantilla-search');
     if (plantillaSearchInput) {
       plantillaSearchInput.addEventListener('input', () => {
@@ -2146,7 +2166,7 @@ const AppsPage = {
       });
     }
 
-    // ── Catalog category filter buttons ────────────────────────
+    // â”€â”€ Catalog category filter buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     document.querySelectorAll('.catalog-cat-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         state.catalogCat = btn.dataset.cat;
@@ -2237,7 +2257,7 @@ const AppsPage = {
              }
           }
 
-          // Auto-suggest name from filename — only if user hasn't typed one yet
+          // Auto-suggest name from filename â€” only if user hasn't typed one yet
           if (!state.name.trim()) {
             const basename = file.split(/[\\/]/).pop() || '';
             const nameWithoutExt = basename.replace(/\.[^.]+$/, '');
@@ -2266,7 +2286,7 @@ const AppsPage = {
       });
     }
 
-    // Suggested version bubble click → apply to input
+    // Suggested version bubble click â†’ apply to input
     const versionSuggestion = document.getElementById('wiz-version-suggestion');
     if (versionSuggestion) {
       versionSuggestion.addEventListener('click', () => {
@@ -2304,7 +2324,7 @@ const AppsPage = {
         const file = await window.api.config.selectFile([{
           name: fileField.label || this.tr(
             this.isInstallerTemplateFile(fileField) ? 'apps.customTemplateInstallerFile' : 'apps.customTemplateConfigFile',
-            this.isInstallerTemplateFile(fileField) ? 'Instalador adjunto' : 'Archivo de configuracion'
+            this.isInstallerTemplateFile(fileField) ? 'Instalador adjunto' : 'Archivo de configuración'
           ),
           extensions: normalizedExtensions
         }]);
@@ -2343,7 +2363,7 @@ const AppsPage = {
         const arch = document.getElementById('odt-arch');
         const sumOpts = document.getElementById('odt-sum-opts');
         if (sumOpts && lang && chan && arch) {
-          sumOpts.textContent = `${chan.options[chan.selectedIndex]?.text} · ${lang.options[lang.selectedIndex]?.text} · ${arch.value} bits`;
+          sumOpts.textContent = `${chan.options[chan.selectedIndex]?.text} Â· ${lang.options[lang.selectedIndex]?.text} Â· ${arch.value} bits`;
         }
 
         // Sync active class on radio cards
@@ -2499,7 +2519,7 @@ const AppsPage = {
                  data-winget-source="${this.esc(item.wingetSource || 'winget')}"
                  data-app-name="${this.esc(item.name)}" data-app-version="${this.esc(item.version || '')}"
                  style="cursor:pointer;">
-              <div class="template-card-icon" style="font-size:22px;">📦</div>
+              <div class="template-card-icon" style="font-size:22px;">ðŸ“¦</div>
               <div class="template-card-name" style="font-size:11px;">${this.esc(item.name)}</div>
               ${item.version ? `<div class="template-card-desc" style="font-size:10px;">v${this.esc(item.version)}</div>` : ''}
             </div>`).join('')}
@@ -2599,10 +2619,10 @@ const AppsPage = {
           ? (this.ousCache.find(o => o.dn === dn) || {}).name || dn
           : dn;
         return `<span style="display:inline-flex;align-items:center;gap:6px;background:rgba(30,144,255,0.15);color:var(--primary-color);padding:2px 10px;border-radius:4px;font-size:12px;">
-          📁 ${this.esc(name)}
-          <button class="btn btn-ghost btn-sm btn-remove-ou" data-dn="${this.esc(dn)}" style="font-size:11px;padding:0 4px;min-height:auto;">✕</button>
+          &#128193; ${this.esc(name)}
+          <button class="btn btn-ghost btn-sm btn-remove-ou" data-dn="${this.esc(dn)}" style="font-size:11px;padding:0 4px;min-height:auto;">&times;</button>
         </span>`;
-      }).join('') + `<button class="btn btn-ghost btn-sm" id="btn-clear-ou" style="font-size:11px;margin-left:4px;opacity:.7;">${t('common.clear') || 'Borrar selección'}</button>`;
+      }).join('') + `<button class="btn btn-ghost btn-sm" id="btn-clear-ou" style="font-size:11px;margin-left:4px;opacity:.7;">${t('common.clear') || 'Borrar selecciÃ³n'}</button>`;
 
       // Bind remove-one buttons
       selectedDisplay.querySelectorAll('.btn-remove-ou').forEach(btn => {
@@ -2763,7 +2783,7 @@ const AppsPage = {
           : ''))
       : '';
     const gpoDisplay = state.createGPO
-      ? `<span style="color:var(--primary-color);">✨ ${t('apps.confirmAutoGpo')}: Deploy_${this.esc(state.name.trim().replace(/\s/g, '_'))}</span>`
+      ? `<span style="color:var(--primary-color);">&#10024; ${t('apps.confirmAutoGpo')}: Deploy_${this.esc(state.name.trim().replace(/\s/g, '_'))}</span>`
       : (state.gpoName ? this.esc(state.gpoName) : `<span style="color:var(--text-muted);">${t('apps.confirmNoGpo')}</span>`);
 
     const paramsHtml = state.customParams && Object.keys(state.customParams).length > 0
@@ -2971,7 +2991,7 @@ const AppsPage = {
             if (failed.length > 0) {
               App.toast(`${t('apps.gpoWarningOnlyServer')} ${failed.map(r => r.error).join(', ')}`, 'warning');
             }
-          } catch (e) { /* non-fatal — script is deployed even if link fails */ }
+          } catch (e) { /* non-fatal â€” script is deployed even if link fails */ }
         }
       } else {
         if (App.isShareError(deployResult.error)) { App.handleShareError(); App.closeModal(); App.navigate('apps'); return; }
@@ -2993,7 +3013,7 @@ const AppsPage = {
     }
   },
 
-  // ─── GPO conflict handler ──────────────────────────
+  // â”€â”€â”€ GPO conflict handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Called when "Create GPO automatically" is checked. If the GPO name already
   // exists in AD (and follows the program's naming convention), asks the user
   // what to do before proceeding.
@@ -3011,7 +3031,7 @@ const AppsPage = {
             t('apps.gpoConflictTitle') || 'GPO ya existe',
             `<div style="display:flex;flex-direction:column;gap:12px;">
               <div style="padding:12px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;font-size:13px;color:var(--text-secondary);">
-                <strong style="color:var(--accent-warning);">⚠ ${this.esc(gpoName)}</strong><br>
+                <strong style="color:var(--accent-warning);">&#9888;&#65039; ${this.esc(gpoName)}</strong><br>
                 ${t('apps.gpoConflictBody') || 'Esta GPO ya existe en Active Directory. Fue creada por este programa.'}
               </div>
               <p style="font-size:13px;color:var(--text-muted);margin:0;">${t('apps.gpoConflictQuestion') || '¿Qué deseas hacer?'}</p>
@@ -3040,7 +3060,7 @@ const AppsPage = {
             return;
           }
         }
-        // 'update' or post-'replace' → fall through to createGPO
+        // 'update' or post-'replace' â†’ fall through to createGPO
       }
     }
 
@@ -3055,7 +3075,7 @@ const AppsPage = {
     }
   },
 
-  // ─── Actions ───────────────────────────────────────
+  // â”€â”€â”€ Actions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async previewScript(id) {
     const app = await window.api.apps.get(id);
     if (!app) return;
@@ -3064,7 +3084,7 @@ const AppsPage = {
 
     App.openModal(`Script: ${app.name}`, `
       <div class="code-header">
-        <span>📄 install.ps1</span>
+        <span>&#128196; install.ps1</span>
         <button class="btn btn-ghost btn-sm" onclick="AppsPage.copyScript()">${t('apps.copyBtn')}</button>
       </div>
       <pre class="code-preview" id="script-preview">${this.esc(script)}</pre>
@@ -3101,7 +3121,7 @@ const AppsPage = {
       <p>${t('apps.disableMsg').replace('{app}', `<strong>${this.esc(app.name)}</strong>`)}</p>
       ${hasGPO ? `
         <div class="form-group mt-md" style="background: rgba(255,165,0,0.08); border: 1px solid rgba(255,165,0,0.25); border-radius:8px; padding:12px;">
-          <p style="margin:0 0 8px 0; color:var(--warning-color); font-weight:600;">⚠️ Esta app tiene la GPO "${this.esc(app.gpoName)}" asignada</p>
+          <p style="margin:0 0 8px 0; color:var(--warning-color); font-weight:600;">&#9888;&#65039; Esta app tiene la GPO "${this.esc(app.gpoName)}" asignada</p>
           ${hasOUs ? `
             <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
               <input type="checkbox" id="chk-unlink-gpo" checked style="width:auto; cursor:pointer;">
@@ -3359,7 +3379,7 @@ const AppsPage = {
     if (fileField?.destinationName) {
       parts.push(this.tr('apps.customTemplateTargetName', 'Destino') + ': ' + fileField.destinationName);
     }
-    return parts.join(' | ') || this.tr('apps.customTemplateConfigFile', 'Archivo de configuracion auxiliar');
+    return parts.join(' | ') || this.tr('apps.customTemplateConfigFile', 'Archivo de configuración auxiliar');
   },
 
   isXmlTemplateFile(fileField) {
@@ -3396,7 +3416,7 @@ const AppsPage = {
       fileFields.push({
         key,
         label: this.tr('apps.customTemplateXmlLabel', 'Archivo XML'),
-        hint: this.tr('apps.customTemplateXmlHint', 'XML solicitado por la plantilla. Se copiara al cache del equipo cliente y el script podra usar $ConfigXmlPath.'),
+        hint: this.tr('apps.customTemplateXmlHint', 'XML solicitado por la plantilla. Se copiará al caché del equipo cliente y el script podrá usar $ConfigXmlPath.'),
         storageKind: 'file',
         required: true,
         extensions: ['xml'],
@@ -3602,12 +3622,111 @@ const AppsPage = {
     });
   },
 
+  buildTemplateManagerRestoreState(extra = {}) {
+    const modalBody = document.getElementById('modal-body');
+    return {
+      scrollTop: modalBody ? modalBody.scrollTop : 0,
+      ...extra
+    };
+  },
+
+  restoreTemplateManagerAfterRender(state) {
+    const restore = state?.templateManagerRestore || null;
+    const shouldFocusName = state?.focusTemplateNameOnRender === true;
+    state.templateManagerRestore = null;
+    state.focusTemplateNameOnRender = false;
+
+    if (!restore && !shouldFocusName) return;
+
+    requestAnimationFrame(() => {
+      const modalBody = document.getElementById('modal-body');
+      if (modalBody && restore && Number.isFinite(restore.scrollTop)) {
+        modalBody.scrollTop = restore.scrollTop;
+      }
+
+      if (restore?.anchorSelector) {
+        const anchor = document.querySelector(restore.anchorSelector);
+        if (anchor) {
+          anchor.scrollIntoView({ block: restore.block || 'nearest', inline: 'nearest' });
+        }
+      }
+
+      const focusTarget = restore?.focusSelector ? document.querySelector(restore.focusSelector) : null;
+      if (focusTarget && typeof focusTarget.focus === 'function') {
+        focusTarget.focus({ preventScroll: true });
+        if (restore.selectText && typeof focusTarget.select === 'function') {
+          focusTarget.select();
+        }
+        return;
+      }
+
+      if (shouldFocusName) {
+        document.getElementById('tmpl-name')?.focus({ preventScroll: true });
+      }
+    });
+  },
+
+  rerenderTemplateManager(state, onClose, restore = {}) {
+    state.templateManagerRestore = this.buildTemplateManagerRestoreState(restore);
+    this.renderTemplateManager(state, onClose);
+  },
+
+  getConfiguredTemplateInstallerPath(state) {
+    const activeTemplateId = state?.selectedBuiltIn || state?.selectedId || null;
+    return activeTemplateId ? (state?.templateInstallers?.[activeTemplateId] || '') : '';
+  },
+
+  getPendingTemplateInstallerPath(state) {
+    const activeTemplateId = state?.selectedBuiltIn || state?.selectedId || null;
+    if (activeTemplateId) {
+      return state?.pendingTemplateInstallers?.[activeTemplateId] || '';
+    }
+    return state?.pendingNewInstallerPath || '';
+  },
+
+  setPendingTemplateInstallerPath(state, localPath) {
+    const normalizedPath = typeof localPath === 'string' ? localPath.trim() : '';
+    const activeTemplateId = state?.selectedBuiltIn || state?.selectedId || null;
+    if (activeTemplateId) {
+      state.pendingTemplateInstallers = { ...(state.pendingTemplateInstallers || {}) };
+      if (normalizedPath) {
+        state.pendingTemplateInstallers[activeTemplateId] = normalizedPath;
+      } else {
+        delete state.pendingTemplateInstallers[activeTemplateId];
+      }
+      return;
+    }
+    state.pendingNewInstallerPath = normalizedPath;
+  },
+
+  clearPendingTemplateInstallerPath(state) {
+    this.setPendingTemplateInstallerPath(state, '');
+  },
+
   renderTemplateManager(state, onClose) {
     const draft = state.draft || this.createEmptyTemplateDraft();
     const templates = Array.isArray(state.templates) ? state.templates : [];
     const builtInTemplates = Array.isArray(state.builtInTemplates) ? state.builtInTemplates : [];
     const templateInstallers = state.templateInstallers || {};
     const deleteUsageCount = Number.isFinite(state.deleteUsageCount) ? state.deleteUsageCount : 0;
+    const isSavingTemplate = state.isSavingTemplate === true;
+    const activeTemplateId = state.selectedBuiltIn || state.selectedId || null;
+    const configuredInstallerPath = this.getConfiguredTemplateInstallerPath(state);
+    const pendingInstallerPath = this.getPendingTemplateInstallerPath(state);
+    const currentInstallerPath = pendingInstallerPath || configuredInstallerPath;
+    const installerFileName = currentInstallerPath ? currentInstallerPath.replace(/.*[\\/]/, '') : '';
+    const hasPendingInstaller = !!pendingInstallerPath;
+    const installerStatus = state.installerStatus && typeof state.installerStatus.message === 'string'
+      ? state.installerStatus
+      : null;
+    const installerStatusTone = installerStatus?.type === 'error'
+      ? 'background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#dc2626;'
+      : installerStatus?.type === 'success'
+        ? 'background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:#16a34a;'
+        : 'background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.3);color:var(--text-primary);';
+    const installerBadgeTone = hasPendingInstaller
+      ? 'background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.35);color:var(--accent-info);'
+      : 'background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.35);color:#16a34a;';
 
     const builtInListHtml = builtInTemplates.map(tmpl => {
       const hasInstaller = !!templateInstallers[tmpl.id];
@@ -3617,7 +3736,7 @@ const AppsPage = {
           <div style="display:flex;align-items:center;gap:6px;">
             <span style="font-size:14px;">${this.templateIcon(tmpl.id)}</span>
             <div style="font-weight:600;color:var(--text-primary);font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${this.esc(tmpl.name)}</div>
-            ${hasInstaller ? `<span style="font-size:9px;background:rgba(34,197,94,.15);color:var(--accent-success,#22c55e);padding:1px 5px;border-radius:3px;flex-shrink:0;">✓</span>` : ''}
+            ${hasInstaller ? `<span style="font-size:9px;background:rgba(34,197,94,.15);color:var(--accent-success,#22c55e);padding:1px 5px;border-radius:3px;flex-shrink:0;">&#10003;</span>` : ''}
           </div>
         </button>`;
     }).join('');
@@ -3629,19 +3748,19 @@ const AppsPage = {
           <button class="template-manager-item ${state.selectedId === template.id ? 'active' : ''}" type="button" data-template-id="${this.esc(template.id)}">
             <div style="display:flex;align-items:center;gap:6px;">
               <div style="font-weight:600;color:var(--text-primary);font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${this.esc(template.name)}</div>
-              ${hasInstaller ? `<span style="font-size:9px;background:rgba(34,197,94,.15);color:var(--accent-success,#22c55e);padding:1px 5px;border-radius:3px;flex-shrink:0;">✓</span>` : ''}
+              ${hasInstaller ? `<span style="font-size:9px;background:rgba(34,197,94,.15);color:var(--accent-success,#22c55e);padding:1px 5px;border-radius:3px;flex-shrink:0;">&#10003;</span>` : ''}
             </div>
             <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">${this.esc(template.description || this.tr('apps.customTemplateDefaultDesc', 'Plantilla definida por el administrador'))}</div>
           </button>`;
         }).join('')
-      : `<div style="padding:14px;border:1px dashed var(--border-color);border-radius:8px;color:var(--text-muted);font-size:12px;">${this.tr('apps.customTemplatesEmpty', 'Todavia no hay plantillas personalizadas.')}</div>`;
+      : `<div style="padding:14px;border:1px dashed var(--border-color);border-radius:8px;color:var(--text-muted);font-size:12px;">${this.tr('apps.customTemplatesEmpty', 'Todavía no hay plantillas personalizadas.')}</div>`;
 
     const argumentRows = draft.arguments.map((arg, index) => `
       <div class="tmpl-arg-row" data-index="${index}" style="border:1px solid var(--border-color);border-radius:8px;padding:12px;margin-bottom:10px;background:var(--bg-secondary);">
         <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
           <div class="form-group" style="margin-bottom:0;">
             <label class="form-label">${this.tr('apps.customTemplateFieldLabel', 'Etiqueta')}</label>
-            <input class="form-input" data-field="label" value="${this.esc(arg.label)}" placeholder="Valor de configuracion">
+            <input class="form-input" data-field="label" value="${this.esc(arg.label)}" placeholder="Valor de configuración">
           </div>
           <div class="form-group" style="margin-bottom:0;">
             <label class="form-label">${this.tr('apps.customTemplateArgLabel', 'Argumento')}</label>
@@ -3658,11 +3777,11 @@ const AppsPage = {
         </div>
         <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:10px;">
           <label class="checkbox-wrapper" style="margin:0;">
-            <input type="checkbox" data-field="quote" ${arg.quoteValue !== false ? 'checked' : ''}>
+            <input type="checkbox" class="checkbox-select" data-field="quote" ${arg.quoteValue !== false ? 'checked' : ''}>
             <span>${this.tr('apps.customTemplateQuoteValue', 'Entrecomillar valor')}</span>
           </label>
           <label class="checkbox-wrapper" style="margin:0;">
-            <input type="checkbox" data-field="required" ${arg.required ? 'checked' : ''}>
+            <input type="checkbox" class="checkbox-select" data-field="required" ${arg.required ? 'checked' : ''}>
             <span>${this.tr('apps.customTemplateRequired', 'Obligatorio')}</span>
           </label>
           <label style="display:flex;align-items:center;gap:8px;color:var(--text-secondary);font-size:12px;">
@@ -3683,7 +3802,7 @@ const AppsPage = {
         <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
           <div class="form-group" style="margin-bottom:0;">
             <label class="form-label">${this.tr('apps.customTemplateFieldLabel', 'Etiqueta')}</label>
-            <input class="form-input" data-field="label" value="${this.esc(file.label)}" placeholder="${this.esc(this.isInstallerTemplateFile(file) ? 'Instalador adicional' : 'Archivo de configuracion')}">
+            <input class="form-input" data-field="label" value="${this.esc(file.label)}" placeholder="${this.esc(this.isInstallerTemplateFile(file) ? 'Instalador adicional' : 'Archivo de configuración')}">
           </div>
           <div class="form-group" style="margin-bottom:0;">
             <label class="form-label">${this.tr('apps.customTemplateExtensions', 'Extensiones')}</label>
@@ -3696,7 +3815,7 @@ const AppsPage = {
             </select>
           </div>
           <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label">${this.tr('apps.customTemplateInstallArg', 'Argumento de instalacion')}</label>
+            <label class="form-label">${this.tr('apps.customTemplateInstallArg', 'Argumento de instalación')}</label>
             <input class="form-input" data-field="argument" value="${this.esc(file.argumentName)}" placeholder="/configure">
           </div>
           <div class="form-group" style="margin-bottom:0;">
@@ -3706,17 +3825,17 @@ const AppsPage = {
           <div class="form-group" style="margin-bottom:0;grid-column:1 / -1;">
             <label class="form-label">${this.tr('apps.customTemplateHintLabel', 'Ayuda')}</label>
             <input class="form-input" data-field="hint" value="${this.esc(file.hint)}" placeholder="${this.esc(this.isInstallerTemplateFile(file)
-              ? this.tr('apps.customTemplateInstallerHintPlaceholder', 'Ejemplo: instalador auxiliar que se copiara al share sin sustituir al principal')
+              ? this.tr('apps.customTemplateInstallerHintPlaceholder', 'Ejemplo: instalador auxiliar que se copiará al share sin sustituir al principal')
               : this.tr('apps.customTemplateFileHintPlaceholder', 'Ejemplo: XML o CFG exportado desde la herramienta original'))}">
           </div>
         </div>
         <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:10px;">
           <label class="checkbox-wrapper" style="margin:0;">
-            <input type="checkbox" data-field="quote" ${file.quoteValue !== false ? 'checked' : ''}>
+            <input type="checkbox" class="checkbox-select" data-field="quote" ${file.quoteValue !== false ? 'checked' : ''}>
             <span>${this.tr('apps.customTemplateQuotePath', 'Entrecomillar ruta')}</span>
           </label>
           <label class="checkbox-wrapper" style="margin:0;">
-            <input type="checkbox" data-field="required" ${file.required ? 'checked' : ''}>
+            <input type="checkbox" class="checkbox-select" data-field="required" ${file.required ? 'checked' : ''}>
             <span>${this.tr('apps.customTemplateRequired', 'Obligatorio')}</span>
           </label>
           <label style="display:flex;align-items:center;gap:8px;color:var(--text-secondary);font-size:12px;">
@@ -3729,8 +3848,8 @@ const AppsPage = {
           <button class="btn btn-ghost btn-sm btn-remove-template-file" type="button" data-index="${index}">${this.tr('common.delete', 'Borrar')}</button>
         </div>
         <div style="margin-top:8px;font-size:11px;color:var(--text-muted);">${this.isInstallerTemplateFile(file)
-          ? this.tr('apps.customTemplateInstallerExample', 'El instalador adjunto se copiara al share en una carpeta separada y el script recibira su ruta cacheada en el equipo cliente.')
-          : this.tr('apps.customTemplateFileExample', 'Si defines un argumento, el instalador recibira la ruta cacheada del archivo en el equipo cliente.')}: <code class="tmpl-file-preview">${this.esc(this.getTemplateFilePreview(file))}</code></div>
+          ? this.tr('apps.customTemplateInstallerExample', 'El instalador adjunto se copiará al share en una carpeta separada y el script recibirá su ruta en caché en el equipo cliente.')
+          : this.tr('apps.customTemplateFileExample', 'Si defines un argumento, recibirá la ruta en caché del archivo en el equipo cliente.')}: <code class="tmpl-file-preview">${this.esc(this.getTemplateFilePreview(file))}</code></div>
       </div>
     `).join('');
 
@@ -3738,9 +3857,9 @@ const AppsPage = {
       <div class="card template-builder-section" style="border-color:rgba(220,38,38,0.28);background:rgba(220,38,38,0.08);">
         <div style="font-weight:700;color:var(--text-primary);margin-bottom:8px;">${this.tr('apps.customTemplateDeleteTitle', 'Borrar plantilla')}</div>
         <p class="form-hint" style="margin:0 0 10px 0;color:var(--text-secondary);">
-          ${this.tr('apps.customTemplateDeleteConfirm', 'Seguro que quieres borrar esta plantilla personalizada?')}
+          ${this.tr('apps.customTemplateDeleteConfirm', '¿Seguro que quieres borrar esta plantilla personalizada?')}
         </p>
-        ${deleteUsageCount > 0 ? `<p class="form-hint" style="margin:0 0 12px 0;color:var(--accent-warning);">${this.tr('apps.customTemplateDeleteWarning', 'Hay apps usando esta plantilla:')} ${deleteUsageCount}. ${this.tr('apps.customTemplateDeleteSnapshotHint', 'Las apps ya creadas conservaran su configuracion guardada, pero la plantilla dejara de estar disponible para nuevas apps.')}</p>` : ''}
+        ${deleteUsageCount > 0 ? `<p class="form-hint" style="margin:0 0 12px 0;color:var(--accent-warning);">${this.tr('apps.customTemplateDeleteWarning', 'Hay apps usando esta plantilla:')} ${deleteUsageCount}. ${this.tr('apps.customTemplateDeleteSnapshotHint', 'Las apps ya creadas conservarán su configuración guardada, pero la plantilla dejará de estar disponible para nuevas apps.')}</p>` : ''}
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn btn-secondary" type="button" id="btn-cancel-delete-template">${this.tr('common.cancel', 'Cancelar')}</button>
           <button class="btn btn-danger" type="button" id="btn-confirm-delete-template">${this.tr('apps.customTemplateDeleteAction', 'Eliminar plantilla')}</button>
@@ -3749,23 +3868,20 @@ const AppsPage = {
     ` : '';
 
     // Shared installer config panel
-    const activeTemplateId = state.selectedBuiltIn || state.selectedId || null;
-    const currentInstallerPath = activeTemplateId ? (templateInstallers[activeTemplateId] || '') : '';
-    const installerFileName = currentInstallerPath ? currentInstallerPath.replace(/.*[\\/]/, '') : '';
     const installerPanel = `
       <div class="card template-builder-section" style="border-color:rgba(30,144,255,0.25);background:rgba(30,144,255,0.04);">
-        <div style="font-weight:700;color:var(--text-primary);margin-bottom:6px;">📦 Instalador preconfigurado</div>
-        <p class="form-hint" style="margin:0 0 10px 0;">Si adjuntas el instalador aqui, se completara automaticamente cada vez que alguien cree una app con esta plantilla.</p>
-        ${currentInstallerPath ? `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.35);border-radius:6px;padding:4px 10px;margin-bottom:10px;font-size:12px;color:#16a34a;max-width:100%;overflow:hidden;">
-          <span style="flex-shrink:0;">✓</span>
+        <div style="font-weight:700;color:var(--text-primary);margin-bottom:6px;">Instalador preconfigurado</div>
+        <p class="form-hint" style="margin:0 0 10px 0;">Si adjuntas el instalador aquí, se completará automáticamente cada vez que alguien cree una app con esta plantilla.</p>
+        ${currentInstallerPath ? `<div style="display:inline-flex;align-items:center;gap:6px;${installerBadgeTone}border-radius:6px;padding:4px 10px;margin-bottom:10px;font-size:12px;max-width:100%;overflow:hidden;">
+          <span style="flex-shrink:0;">${hasPendingInstaller ? '&#8599;' : '&#10003;'}</span>
           <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:monospace;" title="${this.esc(currentInstallerPath)}">${this.esc(installerFileName)}</span>
         </div>` : ''}
         <div style="display:flex;gap:8px;align-items:center;">
           <input class="form-input" id="tmpl-installer-path" value="${this.esc(currentInstallerPath)}" placeholder="Sin instalador preconfigurado" readonly style="flex:1;font-family:monospace;font-size:12px;">
-          <button class="btn btn-secondary btn-sm" type="button" id="btn-browse-tmpl-installer">Seleccionar</button>
-          ${currentInstallerPath ? `<button class="btn btn-ghost btn-sm" type="button" id="btn-clear-tmpl-installer">✕</button>` : ''}
+          <button class="btn btn-secondary btn-sm" type="button" id="btn-browse-tmpl-installer" ${isSavingTemplate ? 'disabled' : ''}>Seleccionar</button>
+          ${currentInstallerPath ? `<button class="btn btn-ghost btn-sm" type="button" id="btn-clear-tmpl-installer" ${isSavingTemplate ? 'disabled' : ''}>&times;</button>` : ''}
         </div>
-        <div id="tmpl-installer-status" style="display:none;margin-top:10px;padding:8px 12px;border-radius:6px;font-size:13px;"></div>
+        <div id="tmpl-installer-status" style="display:${installerStatus ? 'block' : 'none'};margin-top:10px;padding:8px 12px;border-radius:6px;font-size:13px;${installerStatusTone}">${installerStatus ? this.esc(installerStatus.message) : ''}</div>
       </div>`;
 
     // Built-in template view (read-only, just installer config)
@@ -3776,7 +3892,7 @@ const AppsPage = {
         <div>
           <div style="font-size:16px;font-weight:700;color:var(--text-primary);">${this.esc(selectedBuiltInInfo.name)}</div>
           <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${this.esc(selectedBuiltInInfo.description || '')}</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;opacity:.7;">Plantilla del sistema · Solo lectura</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;opacity:.7;">Plantilla del sistema - Solo lectura</div>
         </div>
       </div>
       ${installerPanel}
@@ -3786,7 +3902,7 @@ const AppsPage = {
       <div class="template-manager-shell">
         <div class="template-manager-sidebar">
           ${builtInTemplates.length > 0 ? `
-            <button type="button" id="btn-toggle-system-section" style="display:flex;align-items:center;justify-content:space-between;width:100%;background:none;border:none;cursor:pointer;padding:4px 4px 6px;margin-bottom:2px;">
+            <button type="button" id="btn-toggle-system-section" style="display:flex;align-items:center;justify-content:space-between;width:100%;background:none;border:none;cursor:pointer;padding:4px 4px 6px;margin-bottom:2px;" ${isSavingTemplate ? 'disabled' : ''}>
               <span style="font-size:10px;text-transform:uppercase;color:var(--text-muted);letter-spacing:.06em;font-weight:600;">Sistema</span>
               <svg id="icon-system-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-muted);transform:${state.systemExpanded ? 'rotate(180deg)' : 'rotate(0deg)'};transition:transform .2s;"><polyline points="6 9 12 15 18 9"/></svg>
             </button>
@@ -3796,7 +3912,7 @@ const AppsPage = {
             <div style="height:1px;background:var(--border-color);margin:8px 0;"></div>
           ` : ''}
           <div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);letter-spacing:.06em;padding:4px 4px 6px;font-weight:600;">Personalizadas</div>
-          <button class="btn btn-primary" type="button" id="btn-new-template" style="width:100%;margin-bottom:8px;">${this.tr('apps.newCustomTemplate', 'Nueva plantilla')}</button>
+          <button class="btn btn-primary" type="button" id="btn-new-template" style="width:100%;margin-bottom:8px;" ${isSavingTemplate ? 'disabled' : ''}>${this.tr('apps.newCustomTemplate', 'Nueva plantilla')}</button>
           ${userListHtml}
         </div>
         <div class="template-manager-main">
@@ -3807,14 +3923,14 @@ const AppsPage = {
             <input class="form-input" id="tmpl-name" value="${this.esc(draft.name)}" placeholder="Plantilla personalizada">
           </div>
           <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label">${this.tr('apps.customTemplateDescription', 'Descripcion')}</label>
-            <textarea class="form-input" id="tmpl-description" rows="2" placeholder="${this.esc(this.tr('apps.customTemplateDescriptionPlaceholder', 'Explica que hace esta plantilla y que espera del operador.'))}">${this.esc(draft.description)}</textarea>
+            <label class="form-label">${this.tr('apps.customTemplateDescription', 'Descripción')}</label>
+            <textarea class="form-input" id="tmpl-description" rows="2" placeholder="${this.esc(this.tr('apps.customTemplateDescriptionPlaceholder', 'Explica qué hace esta plantilla y qué espera del operador.'))}">${this.esc(draft.description)}</textarea>
           </div>
           ${installerPanel}
           <div class="card template-builder-section">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;">
               <div style="font-weight:700;color:var(--text-primary);">${this.tr('apps.customTemplateArgsTitle', 'Argumentos')}</div>
-              <button class="btn btn-secondary btn-sm" type="button" id="btn-add-template-arg">${this.tr('apps.customTemplateAddArg', 'Anadir argumento')}</button>
+              <button class="btn btn-secondary btn-sm" type="button" id="btn-add-template-arg" ${isSavingTemplate ? 'disabled' : ''}>${this.tr('apps.customTemplateAddArg', 'Añadir argumento')}</button>
             </div>
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">${this.tr('apps.customTemplateArgsHint', 'Cada argumento crea un campo de texto en la app y se traduce a `ARGUMENTO=\"valor\"` o `ARGUMENTO valor`.')}</div>
             ${argumentRows || `<div style="color:var(--text-muted);font-size:12px;">${this.tr('apps.customTemplateArgsEmpty', 'No hay argumentos definidos.')}</div>`}
@@ -3822,15 +3938,15 @@ const AppsPage = {
           <div class="card template-builder-section">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;">
               <div style="font-weight:700;color:var(--text-primary);">${this.tr('apps.customTemplateFilesTitle', 'Archivos auxiliares')}</div>
-              <button class="btn btn-secondary btn-sm" type="button" id="btn-add-template-file">${this.tr('apps.customTemplateAddFile', 'Anadir archivo')}</button>
+              <button class="btn btn-secondary btn-sm" type="button" id="btn-add-template-file" ${isSavingTemplate ? 'disabled' : ''}>${this.tr('apps.customTemplateAddFile', 'Añadir archivo')}</button>
             </div>
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">${this.tr('apps.customTemplateFilesHint', 'Sirve para XML, CFG, JSON o instaladores adjuntos. Si anades aqui un XML, se pedira al crear la app y el script podra usar $ConfigXmlPath. Los instaladores adjuntos se guardan en el share sin sustituir al instalador principal. Si defines un argumento de instalacion, se pasara la ruta del archivo copiado al cache de despliegue.')}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">${this.tr('apps.customTemplateFilesHint', 'Sirve para XML, CFG, JSON o instaladores adjuntos. Si añades aquí un XML, se pedirá al crear la app y el script podrá usar $ConfigXmlPath. Los instaladores adjuntos se guardan en el share sin sustituir al instalador principal. Si defines un argumento de instalación, se pasará la ruta del archivo copiado al caché de despliegue.')}</div>
             ${fileRows || `<div style="color:var(--text-muted);font-size:12px;">${this.tr('apps.customTemplateFilesEmpty', 'No hay archivos definidos.')}</div>`}
           </div>
           <div class="card template-builder-section">
-            <div style="font-weight:700;color:var(--text-primary);margin-bottom:10px;">${this.tr('apps.customTemplateScriptTitle', 'Script opcional post-instalacion')}</div>
-            <textarea class="form-input" id="tmpl-script" rows="8" style="font-family:monospace;" placeholder="${this.esc(this.tr('apps.customTemplateScriptPlaceholder', 'Ejemplo:\nWrite-Host "Configuracion adicional aplicada"'))}">${this.esc(draft.script)}</textarea>
-            <p class="form-hint" style="margin-top:8px;">${this.tr('apps.customTemplateScriptHint', 'Variables disponibles: $TemplateValues.<clave>, $TemplateFiles.<clave>, $TemplateFileNames.<clave>, $ConfigXmlPath (si la plantilla incluye un XML), $Instalador y $CacheDir. Este script se ejecuta despues del instalador.')}</p>
+            <div style="font-weight:700;color:var(--text-primary);margin-bottom:10px;">${this.tr('apps.customTemplateScriptTitle', 'Script opcional post-instalación')}</div>
+            <textarea class="form-input" id="tmpl-script" rows="8" style="font-family:monospace;" placeholder="${this.esc(this.tr('apps.customTemplateScriptPlaceholder', 'Ejemplo:\nWrite-Host "Configuración adicional aplicada"'))}">${this.esc(draft.script)}</textarea>
+            <p class="form-hint" style="margin-top:8px;">${this.tr('apps.customTemplateScriptHint', 'Variables disponibles: $TemplateValues.<clave>, $TemplateFiles.<clave>, $TemplateFileNames.<clave>, $ConfigXmlPath (si la plantilla incluye un XML), $Instalador y $CacheDir. Este script se ejecuta después del instalador.')}</p>
           </div>
           `}
         </div>
@@ -3838,22 +3954,22 @@ const AppsPage = {
     `;
 
     const footer = `
-      <button class="btn btn-secondary" type="button" id="btn-close-template-manager">${this.tr('common.close', 'Cerrar')}</button>
+      <button class="btn btn-secondary" type="button" id="btn-close-template-manager" ${isSavingTemplate ? 'disabled' : ''}>${this.tr('common.close', 'Cerrar')}</button>
       <div style="flex:1"></div>
-      ${!state.selectedBuiltIn && state.selectedId ? `<button class="btn btn-danger" type="button" id="btn-delete-template">${this.tr('common.delete', 'Borrar')}</button>` : ''}
-      ${!state.selectedBuiltIn ? `<button class="btn btn-success" type="button" id="btn-save-template">${this.tr('common.save', 'Guardar')}</button>` : ''}
-      ${state.selectedBuiltIn ? `<button class="btn ${state.installerSaved ? 'btn-secondary' : 'btn-success'}" type="button" id="btn-save-tmpl-installer">${state.installerSaved ? this.tr('common.close', 'Cerrar') : 'Guardar instalador'}</button>` : ''}
+      ${!state.selectedBuiltIn && state.selectedId ? `<button class="btn btn-danger" type="button" id="btn-delete-template" ${isSavingTemplate ? 'disabled' : ''}>${this.tr('common.delete', 'Borrar')}</button>` : ''}
+      ${!state.selectedBuiltIn ? `<button class="btn btn-success" type="button" id="btn-save-template" ${isSavingTemplate ? 'disabled' : ''}>${isSavingTemplate ? 'Guardando...' : this.tr('common.save', 'Guardar')}</button>` : ''}
+      ${state.selectedBuiltIn ? `<button class="btn ${state.installerSaved ? 'btn-secondary' : 'btn-success'}" type="button" id="btn-save-tmpl-installer" ${isSavingTemplate ? 'disabled' : ''}>${isSavingTemplate ? 'Guardando...' : (state.installerSaved ? this.tr('common.close', 'Cerrar') : 'Guardar instalador')}</button>` : ''}
     `;
 
     App.openModal(this.tr('apps.manageTemplates', 'Plantillas'), body, footer, { size: 'full' });
+    App._modalLocked = isSavingTemplate;
     this.bindTemplateManagerEvents(state, onClose);
-    if (!state.selectedId && !state.selectedBuiltIn) {
-      requestAnimationFrame(() => document.getElementById('tmpl-name')?.focus());
-    }
+    this.restoreTemplateManagerAfterRender(state);
   },
 
   bindTemplateManagerEvents(state, onClose) {
     document.getElementById('btn-close-template-manager')?.addEventListener('click', async () => {
+      if (state.isSavingTemplate) return;
       App.closeModal();
       if (typeof onClose === 'function') await onClose();
     });
@@ -3864,6 +3980,11 @@ const AppsPage = {
       state.selectedBuiltIn = null;
       state.deleteConfirm = false;
       state.deleteUsageCount = 0;
+      state.pendingNewInstallerPath = '';
+      state.installerStatus = null;
+      state.isSavingTemplate = false;
+      state.installerSaved = false;
+      state.focusTemplateNameOnRender = true;
       this.renderTemplateManager(state, onClose);
     });
 
@@ -3882,7 +4003,11 @@ const AppsPage = {
         state.selectedBuiltIn = item.dataset.builtinId;
         state.selectedId = null;
         state.deleteConfirm = false;
-        this.renderTemplateManager(state, onClose);
+        state.installerStatus = null;
+        state.isSavingTemplate = false;
+        state.installerSaved = false;
+        state.focusTemplateNameOnRender = false;
+        this.rerenderTemplateManager(state, onClose);
       });
     });
 
@@ -3897,26 +4022,89 @@ const AppsPage = {
         state.draft = this.cloneTemplateDraft(template);
         state.deleteConfirm = false;
         state.deleteUsageCount = 0;
-        this.renderTemplateManager(state, onClose);
+        state.installerStatus = null;
+        state.isSavingTemplate = false;
+        state.installerSaved = false;
+        state.focusTemplateNameOnRender = false;
+        this.rerenderTemplateManager(state, onClose);
       });
     });
 
     // Browse installer button (for both built-in and user templates)
     document.getElementById('btn-browse-tmpl-installer')?.addEventListener('click', async () => {
+      if (state.isSavingTemplate) return;
       const file = await window.api.config.selectFile([{ name: 'Instalador (EXE/MSI)', extensions: ['exe', 'msi'] }]);
       if (!file) return;
-      state.installerSaved = false; // new file selected — re-enable save button
-      document.getElementById('tmpl-installer-path').value = file;
-      this.renderTemplateManager(state, onClose);
+      state.installerSaved = false; // new file selected â€” re-enable save button
+      this.setPendingTemplateInstallerPath(state, file);
+      state.installerStatus = {
+        type: 'info',
+        message: state.selectedBuiltIn
+          ? 'Instalador seleccionado. Pulsa Guardar instalador para subirlo al share.'
+          : 'Instalador seleccionado. Se subirá al share al guardar la plantilla.'
+      };
+      state.focusTemplateNameOnRender = false;
+      this.rerenderTemplateManager(state, onClose);
     });
 
-    document.getElementById('btn-clear-tmpl-installer')?.addEventListener('click', () => {
+    document.getElementById('btn-clear-tmpl-installer')?.addEventListener('click', async () => {
+      if (state.isSavingTemplate) return;
       const activeId = state.selectedBuiltIn || state.selectedId;
-      if (!activeId) return;
-      state.templateInstallers = { ...state.templateInstallers };
-      delete state.templateInstallers[activeId];
-      this.renderTemplateManager(state, onClose);
-      window.api.config.set({ templateInstallers: state.templateInstallers }).catch(() => {});
+      if (this.getPendingTemplateInstallerPath(state)) {
+        this.clearPendingTemplateInstallerPath(state);
+        state.installerStatus = null;
+        state.installerSaved = false;
+        state.focusTemplateNameOnRender = false;
+        this.rerenderTemplateManager(state, onClose);
+        return;
+      }
+      const configuredInstallerPath = this.getConfiguredTemplateInstallerPath(state).trim();
+      if (!activeId || !configuredInstallerPath) return;
+      state.isSavingTemplate = true;
+      state.installerStatus = {
+        type: 'info',
+        message: 'Eliminando instalador del share...'
+      };
+      state.focusTemplateNameOnRender = false;
+      this.rerenderTemplateManager(state, onClose);
+      try {
+        const deleteResult = await window.api.templates.deleteInstaller(activeId);
+        if (!deleteResult?.success) {
+          state.isSavingTemplate = false;
+          state.installerStatus = {
+            type: 'error',
+            message: `No se pudo eliminar el instalador: ${deleteResult?.error || 'Error desconocido'}`
+          };
+          App.toast(`Error: ${deleteResult?.error || 'No se pudo eliminar el instalador'}`, 'error');
+          this.rerenderTemplateManager(state, onClose);
+          return;
+        }
+
+        const nextTemplateInstallers = { ...state.templateInstallers };
+        delete nextTemplateInstallers[activeId];
+        const saveConfigResult = await window.api.config.set({ templateInstallers: nextTemplateInstallers });
+        if (saveConfigResult?.success === false) {
+          throw new Error(saveConfigResult.error || 'No se pudo actualizar la configuración');
+        }
+
+        state.templateInstallers = nextTemplateInstallers;
+        state.isSavingTemplate = false;
+        state.installerStatus = {
+          type: 'success',
+          message: 'Instalador preconfigurado eliminado.'
+        };
+        state.installerSaved = !!state.selectedBuiltIn;
+        App.toast('Instalador preconfigurado eliminado.', 'success');
+        this.rerenderTemplateManager(state, onClose);
+      } catch (err) {
+        state.isSavingTemplate = false;
+        state.installerStatus = {
+          type: 'error',
+          message: `No se pudo eliminar el instalador: ${err?.message || 'Error desconocido'}`
+        };
+        App.toast(`Error: ${err?.message || 'No se pudo eliminar el instalador'}`, 'error');
+        this.rerenderTemplateManager(state, onClose);
+      }
     });
 
     // Save installer for built-in template (also acts as "Cerrar" after a successful save)
@@ -3926,46 +4114,64 @@ const AppsPage = {
         if (onClose) await onClose();
         return;
       }
+      if (state.isSavingTemplate) return;
       const activeId = state.selectedBuiltIn;
       if (!activeId) return;
-      const localPath = document.getElementById('tmpl-installer-path')?.value?.trim() || '';
+      const localPath = this.getPendingTemplateInstallerPath(state).trim()
+        || document.getElementById('tmpl-installer-path')?.value?.trim()
+        || '';
       if (!localPath) {
         App.toast('Selecciona un instalador primero', 'warning');
         return;
       }
-      const btn = document.getElementById('btn-save-tmpl-installer');
-      const statusDiv = document.getElementById('tmpl-installer-status');
-      const showStatus = (msg, color) => {
-        if (!statusDiv) return;
-        statusDiv.style.display = 'block';
-        statusDiv.style.background = color === 'error' ? 'rgba(239,68,68,0.1)' : color === 'success' ? 'rgba(34,197,94,0.1)' : 'rgba(59,130,246,0.1)';
-        statusDiv.style.border = `1px solid ${color === 'error' ? 'rgba(239,68,68,0.3)' : color === 'success' ? 'rgba(34,197,94,0.3)' : 'rgba(59,130,246,0.3)'}`;
-        statusDiv.style.color = color === 'error' ? '#dc2626' : color === 'success' ? '#16a34a' : 'var(--text-primary)';
-        statusDiv.innerHTML = msg;
+      state.isSavingTemplate = true;
+      state.installerStatus = {
+        type: 'info',
+        message: 'Copiando instalador al share, espera un momento...'
       };
-      if (btn) { btn.disabled = true; btn.textContent = 'Copiando...'; }
-      showStatus('<span style="display:inline-flex;align-items:center;gap:8px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite;flex-shrink:0;"><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" opacity=".25"/><path d="M21 12a9 9 0 00-9-9"/></svg>Copiando instalador al share, espera un momento...</span>', 'info');
+      state.focusTemplateNameOnRender = false;
+      this.rerenderTemplateManager(state, onClose);
       try {
         const result = await window.api.templates.saveInstaller(activeId, localPath);
         if (!result?.success) {
-          showStatus(`<span>✗ Error al copiar: ${result?.error || 'No se pudo copiar al share'}</span>`, 'error');
+          state.isSavingTemplate = false;
+          state.installerStatus = {
+            type: 'error',
+            message: `Error al copiar el instalador: ${result?.error || 'No se pudo copiar al share'}`
+          };
           App.toast(`Error: ${result?.error || 'No se pudo copiar al share'}`, 'error');
+          this.rerenderTemplateManager(state, onClose);
           return;
         }
         state.templateInstallers = { ...state.templateInstallers, [activeId]: result.sharePath };
-        await window.api.config.set({ templateInstallers: state.templateInstallers });
+        const saveConfigResult = await window.api.config.set({ templateInstallers: state.templateInstallers });
+        if (saveConfigResult?.success === false) {
+          throw new Error(saveConfigResult.error || 'No se pudo actualizar la configuración');
+        }
+        this.clearPendingTemplateInstallerPath(state);
         state.installerSaved = true;
+        state.isSavingTemplate = false;
+        state.installerStatus = {
+          type: 'success',
+          message: 'Instalador guardado en el share.'
+        };
         App.toast('Instalador guardado en el share', 'success');
-        this.renderTemplateManager(state, onClose);
-      } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'Guardar instalador'; }
+        state.focusTemplateNameOnRender = false;
+        this.rerenderTemplateManager(state, onClose);
+      } catch (err) {
+        state.isSavingTemplate = false;
+        state.installerStatus = {
+          type: 'error',
+          message: `Error al copiar el instalador: ${err?.message || 'No se pudo copiar al share'}`
+        };
+        App.toast(`Error: ${err?.message || 'No se pudo copiar al share'}`, 'error');
+        this.rerenderTemplateManager(state, onClose);
       }
     });
-
     document.getElementById('btn-add-template-arg')?.addEventListener('click', () => {
       state.draft = this.readTemplateDraftFromDom(state);
       state.deleteConfirm = false;
-      state.draft.arguments.push({
+      const newIndex = state.draft.arguments.push({
         label: '',
         token: '',
         joiner: '=',
@@ -3973,8 +4179,13 @@ const AppsPage = {
         required: false,
         hint: '',
         defaultValue: ''
+      }) - 1;
+      state.focusTemplateNameOnRender = false;
+      this.rerenderTemplateManager(state, onClose, {
+        anchorSelector: `.tmpl-arg-row[data-index="${newIndex}"]`,
+        focusSelector: `.tmpl-arg-row[data-index="${newIndex}"] [data-field="label"]`,
+        block: 'nearest'
       });
-      this.renderTemplateManager(state, onClose);
     });
 
     document.querySelectorAll('.btn-remove-template-arg').forEach(btn => {
@@ -3982,14 +4193,15 @@ const AppsPage = {
         state.draft = this.readTemplateDraftFromDom(state);
         state.deleteConfirm = false;
         state.draft.arguments.splice(Number(btn.dataset.index), 1);
-        this.renderTemplateManager(state, onClose);
+        state.focusTemplateNameOnRender = false;
+        this.rerenderTemplateManager(state, onClose);
       });
     });
 
     document.getElementById('btn-add-template-file')?.addEventListener('click', () => {
       state.draft = this.readTemplateDraftFromDom(state);
       state.deleteConfirm = false;
-      state.draft.files.push({
+      const newIndex = state.draft.files.push({
         label: '',
         storageKind: 'file',
         argumentName: '',
@@ -3999,8 +4211,13 @@ const AppsPage = {
         hint: '',
         destinationName: '',
         extensions: 'xml'
+      }) - 1;
+      state.focusTemplateNameOnRender = false;
+      this.rerenderTemplateManager(state, onClose, {
+        anchorSelector: `.tmpl-file-row[data-index="${newIndex}"]`,
+        focusSelector: `.tmpl-file-row[data-index="${newIndex}"] [data-field="label"]`,
+        block: 'nearest'
       });
-      this.renderTemplateManager(state, onClose);
     });
 
     document.querySelectorAll('.btn-remove-template-file').forEach(btn => {
@@ -4008,7 +4225,8 @@ const AppsPage = {
         state.draft = this.readTemplateDraftFromDom(state);
         state.deleteConfirm = false;
         state.draft.files.splice(Number(btn.dataset.index), 1);
-        this.renderTemplateManager(state, onClose);
+        state.focusTemplateNameOnRender = false;
+        this.rerenderTemplateManager(state, onClose);
       });
     });
 
@@ -4022,7 +4240,7 @@ const AppsPage = {
       input.addEventListener('change', () => this.refreshTemplateDraftPreview());
     });
 
-    // storageKind is now always 'file' — no change handler needed
+    // storageKind is now always 'file' â€” no change handler needed
 
     this.refreshTemplateDraftPreview();
 
@@ -4032,20 +4250,23 @@ const AppsPage = {
       if (state.deleteConfirm) {
         state.deleteConfirm = false;
         state.deleteUsageCount = 0;
-        this.renderTemplateManager(state, onClose);
+        state.focusTemplateNameOnRender = false;
+        this.rerenderTemplateManager(state, onClose);
         return;
       }
       const apps = await window.api.apps.getAll().catch(() => []);
       state.deleteUsageCount = apps.filter(app => app.template === state.selectedId).length;
       state.deleteConfirm = true;
-      this.renderTemplateManager(state, onClose);
+      state.focusTemplateNameOnRender = false;
+      this.rerenderTemplateManager(state, onClose);
     });
 
     document.getElementById('btn-cancel-delete-template')?.addEventListener('click', () => {
       state.draft = this.readTemplateDraftFromDom(state);
       state.deleteConfirm = false;
       state.deleteUsageCount = 0;
-      this.renderTemplateManager(state, onClose);
+      state.focusTemplateNameOnRender = false;
+      this.rerenderTemplateManager(state, onClose);
     });
 
     document.getElementById('btn-confirm-delete-template')?.addEventListener('click', async () => {
@@ -4061,11 +4282,13 @@ const AppsPage = {
       state.draft = this.createEmptyTemplateDraft();
       state.deleteConfirm = false;
       state.deleteUsageCount = 0;
+      state.focusTemplateNameOnRender = true;
       App.toast(this.tr('apps.customTemplateDeleted', 'Plantilla borrada correctamente'), 'success');
       this.renderTemplateManager(state, onClose);
     });
 
     document.getElementById('btn-save-template')?.addEventListener('click', async () => {
+      if (state.isSavingTemplate) return;
       state.draft = this.readTemplateDraftFromDom(state);
       state.deleteConfirm = false;
       if (!state.draft.name.trim()) {
@@ -4074,6 +4297,8 @@ const AppsPage = {
         return;
       }
 
+      const wasNewTemplate = !state.selectedId;
+      const pendingInstallerPath = this.getPendingTemplateInstallerPath(state).trim();
       const payload = {
         name: state.draft.name,
         description: state.draft.description,
@@ -4082,40 +4307,102 @@ const AppsPage = {
         script: state.draft.script
       };
 
-      const saved = state.selectedId
-        ? await window.api.templates.update(state.selectedId, payload)
-        : await window.api.templates.create(payload);
+      state.isSavingTemplate = true;
+      state.installerStatus = {
+        type: 'info',
+        message: pendingInstallerPath
+          ? 'Guardando plantilla y subiendo instalador al share...'
+          : 'Guardando plantilla...'
+      };
+      state.focusTemplateNameOnRender = false;
+      this.rerenderTemplateManager(state, onClose);
 
-      if (!saved?.id) {
+      let saved;
+      try {
+        saved = state.selectedId
+          ? await window.api.templates.update(state.selectedId, payload)
+          : await window.api.templates.create(payload);
+      } catch (err) {
+        state.isSavingTemplate = false;
+        state.installerStatus = {
+          type: 'error',
+          message: `No se pudo guardar la plantilla: ${err?.message || 'Error desconocido'}`
+        };
         App.toast(this.tr('apps.customTemplateSaveError', 'No se pudo guardar la plantilla.'), 'error');
+        this.rerenderTemplateManager(state, onClose);
         return;
       }
 
-      // Save pre-configured installer (copy to share if local path selected)
-      const installerInputPath = document.getElementById('tmpl-installer-path')?.value?.trim() || '';
-      if (installerInputPath) {
-        const currentSharePath = state.templateInstallers[saved.id] || '';
-        const isAlreadyOnShare = installerInputPath === currentSharePath;
-        if (!isAlreadyOnShare) {
-          try {
-            const result = await window.api.templates.saveInstaller(saved.id, installerInputPath);
-            if (result?.success) {
-              state.templateInstallers = { ...state.templateInstallers, [saved.id]: result.sharePath };
-            }
-          } catch (e) { /* non-fatal */ }
-        }
-      } else {
-        state.templateInstallers = { ...state.templateInstallers };
-        delete state.templateInstallers[saved.id];
+      if (!saved?.id) {
+        state.isSavingTemplate = false;
+        state.installerStatus = {
+          type: 'error',
+          message: 'No se pudo guardar la plantilla.'
+        };
+        App.toast(this.tr('apps.customTemplateSaveError', 'No se pudo guardar la plantilla.'), 'error');
+        this.rerenderTemplateManager(state, onClose);
+        return;
       }
-      await window.api.config.set({ templateInstallers: state.templateInstallers });
+
+      if (wasNewTemplate && pendingInstallerPath) {
+        state.pendingNewInstallerPath = '';
+        state.pendingTemplateInstallers = { ...(state.pendingTemplateInstallers || {}), [saved.id]: pendingInstallerPath };
+      }
+
+      let installerUploadError = '';
+      if (pendingInstallerPath) {
+        try {
+          const result = await window.api.templates.saveInstaller(saved.id, pendingInstallerPath);
+          if (result?.success) {
+            state.templateInstallers = { ...state.templateInstallers, [saved.id]: result.sharePath };
+            state.pendingTemplateInstallers = { ...(state.pendingTemplateInstallers || {}) };
+            delete state.pendingTemplateInstallers[saved.id];
+          } else {
+            installerUploadError = result?.error || 'No se pudo copiar al share';
+          }
+        } catch (err) {
+          installerUploadError = err?.message || 'No se pudo copiar al share';
+        }
+      }
+
+      const saveConfigResult = await window.api.config.set({ templateInstallers: state.templateInstallers });
+      if (saveConfigResult?.success === false) {
+        state.isSavingTemplate = false;
+        state.installerStatus = {
+          type: 'error',
+          message: `La plantilla se guardó, pero no se pudo actualizar la configuración: ${saveConfigResult.error || 'Error desconocido'}`
+        };
+        App.toast(`Error: ${saveConfigResult.error || 'No se pudo actualizar la configuración'}`, 'error');
+        this.rerenderTemplateManager(state, onClose);
+        return;
+      }
 
       state.templates = await window.api.templates.getAll();
       state.selectedId = saved.id;
+      state.selectedBuiltIn = null;
       state.draft = this.cloneTemplateDraft(saved);
       state.deleteUsageCount = 0;
-      App.toast(this.tr('apps.customTemplateSaved', 'Plantilla guardada correctamente'), 'success');
-      this.renderTemplateManager(state, onClose);
+      state.installerSaved = false;
+      state.isSavingTemplate = false;
+      state.focusTemplateNameOnRender = false;
+
+      if (installerUploadError) {
+        state.installerStatus = {
+          type: 'error',
+          message: `Plantilla guardada, pero no se pudo subir el instalador: ${installerUploadError}`
+        };
+        App.toast(`Plantilla guardada, pero el instalador no se pudo subir: ${installerUploadError}`, 'warning');
+      } else {
+        state.installerStatus = {
+          type: 'success',
+          message: pendingInstallerPath
+            ? 'Plantilla guardada e instalador subido al share.'
+            : 'Plantilla guardada correctamente.'
+        };
+        App.toast(this.tr('apps.customTemplateSaved', 'Plantilla guardada correctamente'), 'success');
+      }
+
+      this.rerenderTemplateManager(state, onClose);
     });
   },
 
@@ -4130,43 +4417,50 @@ const AppsPage = {
       templates,
       builtInTemplates,
       templateInstallers: config.templateInstallers || {},
+      pendingTemplateInstallers: {},
+      pendingNewInstallerPath: '',
+      installerStatus: null,
+      isSavingTemplate: false,
       selectedId: null,
       selectedBuiltIn: null,
       systemExpanded: false,
       installerSaved: false,
       draft: this.createEmptyTemplateDraft(),
       deleteConfirm: false,
-      deleteUsageCount: 0
+      deleteUsageCount: 0,
+      focusTemplateNameOnRender: true,
+      templateManagerRestore: null
     };
     this.renderTemplateManager(state, onClose);
   },
 
   templateIcon(id) {
-    if (String(id || '').startsWith('user-')) return 'ðŸ§©';
+    const key = String(id || '').trim().toLowerCase();
+    if (key.startsWith('user-')) return '&#129513;';
     const icons = {
-      generic: '📦',
-      office: '📎',
-      custom: '⚡',
-      wazuh: '🛡️',
-      sentinelone: '🟣',
-      cortexxdr: '🛡️',
-      bitdefender: '🔴',
-      crowdstrike: '🦅',
-      zscaler: '☁️',
-      globalprotect: '🌍',
-      ciscosecureclient: '🔒',
-      forticlient: '🛡️',
-      lansweeper: '📡',
-      ninjaone: '🥷',
-      freshservice: '🔧',
-      teamviewer: '↔️',
-      anydesk: '🟥',
-      veeam: '🟩',
-      crashplan: '☁️',
-      chrome: '🌐',
-      'sap-gui': '💼'
+      generic: '&#128230;',
+      office: '&#128203;',
+      custom: '&#9881;&#65039;',
+      wazuh: '&#128737;&#65039;',
+      sentinelone: '&#128274;',
+      cortexxdr: '&#128737;&#65039;',
+      bitdefender: '&#128308;',
+      crowdstrike: '&#129413;',
+      zscaler: '&#9729;&#65039;',
+      globalprotect: '&#127760;',
+      ciscosecureclient: '&#128274;',
+      forticlient: '&#128737;&#65039;',
+      lansweeper: '&#128225;',
+      ninjaone: '&#129302;',
+      freshservice: '&#128295;',
+      teamviewer: '&#8596;&#65039;',
+      anydesk: '&#128187;',
+      veeam: '&#128190;',
+      crashplan: '&#9729;&#65039;',
+      chrome: '&#127760;',
+      'sap-gui': '&#128188;'
     };
-    return icons[id] || '📦';
+    return icons[key] || '&#128230;';
   },
 
   esc(str) {

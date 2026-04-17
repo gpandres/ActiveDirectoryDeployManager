@@ -572,6 +572,7 @@ const BundlesPage = {
       name: existingBundle?.name || '',
       description: existingBundle?.description || '',
       selectedApps: existingBundle?.apps || [],
+      appSearch: '',
       notifyUser: existingBundle?.notifyUser || false,
       gpoName: existingBundle?.gpoName || '',
       selectedOUs: this.getBundleOUs(existingBundle),
@@ -611,14 +612,27 @@ const BundlesPage = {
           </div>
         `;
       } else if (state.step === 2) {
+        const appSearch = (state.appSearch || '').trim().toLowerCase();
+        const filteredApps = this.apps.filter(app => {
+          if (!appSearch) return true;
+          return [
+            app.name || '',
+            app.template || '',
+            app.version || ''
+          ].some(value => String(value).toLowerCase().includes(appSearch));
+        });
         body += `
           <p style="color:var(--text-secondary);margin-bottom:16px">${t('bundles.selectApps')}:</p>
+          <div style="position:relative;margin-bottom:12px;">
+            <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.4" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" class="form-input" id="wiz-bundle-app-search" value="${this.esc(state.appSearch || '')}" placeholder="${t('bundles.search')}" autocomplete="off" style="padding-left:34px;">
+          </div>
           <div style="max-height:300px;overflow-y:auto">
-            ${this.apps.map((app, i) => {
+            ${filteredApps.map(app => {
               const isSelected = state.selectedApps.some(s => s.appId === app.id);
               return `
-                <label class="checkbox-wrapper checkbox-panel" style="align-items:center;margin-bottom:8px;${isSelected ? 'background:var(--accent-primary-dim);border-color:var(--accent-primary);' : ''}">
-                  <input type="checkbox" data-app-id="${app.id}" data-app-name="${this.esc(app.name)}"
+                <label class="checkbox-wrapper checkbox-panel bundle-wizard-app-row" data-search="${this.esc(`${app.name || ''} ${app.template || ''} ${app.version || ''}`.toLowerCase())}" style="align-items:center;margin-bottom:8px;${isSelected ? 'background:var(--accent-primary-dim);border-color:var(--accent-primary);' : ''}">
+                  <input type="checkbox" class="checkbox-select" data-app-id="${app.id}" data-app-name="${this.esc(app.name)}"
                     ${isSelected ? 'checked' : ''} onchange="BundlesPage._toggleApp(this)">
                   <span style="flex:1;min-width:0;">${this.esc(app.name)}</span>
                   <span class="badge badge-primary" style="margin-left:auto">${this.esc(app.template)}</span>
@@ -627,13 +641,14 @@ const BundlesPage = {
               `;
             }).join('')}
           </div>
+          <p id="wiz-bundle-app-no-match" style="display:${this.apps.length > 0 && filteredApps.length === 0 ? 'block' : 'none'};color:var(--text-muted);margin-top:8px">${t('bundles.noBundlesMatch')}</p>
           ${this.apps.length === 0 ? `<p style="color:var(--accent-warning);margin-top:8px">⚠ ${t('bundles.emptyApps')}</p>` : ''}
         `;
       } else if (state.step === 3) {
         body += `
           <div class="form-group">
             <label class="checkbox-wrapper checkbox-panel">
-              <input type="checkbox" id="wiz-bundle-notify" ${state.notifyUser ? 'checked' : ''}>
+              <input type="checkbox" class="checkbox-select" id="wiz-bundle-notify" ${state.notifyUser ? 'checked' : ''}>
               <span>🔔 ${t('bundles.notifyUserLabel')}</span>
             </label>
             <div class="form-hint">${t('bundles.notifyUserHint')}</div>
@@ -642,7 +657,7 @@ const BundlesPage = {
 
           <div class="form-group mb-md">
             <label class="checkbox-wrapper checkbox-panel checkbox-panel--accent">
-              <input type="checkbox" id="wiz-bundle-create-gpo" ${state.createGPO ? 'checked' : ''}>
+              <input type="checkbox" class="checkbox-select" id="wiz-bundle-create-gpo" ${state.createGPO ? 'checked' : ''}>
               <span style="font-weight:600;color:var(--primary-color)">✨ ${t('bundles.createGpo')}</span>
             </label>
           </div>
@@ -688,6 +703,9 @@ const BundlesPage = {
         }
       `);
 
+      if (state.step === 2) {
+        this.bindBundleAppSearch(state);
+      }
       if (state.step === 3) {
         this.bindBundleOUTree(state);
       }
@@ -781,6 +799,26 @@ const BundlesPage = {
 
     selectEl.ondblclick = () => addBtn.click();
     sync();
+  },
+
+  bindBundleAppSearch(state) {
+    const searchInput = document.getElementById('wiz-bundle-app-search');
+    if (!searchInput) return;
+
+    searchInput.oninput = () => {
+      state.appSearch = searchInput.value;
+      const query = (state.appSearch || '').trim().toLowerCase();
+      let visibleCount = 0;
+      document.querySelectorAll('.bundle-wizard-app-row').forEach(row => {
+        const matches = !query || (row.dataset.search || '').includes(query);
+        row.style.display = matches ? '' : 'none';
+        if (matches) visibleCount++;
+      });
+      const noMatch = document.getElementById('wiz-bundle-app-no-match');
+      if (noMatch) {
+        noMatch.style.display = query && visibleCount === 0 ? 'block' : 'none';
+      }
+    };
   },
 
   bindBundleOUTree(state) {
@@ -884,6 +922,9 @@ const BundlesPage = {
     } else {
       s.selectedApps = s.selectedApps.filter(a => a.appId !== id);
       s.selectedApps.forEach((a, i) => a.order = i + 1);
+    }
+    if (s?.step === 2 && typeof this._wizRender === 'function') {
+      this._wizRender();
     }
   },
 

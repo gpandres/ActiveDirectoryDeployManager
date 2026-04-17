@@ -1284,6 +1284,20 @@ tr:hover td { background: rgba(108, 99, 255, 0.03); }
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
+.checkbox-select:indeterminate {
+  background: var(--bg-input);
+  border-color: var(--accent-primary);
+}
+.checkbox-select:indeterminate::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 8px;
+  width: 10px;
+  height: 2px;
+  background: var(--accent-primary);
+  border-radius: 999px;
+}
 
 .app-card .checkbox-select, .bundle-card .checkbox-select {
   position: absolute;
@@ -1875,6 +1889,10 @@ tr:hover td { background: rgba(108, 99, 255, 0.03); }
   margin: 0;
 }
 
+.checkbox-wrapper--compact .checkbox-select {
+  margin: 0;
+}
+
 .checkbox-panel {
   align-items: flex-start;
   gap: 10px;
@@ -1887,6 +1905,10 @@ tr:hover td { background: rgba(108, 99, 255, 0.03); }
 
 .checkbox-panel input[type="checkbox"] {
   margin-top: 2px;
+}
+
+.checkbox-panel .checkbox-select {
+  margin-top: 0;
 }
 
 .checkbox-panel--accent {
