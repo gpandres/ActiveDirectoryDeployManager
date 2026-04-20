@@ -8,6 +8,12 @@ contextBridge.exposeInMainWorld('api', {
     close: () => ipcRenderer.send('window:close')
   },
 
+  // Share Health
+  share: {
+    checkHealth: () => ipcRenderer.invoke('share:checkHealth'),
+    getStatus: () => ipcRenderer.invoke('share:getStatus')
+  },
+
   // Config
   config: {
     get: () => ipcRenderer.invoke('config:get'),
@@ -21,6 +27,7 @@ contextBridge.exposeInMainWorld('api', {
     checkRSAT: () => ipcRenderer.invoke('ad:checkRSAT'),
     getOUs: (ignoreBaseOU = false) => ipcRenderer.invoke('ad:getOUs', ignoreBaseOU),
     getGPOs: () => ipcRenderer.invoke('ad:getGPOs'),
+    getGPOLinkCounts: () => ipcRenderer.invoke('ad:getGPOLinkCounts'),
     createGPO: (name, path, ouDN) => ipcRenderer.invoke('ad:createGPO', name, path, ouDN),
     linkGPOtoOU: (gpoName, ouDN) => ipcRenderer.invoke('ad:linkGPOtoOU', gpoName, ouDN),
     bulkLinkGPO: (gpoName, ouDNs) => ipcRenderer.invoke('ad:bulkLinkGPO', gpoName, ouDNs),
@@ -48,6 +55,8 @@ contextBridge.exposeInMainWorld('api', {
   scripts: {
     generate: (appConfig) => ipcRenderer.invoke('scripts:generate', appConfig),
     deploy: (appConfig) => ipcRenderer.invoke('scripts:deploy', appConfig),
+    generateUninstall: (appConfig) => ipcRenderer.invoke('scripts:generateUninstall', appConfig),
+    deployUninstall: (appConfig) => ipcRenderer.invoke('scripts:deployUninstall', appConfig),
     getTemplates: () => ipcRenderer.invoke('scripts:getTemplates')
   },
 
@@ -56,7 +65,9 @@ contextBridge.exposeInMainWorld('api', {
     get: (id) => ipcRenderer.invoke('templates:get', id),
     create: (data) => ipcRenderer.invoke('templates:create', data),
     update: (id, data) => ipcRenderer.invoke('templates:update', id, data),
-    delete: (id) => ipcRenderer.invoke('templates:delete', id)
+    delete: (id) => ipcRenderer.invoke('templates:delete', id),
+    saveInstaller: (templateId, localPath) => ipcRenderer.invoke('templates:saveInstaller', templateId, localPath),
+    deleteInstaller: (templateId) => ipcRenderer.invoke('templates:deleteInstaller', templateId)
   },
 
   // Files
@@ -74,7 +85,9 @@ contextBridge.exposeInMainWorld('api', {
     update: (id, data) => ipcRenderer.invoke('bundles:update', id, data),
     delete: (id) => ipcRenderer.invoke('bundles:delete', id),
     deploy: (id) => ipcRenderer.invoke('bundles:deploy', id),
-    generateScript: (id) => ipcRenderer.invoke('bundles:generateScript', id)
+    deployUninstall: (id) => ipcRenderer.invoke('bundles:deployUninstall', id),
+    generateScript: (id) => ipcRenderer.invoke('bundles:generateScript', id),
+    generateUninstallScript: (id) => ipcRenderer.invoke('bundles:generateUninstallScript', id)
   },
 
   // Activity Log
@@ -107,6 +120,7 @@ contextBridge.exposeInMainWorld('api', {
     search: (query, category) => ipcRenderer.invoke('catalog:search', query, category),
     searchCLI: (query) => ipcRenderer.invoke('catalog:searchCLI', query),
     checkVersions: (ids) => ipcRenderer.invoke('catalog:checkVersions', ids),
-    checkSingle: (wingetId) => ipcRenderer.invoke('catalog:checkSingle', wingetId)
+    checkSingle: (wingetId, wingetSource, name) => ipcRenderer.invoke('catalog:checkSingle', wingetId, wingetSource, name),
+    resolvePackage: (reference) => ipcRenderer.invoke('catalog:resolvePackage', reference)
   }
 });

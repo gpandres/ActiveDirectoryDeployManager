@@ -152,10 +152,14 @@ const CatalogPage = {
 
   _renderCard(item) {
     const isSelected = this._selectedItems.some(s =>
-      (s.wingetId && s.wingetId === item.wingetId) || (s.id && s.id === item.id)
+      (s.wingetId && s.wingetId === item.wingetId && (s.wingetSource || 'winget') === (item.wingetSource || 'winget'))
+      || (s.id && s.id === item.id)
     );
     // Use latest known version if available from a previous version check
-    const checkedResult = this._versionCheckResults.find(r => r.wingetId && r.wingetId === item.wingetId);
+    const checkedResult = this._versionCheckResults.find(r =>
+      r.wingetId && r.wingetId === item.wingetId
+      && (r.wingetSource || 'winget') === (item.wingetSource || 'winget')
+    );
     const version = (checkedResult && checkedResult.latestVersion) || item.version || item.defaultVersion || '';
     const isApi = item.source === 'winget-api' || item.source === 'winget-cli';
 
@@ -163,6 +167,7 @@ const CatalogPage = {
       <div class="catalog-card ${isSelected ? 'selected' : ''}"
            data-item-id="${this.esc(item.id || item.wingetId)}"
            data-winget-id="${this.esc(item.wingetId || '')}"
+           data-winget-source="${this.esc(item.wingetSource || 'winget')}"
            data-name="${this.esc(item.name)}"
            data-version="${this.esc(version)}"
            data-source="${this.esc(item.source || 'curated')}">
@@ -172,7 +177,7 @@ const CatalogPage = {
           ${isApi && item.publisher ? `<div class="catalog-card-publisher">${this.esc(item.publisher)}</div>` : ''}
           <div class="catalog-card-meta">
             ${version ? `<span class="badge badge-info" style="font-size:9px;padding:1px 6px;">v${this.esc(version)}</span>` : ''}
-            ${item.wingetId ? `<span class="badge badge-primary" style="font-size:9px;padding:1px 6px;">winget</span>` : ''}
+            ${item.wingetId ? `<span class="badge badge-primary" style="font-size:9px;padding:1px 6px;">${this.esc(item.wingetSource || 'winget')}</span>` : ''}
           </div>
         </div>
         ${isSelected ? '<div class="catalog-card-check">✓</div>' : ''}
@@ -201,7 +206,10 @@ const CatalogPage = {
 
     // Match results to user's installed apps
     const resultsWithApps = this._versionCheckResults.map(r => {
-      const userApp = (this._userApps || []).find(a => a.wingetId && a.wingetId === r.wingetId);
+      const userApp = (this._userApps || []).find(a =>
+        a.wingetId && a.wingetId === r.wingetId
+        && (a.wingetSource || 'winget') === (r.wingetSource || 'winget')
+      );
       return { ...r, userApp };
     });
     // Count how many user apps can actually be updated
@@ -339,12 +347,12 @@ const CatalogPage = {
     this._updateResults();
 
     // Fase 2: búsqueda CLI en paralelo (puede tardar 10-20s)
-    const curatedIds = new Set(curatedFiltered.map(r => r.wingetId).filter(Boolean));
+    const curatedIds = new Set(curatedFiltered.map(r => `${r.wingetId || ''}|${r.wingetSource || 'winget'}`));
     try {
       const wingetResults = await window.api.catalog.searchCLI(query);
       // Abort if the user has already typed something different
       if ((document.getElementById('catalog-search')?.value?.trim() || '') !== query) return;
-      const newOnly = wingetResults.filter(r => r.wingetId && !curatedIds.has(r.wingetId));
+      const newOnly = wingetResults.filter(r => r.wingetId && !curatedIds.has(`${r.wingetId}|${r.wingetSource || 'winget'}`));
       this._results = [...curatedFiltered, ...newOnly];
     } catch {
       // mantener solo curated
@@ -366,12 +374,13 @@ const CatalogPage = {
   _toggleSelection(card) {
     const itemId = card.dataset.itemId;
     const wingetId = card.dataset.wingetId;
+    const wingetSource = card.dataset.wingetSource || 'winget';
     const name = card.dataset.name;
     const version = card.dataset.version;
     const source = card.dataset.source;
 
     const existingIdx = this._selectedItems.findIndex(s =>
-      (wingetId && s.wingetId === wingetId) || s.id === itemId
+      (wingetId && s.wingetId === wingetId && (s.wingetSource || 'winget') === wingetSource) || s.id === itemId
     );
 
     if (existingIdx >= 0) {
@@ -379,7 +388,7 @@ const CatalogPage = {
       card.classList.remove('selected');
       card.querySelector('.catalog-card-check')?.remove();
     } else {
-      this._selectedItems.push({ id: itemId, wingetId, name, version, source });
+      this._selectedItems.push({ id: itemId, wingetId, wingetSource, name, version, source });
       card.classList.add('selected');
       const checkDiv = document.createElement('div');
       checkDiv.className = 'catalog-card-check';
@@ -442,7 +451,10 @@ const CatalogPage = {
       btn.addEventListener('click', () => {
         const idx = parseInt(btn.dataset.idx);
         const resultsWithApps = this._versionCheckResults.map(r => {
-          const userApp = (this._userApps || []).find(a => a.wingetId && a.wingetId === r.wingetId);
+          const userApp = (this._userApps || []).find(a =>
+            a.wingetId && a.wingetId === r.wingetId
+            && (a.wingetSource || 'winget') === (r.wingetSource || 'winget')
+          );
           return { ...r, userApp };
         });
         const row = resultsWithApps[idx];
@@ -501,7 +513,10 @@ const CatalogPage = {
 
   async _performBulkUpdateFromCatalog() {
     const resultsWithApps = this._versionCheckResults.map(r => {
-      const userApp = (this._userApps || []).find(a => a.wingetId && a.wingetId === r.wingetId);
+      const userApp = (this._userApps || []).find(a =>
+        a.wingetId && a.wingetId === r.wingetId
+        && (a.wingetSource || 'winget') === (r.wingetSource || 'winget')
+      );
       return { ...r, userApp };
     }).filter(r => r.userApp);
 
@@ -513,21 +528,39 @@ const CatalogPage = {
     }
   },
 
-  _addToNewApp() {
+  async _addToNewApp() {
     if (this._selectedItems.length === 0) return;
     const first = this._selectedItems[0];
+    const prefilledApp = {
+      template: 'winget',
+      wingetId: first.wingetId || '',
+      wingetSource: first.wingetSource || 'winget',
+      name: first.name || '',
+      version: first.version || '1.0.0'
+    };
+
+    if (prefilledApp.wingetId) {
+      try {
+        const resolvedWinget = await window.api.catalog.resolvePackage({
+          wingetId: prefilledApp.wingetId,
+          wingetSource: prefilledApp.wingetSource,
+          name: prefilledApp.name
+        });
+        if (resolvedWinget?.available && resolvedWinget.wingetId) {
+          prefilledApp.wingetId = resolvedWinget.wingetId;
+          prefilledApp.wingetSource = resolvedWinget.wingetSource || prefilledApp.wingetSource;
+          if ((!prefilledApp.version || prefilledApp.version === '1.0.0') && resolvedWinget.latestVersion) {
+            prefilledApp.version = resolvedWinget.latestVersion;
+          }
+        }
+      } catch {}
+    }
     
     // Navigate to apps page and trigger wizard with pre-filled winget data
     App.navigate('apps');
     // Small delay to let the page render, then open wizard
     setTimeout(() => {
       if (typeof AppsPage !== 'undefined') {
-        const prefilledApp = {
-          template: 'winget',
-          wingetId: first.wingetId || '',
-          name: first.name || '',
-          version: first.version || '1.0.0'
-        };
         AppsPage.openWizard(prefilledApp);
       }
     }, 200);

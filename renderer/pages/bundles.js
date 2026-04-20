@@ -9,6 +9,7 @@ const BundlesPage = {
   _wizardOpening: false,       // prevents double-click opening multiple wizards
   _deployingIds: new Set(),    // prevents concurrent deploy of the same bundle
   _viewMode: 'grid',
+  _wizOuTree: [],
 
   async render(container) {
     this.apps = await window.api.apps.getAll();
@@ -56,7 +57,7 @@ const BundlesPage = {
           </div>
           <div style="display:flex; align-items:center; gap:var(--space-sm); flex:1; justify-content:flex-end;">
             <label class="checkbox-wrapper" style="margin-right: 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
-              <input type="checkbox" class="checkbox-select" id="select-all-bundles" style="position:static" onchange="BundlesPage.toggleSelectAll(this.checked)">
+              <input type="checkbox" id="select-all-bundles" onchange="BundlesPage.toggleSelectAll(this.checked)">
               <span style="font-size:var(--font-sm); color:var(--text-secondary);">${t('apps.selectAll') || 'Seleccionar Todo'}</span>
             </label>
             <div style="position:relative; min-width:180px; max-width:280px; flex:1;">
@@ -160,12 +161,21 @@ const BundlesPage = {
         document.querySelectorAll('.app-card-dropdown.visible').forEach(d => d.classList.remove('visible'));
       }
     });
+
+    if (this._pendingFocusBundleId) {
+      const focusId = this._pendingFocusBundleId;
+      this._pendingFocusBundleId = null;
+      this.keepBundleCardVisible(focusId);
+    }
   },
 
   renderBundleCard(bundle) {
     const isDeployed = bundle.deployed && bundle.deployedPath;
-    const statusClass = isDeployed ? 'deployed' : 'pending';
-    const statusText = isDeployed ? t('apps.deployedBadge') : t('apps.detailNotDeployed');
+    const publishedAction = this.getPublishedAction(bundle);
+    const statusClass = this.getDeploymentVisualState(bundle);
+    const statusText = this.getDeploymentStatusLabel(bundle);
+    const canPublishUninstall = isDeployed && publishedAction !== 'uninstall';
+    const installActionLabel = this.getInstallActionLabel(bundle);
     return `
       <div class="bundle-card bundle-card--${statusClass}" data-deployed="${!!isDeployed}" data-id="${bundle.id}" onclick="BundlesPage.showBundleDetail('${bundle.id}')">
         <input type="checkbox" class="checkbox-select bundle-card-cb" data-id="${bundle.id}" onchange="BundlesPage.toggleSelect('${bundle.id}', this.checked)" onclick="event.stopPropagation()">
@@ -178,6 +188,7 @@ const BundlesPage = {
         </div>
         <div class="app-card-badges">
           <span class="badge badge-info">v${this.esc(bundle.version)}</span>
+          ${statusClass === 'uninstalling' ? `<span class="badge badge-warning">${this.tr('apps.uninstallPublished', 'Desinstalacion')}</span>` : ''}
           <span class="badge badge-primary">${bundle.apps.length} ${t('bundles.appsIncluded')}</span>
           ${bundle.gpoName ? `<span class="badge badge-info">${this.esc(bundle.gpoName)}</span>` : ''}
           ${bundle.createGPO ? `<span class="badge badge-info">${t('bundles.autoGpo')}</span>` : ''}
@@ -187,7 +198,7 @@ const BundlesPage = {
         <div class="bundle-card-apps">
           ${bundle.apps.map(a => `<span class="app-chip">${this.esc(a.name)}</span>`).join('')}
         </div>
-        <div class="bundle-card-footer">
+        <div class="bundle-card-footer" onclick="event.stopPropagation()">
           <span class="app-status-label ${statusClass}">${statusText}</span>
           <div class="app-card-menu">
             <button class="app-card-menu-btn" onclick="event.stopPropagation(); BundlesPage.toggleMenu(this)" title="${t('apps.edit') || 'Acciones'}">
@@ -203,6 +214,23 @@ const BundlesPage = {
                 ${t('apps.script')}
               </button>
               ${isDeployed ? `
+                <button class="dropdown-item" onclick="BundlesPage.previewUninstallScript('${bundle.id}')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  ${this.tr('apps.uninstallScript', 'Script uninstall')}
+                </button>
+              ` : ''}
+              ${isDeployed ? `
+                ${canPublishUninstall ? `
+                <button class="dropdown-item dropdown-item--warning" onclick="BundlesPage.uninstallBundle('${bundle.id}')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  ${this.tr('apps.uninstallAction', 'Desinstalar')}
+                </button>
+                ` : `
+                <button class="dropdown-item dropdown-item--success" onclick="BundlesPage.deployBundle('${bundle.id}')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                  ${installActionLabel}
+                </button>
+                `}
                 <button class="dropdown-item dropdown-item--warning" onclick="BundlesPage.disableDeploy('${bundle.id}')">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
                   ${t('apps.disable')}
@@ -210,7 +238,7 @@ const BundlesPage = {
               ` : `
                 <button class="dropdown-item dropdown-item--success" onclick="BundlesPage.deployBundle('${bundle.id}')">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                  ${t('apps.deploy')}
+                  ${installActionLabel}
                 </button>
               `}
               <button class="dropdown-item" onclick="BundlesPage.editBundle('${bundle.id}')">
@@ -238,6 +266,11 @@ const BundlesPage = {
 
   esc(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; },
 
+  tr(key, fallback) {
+    const value = t(key);
+    return value === key ? fallback : value;
+  },
+
   normalizeOUDNs(value) {
     const raw = Array.isArray(value)
       ? value
@@ -247,6 +280,53 @@ const BundlesPage = {
 
   getBundleOUs(bundle) {
     return this.normalizeOUDNs(bundle?.ouDNs || bundle?.ouDN);
+  },
+
+  getPublishedAction(bundle) {
+    const normalized = String(bundle?.publishedAction || '').trim().toLowerCase();
+    if (normalized === 'install' || normalized === 'uninstall') return normalized;
+    return (bundle?.deployed && bundle?.deployedPath) ? 'install' : 'pending';
+  },
+
+  getDeploymentVisualState(bundle) {
+    const isDeployed = !!(bundle?.deployed && bundle?.deployedPath);
+    if (!isDeployed) return 'pending';
+    return this.getPublishedAction(bundle) === 'uninstall' ? 'uninstalling' : 'deployed';
+  },
+
+  getDeploymentStatusLabel(bundle) {
+    const state = this.getDeploymentVisualState(bundle);
+    if (state === 'uninstalling') return this.tr('apps.uninstallPublished', 'Desinstalacion');
+    if (state === 'deployed') return this.tr('apps.installPublished', 'Instalacion');
+    return t('apps.detailNotDeployed');
+  },
+
+  getInstallActionLabel(bundle) {
+    return this.getPublishedAction(bundle) === 'uninstall'
+      ? this.tr('apps.reinstallAction', 'Volver a instalar')
+      : t('apps.deploy');
+  },
+
+  keepBundleCardVisible(id) {
+    if (!id) return;
+    requestAnimationFrame(() => {
+      const card = document.querySelector(`.bundle-card[data-id="${id}"]`);
+      if (card) {
+        card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    });
+  },
+
+  canUninstallAppRecord(app) {
+    if (window.AppsPage && typeof window.AppsPage.canGenerateUninstall === 'function') {
+      return window.AppsPage.canGenerateUninstall(app);
+    }
+    const uninstallMode = String(app?.uninstall?.mode || '').trim().toLowerCase();
+    if (uninstallMode === 'manual') return !!String(app?.uninstall?.command || '').trim();
+    if (uninstallMode === 'winget') return !!String(app?.wingetId || '').trim();
+    if (uninstallMode === 'auto-msi') return String(app?.installerType || '').toLowerCase() === 'msi';
+    if (uninstallMode === 'auto-registry') return !!String(app?.name || '').trim();
+    return String(app?.template || '').toLowerCase() === 'winget' || String(app?.installerType || '').toLowerCase() === 'msi';
   },
 
   getOUName(dn) {
@@ -267,6 +347,39 @@ const BundlesPage = {
     `).join('');
   },
 
+  renderDeleteTargetCard({ icon, title, subtitle = '' }) {
+    return `
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-tertiary);border-radius:6px;">
+        <span style="font-size:18px;">${icon}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.esc(title)}</div>
+          ${subtitle ? `<div style="font-size:11px;color:var(--text-muted);">${subtitle}</div>` : ''}
+        </div>
+      </div>`;
+  },
+
+  renderDeleteOptionCard({ id, checked = false, title, hint = '' }) {
+    return `
+      <label class="checkbox-wrapper checkbox-panel" style="background:var(--bg-secondary);">
+        <input type="checkbox" id="${id}" ${checked ? 'checked' : ''}>
+        <span class="checkbox-panel__content">
+          <span class="checkbox-panel__title" style="font-size:13px;">${title}</span>
+          ${hint ? `<span class="checkbox-panel__hint" style="font-size:11px;">${hint}</span>` : ''}
+        </span>
+      </label>`;
+  },
+
+  renderDeleteFooter(confirmId, confirmLabel) {
+    return `
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button class="btn btn-secondary" id="${confirmId}-cancel">${t('common.cancel')}</button>
+        <button class="btn btn-danger" id="${confirmId}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          ${confirmLabel}
+        </button>
+      </div>`;
+  },
+
   // ─── Bulk Logic ────────────────────────────────────
   toggleSelect(id, checked) {
     if (checked) this.selectedIds.add(id);
@@ -276,7 +389,7 @@ const BundlesPage = {
 
   clearSelection() {
     this.selectedIds.clear();
-    document.querySelectorAll('.checkbox-select').forEach(cb => cb.checked = false);
+    document.querySelectorAll('.bundle-card-cb').forEach(cb => cb.checked = false);
     const selectAll = document.getElementById('select-all-bundles');
     if (selectAll) selectAll.checked = false;
     this.updateBulkBar();
@@ -319,17 +432,20 @@ const BundlesPage = {
   async bulkDisable() {
     if (this.selectedIds.size === 0) return;
     try {
-      const ids = Array.from(this.selectedIds);
-      for (const id of ids) {
-        const bundle = await window.api.bundles.get(id);
-        if (bundle && bundle.deployed) {
-          bundle.deployed = false;
-          await window.api.bundles.update(id, bundle);
+        const ids = Array.from(this.selectedIds);
+        for (const id of ids) {
+          const bundle = await window.api.bundles.get(id);
+          if (bundle && bundle.deployed) {
+            bundle.deployed = false;
+            bundle.publishedAction = 'pending';
+            bundle.publishedAt = '';
+            await window.api.bundles.update(id, bundle);
+          }
         }
-      }
-      App.toast(t('apps.bulkDisableSuccess') || `Deshabilitados ${ids.length} bundles correctamente`, 'success');
-      this.clearSelection();
-      App.navigate('bundles');
+        App.toast(t('apps.bulkDisableSuccess') || `Deshabilitados ${ids.length} bundles correctamente`, 'success');
+        this.clearSelection();
+        this._pendingFocusBundleId = ids[ids.length - 1] || null;
+        App.navigate('bundles');
     } catch (err) {
       App.toast('Error: ' + err.message, 'error');
     }
@@ -420,6 +536,10 @@ const BundlesPage = {
     if (!bundle) return;
 
     const isDeployed = bundle.deployed && bundle.deployedPath;
+    const publishedAction = this.getPublishedAction(bundle);
+    const statusClass = this.getDeploymentVisualState(bundle);
+    const statusText = this.getDeploymentStatusLabel(bundle);
+    const canPublishUninstall = isDeployed && publishedAction !== 'uninstall';
     
     const row = (label, value) => value ? `
       <div style="display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border-color);">
@@ -447,7 +567,11 @@ const BundlesPage = {
         <!-- Status badges -->
         <div style="display:flex; flex-wrap:wrap; gap:6px;">
           <span class="badge badge-info">v${this.esc(bundle.version || '1.0.0')}</span>
-          ${isDeployed ? `<span class="badge badge-success">${t('apps.deployedBadge')}</span>` : `<span class="badge badge-neutral">${t('apps.detailNotDeployed')}</span>`}
+          ${statusClass === 'uninstalling'
+            ? `<span class="badge badge-warning">${this.tr('apps.uninstallPublished', 'Desinstalacion')}</span>`
+            : (isDeployed
+                ? `<span class="badge badge-success">${this.tr('apps.installPublished', 'Instalacion')}</span>`
+                : `<span class="badge badge-neutral">${t('apps.detailNotDeployed')}</span>`)}
           ${bundle.gpoName ? `<span class="badge badge-info">${this.esc(bundle.gpoName)}</span>` : `<span class="badge badge-neutral">${t('bundles.autoGpo') || 'GPO'}</span>`}
           ${bundle.notifyUser ? `<span class="badge badge-warning">${t('apps.detailNotifyEnabled')}</span>` : ''}
         </div>
@@ -462,6 +586,7 @@ const BundlesPage = {
         <div class="card" style="padding:12px 16px; margin:0;">
           <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionGeneral')}</div>
           ${row(t('apps.detailVersion'), this.esc(bundle.version || '1.0.0'))}
+          ${row(this.tr('apps.publishedState', 'Estado publicado'), this.esc(statusText))}
           ${row(t('apps.detailNotifyUser'), bundle.notifyUser ? '&#10003;' : '&#10007;')}
           ${row(t('bundles.createGpo') || 'Crear GPO automáticamente', bundle.createGPO ? '&#10003;' : '&#10007;')}
         </div>
@@ -470,6 +595,7 @@ const BundlesPage = {
         <div class="card" style="padding:12px 16px; margin:0;">
           <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionPaths') || 'Rutas de Archivo'}</div>
           ${row(t('apps.detailDeployPath'), bundle.deployedPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(bundle.deployedPath) + '</span>' : '-')}
+          ${row(this.tr('apps.uninstallDeployPath', 'Ruta uninstall'), bundle.uninstallDeployedPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(bundle.uninstallDeployedPath) + '</span>' : '-')}
         </div>
 
         <!-- Targeting -->
@@ -486,7 +612,13 @@ const BundlesPage = {
       </div>
     `;
 
-    App.openModal(t('common.details') || 'Detalles del Bundle', body, `<button class="btn btn-primary" onclick="App.closeModal()">${t('common.close') || 'Cerrar'}</button>`);
+    App.openModal(t('common.details') || 'Detalles del Bundle', body, `
+      <button class="btn btn-secondary" onclick="App.closeModal()">${t('common.close') || 'Cerrar'}</button>
+      ${canPublishUninstall ? `<button class="btn btn-warning" onclick="App.closeModal(); BundlesPage.uninstallBundle('${bundle.id}')">${this.tr('apps.uninstallAction', 'Desinstalar')}</button>` : ''}
+      ${(!isDeployed || publishedAction === 'uninstall') ? `<button class="btn btn-success" onclick="App.closeModal(); BundlesPage.deployBundle('${bundle.id}')">${this.getInstallActionLabel(bundle)}</button>` : ''}
+    `);
+
+    this.keepBundleCardVisible(id);
   },
 
   // ─── Flatten OU tree for select dropdowns ──────────
@@ -519,9 +651,11 @@ const BundlesPage = {
     );
 
     let flatOUs = [];
+    let ouTree = [];
     try {
       const ouResult = await window.api.ad.getOUs();
       if (ouResult.success && ouResult.data) {
+        ouTree = ouResult.data;
         flatOUs = this._flattenOUs(ouResult.data);
       }
     } catch (e) {
@@ -536,6 +670,7 @@ const BundlesPage = {
       name: existingBundle?.name || '',
       description: existingBundle?.description || '',
       selectedApps: existingBundle?.apps || [],
+      appSearch: '',
       notifyUser: existingBundle?.notifyUser || false,
       gpoName: existingBundle?.gpoName || '',
       selectedOUs: this.getBundleOUs(existingBundle),
@@ -575,29 +710,43 @@ const BundlesPage = {
           </div>
         `;
       } else if (state.step === 2) {
+        const appSearch = (state.appSearch || '').trim().toLowerCase();
+        const filteredApps = this.apps.filter(app => {
+          if (!appSearch) return true;
+          return [
+            app.name || '',
+            app.template || '',
+            app.version || ''
+          ].some(value => String(value).toLowerCase().includes(appSearch));
+        });
         body += `
           <p style="color:var(--text-secondary);margin-bottom:16px">${t('bundles.selectApps')}:</p>
+          <div style="position:relative;margin-bottom:12px;">
+            <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.4" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" class="form-input" id="wiz-bundle-app-search" value="${this.esc(state.appSearch || '')}" placeholder="${t('bundles.search')}" autocomplete="off" style="padding-left:34px;">
+          </div>
           <div style="max-height:300px;overflow-y:auto">
-            ${this.apps.map((app, i) => {
+            ${filteredApps.map(app => {
               const isSelected = state.selectedApps.some(s => s.appId === app.id);
               return `
-                <label class="checkbox-wrapper" style="padding:8px;border-radius:var(--radius-sm);${isSelected ? 'background:var(--accent-primary-dim)' : ''}">
-                  <input type="checkbox" data-app-id="${app.id}" data-app-name="${this.esc(app.name)}"
+                <label class="checkbox-wrapper checkbox-panel bundle-wizard-app-row" data-search="${this.esc(`${app.name || ''} ${app.template || ''} ${app.version || ''}`.toLowerCase())}" style="align-items:center;margin-bottom:8px;${isSelected ? 'background:var(--accent-primary-dim);border-color:var(--accent-primary);' : ''}">
+                  <input type="checkbox" class="checkbox-select" data-app-id="${app.id}" data-app-name="${this.esc(app.name)}"
                     ${isSelected ? 'checked' : ''} onchange="BundlesPage._toggleApp(this)">
-                  <span>${this.esc(app.name)}</span>
+                  <span style="flex:1;min-width:0;">${this.esc(app.name)}</span>
                   <span class="badge badge-primary" style="margin-left:auto">${this.esc(app.template)}</span>
                   <span class="badge badge-info">v${this.esc(app.version || '1.0.0')}</span>
                 </label>
               `;
             }).join('')}
           </div>
+          <p id="wiz-bundle-app-no-match" style="display:${this.apps.length > 0 && filteredApps.length === 0 ? 'block' : 'none'};color:var(--text-muted);margin-top:8px">${t('bundles.noBundlesMatch')}</p>
           ${this.apps.length === 0 ? `<p style="color:var(--accent-warning);margin-top:8px">⚠ ${t('bundles.emptyApps')}</p>` : ''}
         `;
       } else if (state.step === 3) {
         body += `
           <div class="form-group">
-            <label class="checkbox-wrapper">
-              <input type="checkbox" id="wiz-bundle-notify" ${state.notifyUser ? 'checked' : ''}>
+            <label class="checkbox-wrapper checkbox-panel">
+              <input type="checkbox" class="checkbox-select" id="wiz-bundle-notify" ${state.notifyUser ? 'checked' : ''}>
               <span>🔔 ${t('bundles.notifyUserLabel')}</span>
             </label>
             <div class="form-hint">${t('bundles.notifyUserHint')}</div>
@@ -605,8 +754,8 @@ const BundlesPage = {
           <hr style="border-color:var(--border-color);margin:16px 0">
 
           <div class="form-group mb-md">
-            <label class="flex items-center gap-sm" style="cursor:pointer; padding: 12px; background: rgba(30,144,255,0.1); border-radius: 6px; border: 1px solid rgba(30,144,255,0.2);">
-              <input type="checkbox" id="wiz-bundle-create-gpo" ${state.createGPO ? 'checked' : ''} style="width:16px;height:16px;">
+            <label class="checkbox-wrapper checkbox-panel checkbox-panel--accent">
+              <input type="checkbox" class="checkbox-select" id="wiz-bundle-create-gpo" ${state.createGPO ? 'checked' : ''}>
               <span style="font-weight:600;color:var(--primary-color)">✨ ${t('bundles.createGpo')}</span>
             </label>
           </div>
@@ -616,24 +765,20 @@ const BundlesPage = {
             <input class="form-input" id="wiz-bundle-gpo" value="${this.esc(state.gpoName)}" placeholder="Deploy_Bundle_Pack">
           </div>
 
-          ${flatOUs.length > 0 ? `
-            <div class="form-group">
-              <label class="form-label">${t('apps.selectOus')}</label>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <select class="form-select" id="wiz-bundle-ou-option" style="flex:1;">
-                  <option value="">${t('bundles.cancelOption')}</option>
-                  ${flatOUs.map(ou => `<option value="${this.esc(ou.dn)}">${'  '.repeat(ou.depth)}${ou.depth > 0 ? '↳ ' : ''}${this.esc(ou.name)}</option>`).join('')}
-                </select>
-                <button type="button" class="btn btn-secondary btn-sm" id="btn-bundle-ou-add">
-                  + ${t('common.add') || 'Agregar'}
-                </button>
-              </div>
+          <div class="form-group">
+            <label class="form-label">${t('apps.selectOus')}</label>
+            <div style="position:relative;margin-bottom:8px;">
+              <svg style="position:absolute;left:9px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.4" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" class="form-input" id="wiz-bundle-ou-search" placeholder="${t('ous.searchOUs')}" autocomplete="off" style="padding-left:32px;">
+            </div>
+            <div id="wiz-bundle-ou-tree" style="max-height:190px;overflow-y:auto;border:1px solid var(--border-color);border-radius:6px;padding:4px 6px;background:var(--bg-secondary);">
+              ${this._wizOuTree?.length ? App.ouPickerTreeHTML(this._wizOuTree, '', state.selectedOUs || []) : `<p style="padding:8px;font-size:13px;color:var(--text-muted);">${t('ous.noOusFound')}</p>`}
+            </div>
               <div id="wiz-bundle-ou-selected" style="margin-top:8px;display:flex;flex-wrap:wrap;align-items:center;gap:6px;">
                 ${this.renderOUChips(state.selectedOUs || [])}
               </div>
               <input type="hidden" id="wiz-bundle-ou" value="${JSON.stringify(state.selectedOUs || []).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">
             </div>
-          ` : ''}
 
           <div style="margin-top:16px;padding:12px;background:var(--bg-input);border-radius:var(--radius-sm)">
             <div style="font-size:var(--font-sm);color:var(--text-muted);margin-bottom:8px">${t('apps.reviewSummary')}:</div>
@@ -656,14 +801,18 @@ const BundlesPage = {
         }
       `);
 
+      if (state.step === 2) {
+        this.bindBundleAppSearch(state);
+      }
       if (state.step === 3) {
-        this.bindBundleOUSelector(state);
+        this.bindBundleOUTree(state);
       }
     };
 
     this._wizState = state;
     this._wizRender = renderWizard;
     this._wizOus = flatOUs;
+    this._wizOuTree = ouTree;
     App._modalLocked = false;  // unlock before rendering the interactive wizard
     renderWizard();
     // Release guard — wizard modal is now open and controls itself
@@ -750,6 +899,116 @@ const BundlesPage = {
     sync();
   },
 
+  bindBundleAppSearch(state) {
+    const searchInput = document.getElementById('wiz-bundle-app-search');
+    if (!searchInput) return;
+
+    searchInput.oninput = () => {
+      state.appSearch = searchInput.value;
+      const query = (state.appSearch || '').trim().toLowerCase();
+      let visibleCount = 0;
+      document.querySelectorAll('.bundle-wizard-app-row').forEach(row => {
+        const matches = !query || (row.dataset.search || '').includes(query);
+        row.style.display = matches ? '' : 'none';
+        if (matches) visibleCount++;
+      });
+      const noMatch = document.getElementById('wiz-bundle-app-no-match');
+      if (noMatch) {
+        noMatch.style.display = query && visibleCount === 0 ? 'block' : 'none';
+      }
+    };
+  },
+
+  bindBundleOUTree(state) {
+    const searchInput = document.getElementById('wiz-bundle-ou-search');
+    const treeContainer = document.getElementById('wiz-bundle-ou-tree');
+    const hiddenEl = document.getElementById('wiz-bundle-ou');
+    const selectedEl = document.getElementById('wiz-bundle-ou-selected');
+    if (!treeContainer || !hiddenEl || !selectedEl) return;
+
+    const renderSelectedDisplay = () => {
+      hiddenEl.value = JSON.stringify(state.selectedOUs || []);
+      const chips = this.renderOUChips(state.selectedOUs || []);
+      const clearBtn = (state.selectedOUs || []).length > 0
+        ? `<button type="button" class="btn btn-ghost btn-sm" id="btn-bundle-ou-clear" style="font-size:11px;margin-left:4px;opacity:.7;">${t('common.clear') || 'Borrar selección'}</button>`
+        : '';
+      selectedEl.innerHTML = chips + clearBtn;
+
+      selectedEl.querySelectorAll('.btn-remove-bundle-ou').forEach(btn => {
+        btn.onclick = (e) => {
+          e.preventDefault();
+          const dn = btn.dataset.dn;
+          state.selectedOUs = this.normalizeOUDNs((state.selectedOUs || []).filter(item => item !== dn));
+          state.ouDN = state.selectedOUs[0] || '';
+          hiddenEl.value = JSON.stringify(state.selectedOUs || []);
+          treeContainer.innerHTML = App.ouPickerTreeHTML(
+            this._wizOuTree || [], searchInput?.value || '', state.selectedOUs || []
+          );
+          bindNodes();
+          renderSelectedDisplay();
+        };
+      });
+
+      const clearAllBtn = document.getElementById('btn-bundle-ou-clear');
+      if (clearAllBtn) {
+        clearAllBtn.onclick = (e) => {
+          e.preventDefault();
+          state.selectedOUs = [];
+          state.ouDN = '';
+          hiddenEl.value = '[]';
+          treeContainer.innerHTML = App.ouPickerTreeHTML(this._wizOuTree || [], searchInput?.value || '', []);
+          bindNodes();
+          renderSelectedDisplay();
+        };
+      }
+    };
+
+    const bindNodes = () => {
+      treeContainer.querySelectorAll('.tree-toggle:not(.empty)').forEach(btn => {
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          const li = btn.closest('.tree-item');
+          const children = li?.querySelector('.tree-children');
+          if (children) {
+            children.classList.toggle('collapsed');
+            btn.classList.toggle('expanded');
+          }
+        };
+      });
+
+      treeContainer.querySelectorAll('.tree-node').forEach(node => {
+        node.onclick = (e) => {
+          if (e.target.closest('.tree-toggle')) return;
+          const dn = node.dataset.dn;
+          const current = Array.isArray(state.selectedOUs) ? state.selectedOUs : [];
+          state.selectedOUs = current.includes(dn)
+            ? current.filter(item => item !== dn)
+            : [...current, dn];
+          state.selectedOUs = this.normalizeOUDNs(state.selectedOUs);
+          state.ouDN = state.selectedOUs[0] || '';
+          hiddenEl.value = JSON.stringify(state.selectedOUs || []);
+          treeContainer.innerHTML = App.ouPickerTreeHTML(
+            this._wizOuTree || [], searchInput?.value || '', state.selectedOUs || []
+          );
+          bindNodes();
+          renderSelectedDisplay();
+        };
+      });
+    };
+
+    bindNodes();
+    renderSelectedDisplay();
+
+    if (searchInput) {
+      searchInput.oninput = () => {
+        treeContainer.innerHTML = App.ouPickerTreeHTML(
+          this._wizOuTree || [], searchInput.value, state.selectedOUs || []
+        );
+        bindNodes();
+      };
+    }
+  },
+
   _toggleApp(checkbox) {
     const id = checkbox.dataset.appId;
     const name = checkbox.dataset.appName;
@@ -761,6 +1020,9 @@ const BundlesPage = {
     } else {
       s.selectedApps = s.selectedApps.filter(a => a.appId !== id);
       s.selectedApps.forEach((a, i) => a.order = i + 1);
+    }
+    if (s?.step === 2 && typeof this._wizRender === 'function') {
+      this._wizRender();
     }
   },
 
@@ -833,34 +1095,51 @@ const BundlesPage = {
     if (!bundle) return;
 
     const hasGPO = !!bundle.gpoName;
-
-    App.openModal(t('apps.deleteConfirm'), `
-      <p>${t('bundles.deleteBundleMsg').replace('{bundle}', `<strong>${this.esc(bundle.name)}</strong>`)}</p>
-      <p style="color:var(--text-muted);font-size:var(--font-sm);margin-top:8px">${t('bundles.individualAppsNotDeleted')}</p>
-      ${hasGPO ? `
-        <div class="form-group mt-md" style="background: rgba(255,50,50,0.08); border: 1px solid rgba(255,50,50,0.25); border-radius:8px; padding:12px;">
-          <p style="margin:0 0 8px 0; color:var(--danger-color); font-weight:600;">🗑️ GPO: "${this.esc(bundle.gpoName)}"</p>
-          ${this.getBundleOUs(bundle).length > 0 ? `
-            <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-              <input type="checkbox" id="chk-bdel-unlink" checked style="width:auto; cursor:pointer;">
-              <label for="chk-bdel-unlink" style="margin:0; cursor:pointer; font-size:14px; color:var(--text-secondary);">${t('apps.cleanGpoOption')}</label>
-            </div>
-          ` : ''}
-          <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-            <input type="checkbox" id="chk-bdel-clean" checked style="width:auto; cursor:pointer;">
-            <label for="chk-bdel-clean" style="margin:0; cursor:pointer; font-size:14px; color:var(--text-secondary);">${t('apps.cleanSysvolOption')}</label>
-          </div>
-          <div style="display:flex; align-items:center; gap:8px;">
-            <input type="checkbox" id="chk-bdel-gpo" checked style="width:auto; cursor:pointer;">
-            <label for="chk-bdel-gpo" style="margin:0; cursor:pointer; font-size:14px; color:var(--text-secondary);">${t('apps.deleteGpoOption')}</label>
+    const bundleOUs = this.getBundleOUs(bundle);
+    const body = `
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div style="padding:10px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;">
+          <div style="font-size:13px;font-weight:700;color:var(--accent-danger);">${t('apps.deleteConfirm')}</div>
+          <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">
+            ${t('bundles.deleteBundleMsg').replace('{bundle}', `<strong>${this.esc(bundle.name)}</strong>`)}
           </div>
         </div>
-      ` : ''}
-    `, `
-      <button class="btn btn-secondary" onclick="App.closeModal()">${t('common.cancel')}</button>
-      <button class="btn btn-danger" id="btn-bundle-confirm-delete">${t('common.delete')}</button>
-    `);
+        ${this.renderDeleteTargetCard({
+          icon: '📦',
+          title: bundle.name,
+          subtitle: bundle.gpoName ? `GPO: ${this.esc(bundle.gpoName)}` : ''
+        })}
+        <div style="padding:10px 14px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;font-size:12px;color:var(--text-muted);">
+          ${t('bundles.individualAppsNotDeleted')}
+        </div>
+        ${hasGPO && bundleOUs.length > 0 ? this.renderDeleteOptionCard({
+          id: 'chk-bdel-unlink',
+          checked: true,
+          title: t('apps.cleanGpoOption'),
+          hint: 'Quita la vinculacion de la GPO en las OUs asociadas'
+        }) : ''}
+        ${hasGPO ? this.renderDeleteOptionCard({
+          id: 'chk-bdel-clean',
+          checked: true,
+          title: t('apps.cleanSysvolOption'),
+          hint: 'Elimina el script de inicio del bundle en SYSVOL'
+        }) : ''}
+        ${hasGPO ? this.renderDeleteOptionCard({
+          id: 'chk-bdel-gpo',
+          checked: true,
+          title: t('apps.deleteGpoOption'),
+          hint: 'Borra la GPO de Active Directory si ya no se necesita'
+        }) : ''}
+      </div>
+    `;
 
+    App.openModal(
+      t('apps.deleteConfirm'),
+      body,
+      this.renderDeleteFooter('btn-bundle-confirm-delete', t('common.delete'))
+    );
+
+    document.getElementById('btn-bundle-confirm-delete-cancel')?.addEventListener('click', () => App.closeModal());
     document.getElementById('btn-bundle-confirm-delete').addEventListener('click', async () => {
       const btn = document.getElementById('btn-bundle-confirm-delete');
       btn.style.width = btn.offsetWidth + 'px';
@@ -874,8 +1153,8 @@ const BundlesPage = {
           const cleanScript = document.getElementById('chk-bdel-clean')?.checked ?? false;
           const deleteGPO = document.getElementById('chk-bdel-gpo')?.checked ?? false;
 
-          if (unlinkGPO && this.getBundleOUs(bundle).length > 0) {
-            for (const ouDN of this.getBundleOUs(bundle)) {
+          if (unlinkGPO && bundleOUs.length > 0) {
+            for (const ouDN of bundleOUs) {
               await window.api.ad.unlinkGPOfromOU(bundle.gpoName, ouDN);
             }
           }
@@ -927,6 +1206,17 @@ const BundlesPage = {
     try {
       const result = await window.api.bundles.deploy(id);
       if (result.success) {
+        const publishedAt = new Date().toISOString();
+        const allApps = await window.api.apps.getAll().catch(() => []);
+        for (const entry of bundle.apps || []) {
+          const app = allApps.find(item => item.id === entry.appId);
+          if (!app) continue;
+          await window.api.apps.update(app.id, {
+            publishedAction: 'install',
+            publishedAt
+          });
+        }
+
         // Create GPO if the bundle has it configured
         if (bundle.createGPO && (bundle.gpoName || bundle.name)) {
           const gpoName = bundle.gpoName || `Deploy_Bundle_${bundle.name.replace(/\s/g, '_')}`;
@@ -956,9 +1246,12 @@ const BundlesPage = {
           }
         }
         App.toast(t('apps.deploySuccess'), 'success');
+        this._pendingFocusBundleId = id;
         App.navigate('bundles');
       } else {
-        App.toast(t('common.error') + ': ' + result.error, 'error');
+        if (App.isShareError(result.error)) { App.handleShareError(); } else {
+          App.toast(t('common.error') + ': ' + result.error, 'error');
+        }
       }
     } catch (err) {
       App.toast(t('common.error') + ': ' + err.message, 'error');
@@ -1028,12 +1321,12 @@ const BundlesPage = {
           if (deleteGPO) {
             const r = await window.api.ad.deleteGPO(bundle.gpoName);
             if (r.success) App.toast(t('bundles.gpoDeletedSuccess').replace('{gpo}', bundle.gpoName), 'success');
-            await window.api.bundles.update(id, { deployed: false, deployedPath: '', gpoName: '' });
+            await window.api.bundles.update(id, { deployed: false, deployedPath: '', gpoName: '', publishedAction: 'pending', publishedAt: '' });
           } else {
-            await window.api.bundles.update(id, { deployed: false, deployedPath: '' });
+            await window.api.bundles.update(id, { deployed: false, deployedPath: '', publishedAction: 'pending', publishedAt: '' });
           }
         } else {
-          await window.api.bundles.update(id, { deployed: false, deployedPath: '' });
+          await window.api.bundles.update(id, { deployed: false, deployedPath: '', publishedAction: 'pending', publishedAt: '' });
         }
 
         await window.api.activity.add('bundle_disable', { bundleId: id, bundleName: bundle.name });
@@ -1056,5 +1349,107 @@ const BundlesPage = {
       </div>
       <pre class="code-preview">${this.esc(script)}</pre>
     `, `<button class="btn btn-secondary" onclick="App.closeModal()">${t('deployments.close')}</button>`);
+  },
+
+  async previewUninstallScript(id) {
+    const script = await window.api.bundles.generateUninstallScript(id);
+    App.openModal(this.tr('apps.uninstallScript', 'Script uninstall'), `
+      <div class="code-header">
+        <span>bundle_uninstall.ps1</span>
+      </div>
+      <pre class="code-preview">${this.esc(script)}</pre>
+    `, `<button class="btn btn-secondary" onclick="App.closeModal()">${t('deployments.close')}</button>`);
+  },
+
+  async uninstallBundle(id) {
+    const bundle = await window.api.bundles.get(id);
+    if (!bundle) return;
+
+    const allApps = await window.api.apps.getAll().catch(() => []);
+    const missingApps = bundle.apps.filter(entry => {
+      const app = allApps.find(item => item.id === entry.appId);
+      return !app || !this.canUninstallAppRecord(app);
+    });
+
+    if (missingApps.length > 0) {
+      App.toast(
+        `${this.tr('bundles.uninstallMissingApps', 'Hay apps del bundle sin desinstalacion configurada')}: ${missingApps.map(item => item.name).join(', ')}`,
+        'warning'
+      );
+      return;
+    }
+
+    const targetOUs = this.getBundleOUs(bundle);
+    App.openModal(this.tr('apps.uninstallAction', 'Desinstalar'), `
+      <p>${this.tr('bundles.uninstallPrepareMsg', 'Se preparará el script de desinstalacion para el bundle')} <strong>${this.esc(bundle.name)}</strong>.</p>
+      <p class="form-hint">${this.tr('bundles.uninstallReverseHint', 'Las apps del bundle se ejecutarán en orden inverso para evitar conflictos entre dependencias.')}</p>
+      ${bundle.gpoName ? `
+        <label class="checkbox-wrapper checkbox-panel" style="margin-top:12px;">
+          <input type="checkbox" class="checkbox-select" id="chk-bundle-switch-uninstall-gpo" checked>
+          <span>${this.tr('apps.uninstallSwitchGpo', 'Reapuntar la GPO al uninstall.ps1')}</span>
+        </label>
+      ` : ''}
+    `, `
+      <button class="btn btn-secondary" onclick="App.closeModal()">${t('common.cancel')}</button>
+      <button class="btn btn-warning" id="btn-confirm-bundle-uninstall">${this.tr('apps.uninstallAction', 'Desinstalar')}</button>
+    `);
+
+    document.getElementById('btn-confirm-bundle-uninstall').addEventListener('click', async () => {
+      const btn = document.getElementById('btn-confirm-bundle-uninstall');
+      btn.style.width = btn.offsetWidth + 'px';
+      btn.style.height = btn.offsetHeight + 'px';
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;"></span>';
+
+      try {
+        const publishedAt = new Date().toISOString();
+        for (const entry of bundle.apps) {
+          const app = allApps.find(item => item.id === entry.appId);
+          if (!app) continue;
+          const result = await window.api.scripts.deployUninstall(app);
+          if (!result.success) {
+            throw new Error(`${app.name}: ${result.error || 'No se pudo preparar uninstall.ps1'}`);
+          }
+          await window.api.apps.update(app.id, {
+            uninstallDeployedPath: result.uninstallPath || result.path || '',
+            publishedAction: 'uninstall',
+            publishedAt
+          });
+        }
+
+        const bundleResult = await window.api.bundles.deployUninstall(id);
+        if (!bundleResult.success) {
+          throw new Error(bundleResult.error || 'No se pudo preparar el uninstall del bundle');
+        }
+
+        await window.api.bundles.update(id, {
+          uninstallDeployedPath: bundleResult.path,
+          uninstallPreparedAt: publishedAt,
+          publishedAction: 'uninstall',
+          publishedAt
+        });
+
+        const switchGPO = document.getElementById('chk-bundle-switch-uninstall-gpo')?.checked ?? false;
+        if (bundle.gpoName && switchGPO && bundleResult.path) {
+          if (!App.rsatAvailable) {
+            App.toast(this.tr('apps.uninstallGpoSkipped', 'La GPO no se pudo actualizar porque RSAT/GPMC no está disponible.'), 'warning');
+          } else {
+            const gpoResult = await window.api.ad.createGPO(bundle.gpoName, bundleResult.path, targetOUs);
+            if (!gpoResult.success) {
+              App.toast(`${this.tr('apps.uninstallGpoWarn', 'El script uninstall se generó, pero no se pudo reapuntar la GPO.')}: ${gpoResult.error}`, 'warning');
+            }
+          }
+        }
+
+        App.toast(this.tr('bundles.uninstallPrepared', 'Bundle de desinstalacion preparado correctamente.'), 'success');
+        App.closeModal();
+        this._pendingFocusBundleId = id;
+        App.navigate('bundles');
+      } catch (err) {
+        App.toast(`${t('common.error')}: ${err.message}`, 'error');
+        btn.disabled = false;
+        btn.textContent = this.tr('apps.uninstallAction', 'Desinstalar');
+      }
+    });
   }
 };

@@ -185,7 +185,17 @@ const adService = {
       return { success: true };
     } catch (err) {
       if (err.message.includes('already linked')) {
-        return { success: true, message: 'GPO ya estaba vinculada' };
+        try {
+          const config = require('./config').getConfig();
+          const safeGpo = sanitizePSInput(gpoName).replace(/'/g, "''");
+          const safeOU = sanitizeDN(ouDN);
+          await runPowerShell(
+            `Import-Module ActiveDirectory; Import-Module GroupPolicy; ${dcSnippet(config.preferredDC)}; Set-GPLink -Name '${safeGpo}' -Target '${safeOU}' -Server $adServer -LinkEnabled Yes -ErrorAction Stop`
+          );
+          return { success: true, message: 'GPO ya estaba vinculada y se ha reactivado el enlace' };
+        } catch (setErr) {
+          return { success: false, error: setErr.message };
+        }
       }
       return { success: false, error: err.message };
     }
@@ -262,7 +272,16 @@ const adService = {
 
             foreach ($ouDN in $ouTargets) {
                 if ($ouDN) {
-                    New-GPLink -Name $gpoName -Target $ouDN -Server $adServer -LinkEnabled Yes -ErrorAction Stop | Out-Null
+                    try {
+                        New-GPLink -Name $gpoName -Target $ouDN -Server $adServer -LinkEnabled Yes -ErrorAction Stop | Out-Null
+                    } catch {
+                        $linkError = $_.Exception.Message
+                        if ($linkError -match 'already linked to a Scope of Management') {
+                            Set-GPLink -Name $gpoName -Target $ouDN -Server $adServer -LinkEnabled Yes -ErrorAction Stop | Out-Null
+                        } else {
+                            throw
+                        }
+                    }
                 }
             }
         } catch {
@@ -382,6 +401,30 @@ const adService = {
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
+    }
+  },
+
+  async getGPOLinkCounts() {
+    try {
+      const config = require('./config').getConfig();
+      const json = await runPowerShell(
+        `Import-Module ActiveDirectory; Import-Module GroupPolicy; ${dcSnippet(config.preferredDC)};
+$ous = Get-ADOrganizationalUnit -Filter * -Properties gPLink -Server $adServer
+$map = @{}
+foreach ($ou in $ous) {
+  if ($ou.gPLink) {
+    [regex]::Matches($ou.gPLink, '\\{([^}]+)\\}') | ForEach-Object {
+      $g = $_.Groups[1].Value.ToLower()
+      if ($map.ContainsKey($g)) { $map[$g]++ } else { $map[$g] = 1 }
+    }
+  }
+}
+$map | ConvertTo-Json -Compress`
+      );
+      const parsed = JSON.parse(json || '{}');
+      return { success: true, data: parsed };
+    } catch (err) {
+      return { success: false, error: err.message, data: {} };
     }
   },
 

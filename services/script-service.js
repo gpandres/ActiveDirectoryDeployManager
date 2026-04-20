@@ -20,16 +20,22 @@ function sanitizeAppName(str) {
   return str.replace(/[^a-zA-Z0-9\s\-_.,()[\]@#]/g, '').trim().substring(0, 128);
 }
 
+function sanitizeWingetSource(str) {
+  if (typeof str !== 'string') return '';
+  const normalized = str.trim().toLowerCase();
+  return /^[a-z0-9._-]{1,64}$/.test(normalized) ? normalized : '';
+}
+
 function isInstallerArtifactName(fileName) {
   const normalized = String(fileName || '').toLowerCase();
   return normalized.endsWith('.exe')
     || normalized.endsWith('.msi')
-    || (normalized.endsWith('.ps1') && normalized !== 'install.ps1');
+    || (normalized.endsWith('.ps1') && normalized !== 'install.ps1' && normalized !== 'uninstall.ps1');
 }
 
 const TEMPLATES = {
   generic: { category: 'General', name: 'Generic (MSI/EXE)', description: 'Universal Drop & Run template for any installer', fields: [] },
-  office: { category: 'General', name: 'Microsoft Office (XML)', description: 'Executes setup.exe with an existing XML file', fields: [{ key: 'configXml', label: 'Config XML Name', default: 'config_office.xml', hint: 'Must be placed in the same folder' }] },
+  office: { category: 'General', name: 'Microsoft Office (XML)', description: 'Executes setup.exe with an existing XML file', fields: [] },
   custom: { category: 'General', name: 'Custom Script', description: 'Write your own raw PowerShell code', fields: [{ key: 'customScript', label: 'PowerShell Code', type: 'textarea', default: '# Write your PowerShell code here\\n', hint: 'This code will not be wrapped. Use with caution.' }] },
   winget: { category: 'General', name: 'Winget Package', description: 'Installs from Windows Package Manager', fields: [], noInstaller: true },
   odt: { category: 'General', name: 'Microsoft Office (ODT)', description: 'Office 365/LTSC without manual download — generates XML automatically', fields: [], noInstaller: true },
@@ -131,112 +137,785 @@ const scriptService = {
     return fn(appConfig);
   },
 
+  generateUninstallScript(appConfig) {
+    return generateAppUninstallScript(appConfig);
+  },
+
   async deployScript(appConfig) {
-    try {
-      // Sweep orphaned temp PS scripts before each deploy
-      try { require('./app-service').cleanupTempFiles(); } catch (e) {}
+    return deployAppScripts(appConfig, { writeInstall: true, writeUninstall: true });
+  },
 
-      const config = configService.getConfig();
-      const { safeName, path: appFolder } = resolveNamedSubdirectory(
-        config.networkSharePath,
-        appConfig.name,
-        'App'
-      );
+  async deployUninstallScript(appConfig) {
+    return deployAppScripts(appConfig, { writeInstall: false, writeUninstall: true });
+  }
+};
 
-      if (!fs.existsSync(appFolder)) {
-        await fs.promises.mkdir(appFolder, { recursive: true });
-      }
-      const customTemplate = templateService.resolve(appConfig?.template, appConfig?.templateDefinition);
+async function deployAppScripts(appConfig, options = {}) {
+  const writeInstall = options.writeInstall !== false;
+  const writeUninstall = !!options.writeUninstall;
 
-      // winget and odt modes don't use local installer files — skip copy entirely
-      const isNoInstaller = appConfig.template === 'winget' || appConfig.template === 'odt';
+  if (!writeInstall && !writeUninstall) {
+    return { success: false, error: 'Nothing to deploy' };
+  }
 
-      // Cleanup existing binaries if new one provided
-      let installerHash = '';
-      if (!isNoInstaller && appConfig.installerPath && fs.existsSync(appConfig.installerPath)) {
-        // If the source is already inside this app's share folder, don't
-        // delete+copy (would delete the source first). Just rehash in place.
-        const sourceResolved = path.resolve(appConfig.installerPath).toLowerCase();
-        const folderResolved = path.resolve(appFolder).toLowerCase();
-        const isAlreadyInFolder = sourceResolved.startsWith(folderResolved + path.sep);
+  try {
+    const shareHealth = require('./share-health');
+    if (!shareHealth.isAvailableSync()) {
+      return { success: false, error: 'SHARE_UNAVAILABLE' };
+    }
 
-        if (isAlreadyInFolder) {
-          const buffer = await fs.promises.readFile(appConfig.installerPath);
-          installerHash = crypto.createHash('sha256').update(buffer).digest('hex');
-        } else {
-          const files = await fs.promises.readdir(appFolder);
-          for (const file of files) {
-            if (isInstallerArtifactName(file)) {
-              try { await fs.promises.unlink(path.join(appFolder, file)); } catch (e) {}
-            }
-          }
-          const fileName = path.basename(appConfig.installerPath);
-          await fs.promises.copyFile(appConfig.installerPath, path.join(appFolder, fileName));
+    try { require('./app-service').cleanupTempFiles(); } catch (e) {}
 
-          // Compute SHA256 hash of installer
-          const buffer = await fs.promises.readFile(path.join(appFolder, fileName));
-          installerHash = crypto.createHash('sha256').update(buffer).digest('hex');
+    let resolvedAppConfig = appConfig || {};
+    if (resolvedAppConfig?.template === 'winget') {
+      try {
+        const catalogService = require('./catalog-service');
+        const resolvedPackage = await catalogService.resolvePackage({
+          wingetId: resolvedAppConfig.wingetId,
+          wingetSource: resolvedAppConfig.wingetSource,
+          name: resolvedAppConfig.name
+        });
+        if (resolvedPackage?.available && resolvedPackage.wingetId) {
+          resolvedAppConfig = {
+            ...resolvedAppConfig,
+            wingetId: resolvedPackage.wingetId,
+            wingetSource: resolvedPackage.wingetSource || resolvedAppConfig.wingetSource || 'winget'
+          };
         }
-      } else if (!isNoInstaller) {
-        // Compute hash of existing installer if any
+      } catch (e) { /* keep configured package reference if resolution fails */ }
+    }
+
+    const uninstallConfig = resolveEffectiveUninstallConfig(resolvedAppConfig);
+    if (!writeInstall && !supportsUninstallScript(resolvedAppConfig, uninstallConfig)) {
+      return { success: false, error: 'UNINSTALL_NOT_CONFIGURED' };
+    }
+
+    const config = configService.getConfig();
+    const { safeName, path: appFolder } = resolveNamedSubdirectory(
+      config.networkSharePath,
+      resolvedAppConfig.name,
+      'App'
+    );
+
+    if (!fs.existsSync(appFolder)) {
+      await fs.promises.mkdir(appFolder, { recursive: true });
+    }
+
+    const customTemplate = templateService.resolve(
+      resolvedAppConfig?.template,
+      resolvedAppConfig?.templateDefinition
+    );
+    const isNoInstaller = resolvedAppConfig.template === 'winget' || resolvedAppConfig.template === 'odt';
+
+    let installerHash = '';
+    if (!isNoInstaller && resolvedAppConfig.installerPath && fs.existsSync(resolvedAppConfig.installerPath)) {
+      const sourceResolved = path.resolve(resolvedAppConfig.installerPath).toLowerCase();
+      const folderResolved = path.resolve(appFolder).toLowerCase();
+      const isAlreadyInFolder = sourceResolved.startsWith(folderResolved + path.sep);
+
+      if (isAlreadyInFolder) {
+        const buffer = await fs.promises.readFile(resolvedAppConfig.installerPath);
+        installerHash = crypto.createHash('sha256').update(buffer).digest('hex');
+      } else {
         const files = await fs.promises.readdir(appFolder);
         for (const file of files) {
           if (isInstallerArtifactName(file)) {
-            const buffer = await fs.promises.readFile(path.join(appFolder, file));
-            installerHash = crypto.createHash('sha256').update(buffer).digest('hex');
-            break;
-          }
-        }
-      }
-
-      // Cleanup existing XML config if new one provided
-      if (!isNoInstaller && appConfig.configXmlPath && fs.existsSync(appConfig.configXmlPath)) {
-        const files = await fs.promises.readdir(appFolder);
-        for (const file of files) {
-          if (file.toLowerCase().endsWith('.xml')) {
             try { await fs.promises.unlink(path.join(appFolder, file)); } catch (e) {}
           }
         }
-        const fileName = path.basename(appConfig.configXmlPath);
-        await fs.promises.copyFile(appConfig.configXmlPath, path.join(appFolder, fileName));
+
+        const fileName = path.basename(resolvedAppConfig.installerPath);
+        await fs.promises.copyFile(resolvedAppConfig.installerPath, path.join(appFolder, fileName));
+
+        const buffer = await fs.promises.readFile(path.join(appFolder, fileName));
+        installerHash = crypto.createHash('sha256').update(buffer).digest('hex');
       }
-
-      if (customTemplate) {
-        await copyCustomTemplateFiles(appFolder, appConfig, customTemplate);
+    } else if (!isNoInstaller) {
+      const files = await fs.promises.readdir(appFolder);
+      for (const file of files) {
+        if (isInstallerArtifactName(file)) {
+          const buffer = await fs.promises.readFile(path.join(appFolder, file));
+          installerHash = crypto.createHash('sha256').update(buffer).digest('hex');
+          break;
+        }
       }
-
-      const scriptContent = this.generateScript(appConfig);
-      const scriptPath = path.join(appFolder, 'install.ps1');
-      await fs.promises.writeFile(scriptPath, '\uFEFF' + scriptContent, 'utf-8');
-
-      // Generate version.json manifest
-      const cfgForManifest = require('./config').getConfig();
-      const manifest = {
-        app: appConfig.name,
-        deploymentFolder: safeName,
-        version: appConfig.version || '1.0.0',
-        hash: installerHash,
-        primaryInstallerName: appConfig.installerPath
-          ? sanitizeTemplateFileName(path.basename(appConfig.installerPath))
-          : '',
-        template: appConfig.template || 'generic',
-        templateSource: customTemplate ? 'user' : 'builtin',
-        notifyUser: appConfig.notifyUser || false,
-        deployedAt: new Date().toISOString(),
-        shareId: cfgForManifest.shareId || ''
-      };
-      await fs.promises.writeFile(
-        path.join(appFolder, 'version.json'),
-        JSON.stringify(manifest, null, 2),
-        'utf-8'
-      );
-
-      return { success: true, path: scriptPath, hash: installerHash };
-    } catch (err) {
-      return { success: false, error: err.message };
     }
+
+    if (!isNoInstaller && resolvedAppConfig.configXmlPath && fs.existsSync(resolvedAppConfig.configXmlPath)) {
+      const files = await fs.promises.readdir(appFolder);
+      for (const file of files) {
+        if (file.toLowerCase().endsWith('.xml')) {
+          try { await fs.promises.unlink(path.join(appFolder, file)); } catch (e) {}
+        }
+      }
+      const fileName = path.basename(resolvedAppConfig.configXmlPath);
+      await fs.promises.copyFile(resolvedAppConfig.configXmlPath, path.join(appFolder, fileName));
+    }
+
+    if (customTemplate) {
+      await copyCustomTemplateFiles(appFolder, resolvedAppConfig, customTemplate);
+    }
+
+    let installPath = '';
+    if (writeInstall) {
+      const installScript = scriptService.generateScript(resolvedAppConfig);
+      installPath = path.join(appFolder, 'install.ps1');
+      await fs.promises.writeFile(installPath, '\uFEFF' + installScript, 'utf-8');
+    }
+
+    let uninstallPath = '';
+    if (writeUninstall) {
+      const targetUninstallPath = path.join(appFolder, 'uninstall.ps1');
+      if (supportsUninstallScript(resolvedAppConfig, uninstallConfig)) {
+        const uninstallScript = generateAppUninstallScript({
+          ...resolvedAppConfig,
+          uninstall: uninstallConfig
+        });
+        uninstallPath = targetUninstallPath;
+        await fs.promises.writeFile(uninstallPath, '\uFEFF' + uninstallScript, 'utf-8');
+      } else {
+        try { await fs.promises.unlink(targetUninstallPath); } catch (e) {}
+      }
+    }
+
+    const manifestPath = path.join(appFolder, 'version.json');
+    let existingManifest = {};
+    try {
+      if (fs.existsSync(manifestPath)) {
+        existingManifest = JSON.parse(await fs.promises.readFile(manifestPath, 'utf-8'));
+      }
+    } catch (e) {}
+
+    const deployedAt = new Date().toISOString();
+    const currentAction = writeInstall ? 'install' : 'uninstall';
+    const manifest = buildAppDeploymentManifest(resolvedAppConfig, {
+      safeName,
+      customTemplate,
+      installerHash,
+      installPath: writeInstall ? (installPath || path.join(appFolder, 'install.ps1')) : path.join(appFolder, 'install.ps1'),
+      uninstallPath,
+      uninstallConfig,
+      deployedAt,
+      currentAction,
+      existingManifest
+    });
+
+    await fs.promises.writeFile(
+      manifestPath,
+      JSON.stringify(manifest, null, 2),
+      'utf-8'
+    );
+
+    return {
+      success: true,
+      path: installPath || uninstallPath,
+      installPath,
+      uninstallPath,
+      hash: installerHash,
+      uninstallMode: uninstallConfig.mode
+    };
+  } catch (err) {
+    return { success: false, error: err.message };
   }
-};
+}
+
+function buildAppDeploymentManifest(appConfig, details = {}) {
+  const cfgForManifest = require('./config').getConfig();
+  const existingManifest = details.existingManifest && typeof details.existingManifest === 'object'
+    ? details.existingManifest
+    : {};
+  const uninstallConfig = resolveEffectiveUninstallConfig({
+    ...appConfig,
+    uninstall: details.uninstallConfig || appConfig?.uninstall
+  });
+  const generatedAt = details.deployedAt || new Date().toISOString();
+  const currentAction = details.currentAction === 'uninstall' ? 'uninstall' : 'install';
+  const installScriptPath = details.installPath || existingManifest.installScriptPath || '';
+  const uninstallScriptPath = details.uninstallPath || existingManifest?.uninstall?.scriptPath || '';
+  return {
+    ...existingManifest,
+    app: appConfig.name,
+    deploymentFolder: details.safeName || '',
+    version: appConfig.version || '1.0.0',
+    hash: details.installerHash || '',
+    primaryInstallerName: appConfig.installerPath
+      ? sanitizeTemplateFileName(path.basename(appConfig.installerPath))
+      : '',
+    template: appConfig.template || 'generic',
+    templateSource: details.customTemplate ? 'user' : 'builtin',
+    notifyUser: appConfig.notifyUser || false,
+    deployedAt: currentAction === 'install' ? generatedAt : (existingManifest.deployedAt || ''),
+    lastInstallAt: currentAction === 'install'
+      ? generatedAt
+      : (existingManifest.lastInstallAt || existingManifest.deployedAt || ''),
+    lastUninstallPreparedAt: currentAction === 'uninstall'
+      ? generatedAt
+      : (existingManifest.lastUninstallPreparedAt || existingManifest?.uninstall?.generatedAt || ''),
+    publishedAction: currentAction,
+    activeScriptPath: currentAction === 'uninstall' ? uninstallScriptPath : installScriptPath,
+    publishedAt: generatedAt,
+    shareId: cfgForManifest.shareId || '',
+    installScriptPath,
+    uninstall: {
+      mode: uninstallConfig.mode,
+      available: supportsUninstallScript(appConfig, uninstallConfig) && !!uninstallScriptPath,
+      command: uninstallConfig.command || '',
+      args: uninstallConfig.args || '',
+      registryMatchName: uninstallConfig.registryMatchName || '',
+      registryMatchPublisher: uninstallConfig.registryMatchPublisher || '',
+      productCode: uninstallConfig.productCode || '',
+      wingetId: uninstallConfig.wingetId || '',
+      wingetSource: uninstallConfig.wingetSource || '',
+      scriptPath: uninstallScriptPath,
+      generatedAt
+    }
+  };
+}
+
+function inferInstallerType(appConfig) {
+  if (appConfig?.template === 'winget') return 'winget';
+  if (appConfig?.template === 'odt') return 'odt';
+  if (appConfig?.template === 'custom') return 'custom';
+  const explicit = String(appConfig?.installerType || '').trim().toLowerCase();
+  if (explicit) return explicit;
+  const ext = path.extname(String(appConfig?.installerPath || '')).toLowerCase();
+  if (ext === '.msi') return 'msi';
+  if (ext === '.ps1') return 'ps1';
+  return 'exe';
+}
+
+function resolveEffectiveUninstallConfig(appConfig) {
+  const raw = appConfig?.uninstall && typeof appConfig.uninstall === 'object'
+    ? appConfig.uninstall
+    : {};
+  const installerType = inferInstallerType(appConfig);
+
+  let mode = typeof raw.mode === 'string' ? raw.mode.trim().toLowerCase() : '';
+  if (!mode) {
+    if (appConfig?.template === 'winget') mode = 'winget';
+    else if (installerType === 'msi') mode = 'auto-msi';
+    else if (appConfig?.template === 'custom' || appConfig?.template === 'odt') mode = 'none';
+    else mode = 'auto-registry';
+  }
+
+  return {
+    mode,
+    command: typeof raw.command === 'string' ? raw.command.trim() : '',
+    args: typeof raw.args === 'string' ? raw.args.trim() : '',
+    registryMatchName: typeof raw.registryMatchName === 'string' && raw.registryMatchName.trim()
+      ? raw.registryMatchName.trim()
+      : String(appConfig?.name || '').trim(),
+    registryMatchPublisher: typeof raw.registryMatchPublisher === 'string' ? raw.registryMatchPublisher.trim() : '',
+    productCode: typeof raw.productCode === 'string' ? raw.productCode.trim() : '',
+    wingetId: typeof raw.wingetId === 'string' && raw.wingetId.trim()
+      ? raw.wingetId.trim()
+      : String(appConfig?.wingetId || '').trim(),
+    wingetSource: sanitizeWingetSource(
+      (typeof raw.wingetSource === 'string' && raw.wingetSource.trim())
+        ? raw.wingetSource
+        : (appConfig?.wingetSource || 'winget')
+    ) || 'winget',
+    scriptPath: typeof raw.scriptPath === 'string' ? raw.scriptPath.trim() : '',
+    preparedAt: typeof raw.preparedAt === 'string' ? raw.preparedAt.trim() : ''
+  };
+}
+
+function supportsUninstallScript(appConfig, uninstallConfig = resolveEffectiveUninstallConfig(appConfig)) {
+  switch (uninstallConfig.mode) {
+    case 'auto-msi':
+      return inferInstallerType(appConfig) === 'msi' || !!uninstallConfig.productCode;
+    case 'winget':
+      return !!uninstallConfig.wingetId;
+    case 'manual':
+      return !!uninstallConfig.command;
+    case 'auto-registry':
+      return !!(uninstallConfig.productCode || uninstallConfig.registryMatchName || uninstallConfig.registryMatchPublisher || appConfig?.name);
+    default:
+      return false;
+  }
+}
+
+function generateAppUninstallScript(appConfig) {
+  const uninstallConfig = resolveEffectiveUninstallConfig(appConfig);
+  if (!supportsUninstallScript(appConfig, uninstallConfig)) {
+    throw new Error('Uninstall is not configured for this app');
+  }
+
+  switch (uninstallConfig.mode) {
+    case 'auto-msi':
+      return generateMsiUninstallScript(appConfig, uninstallConfig);
+    case 'winget':
+      return generateWingetUninstallScript(appConfig, uninstallConfig);
+    case 'manual':
+      return generateManualUninstallScript(appConfig, uninstallConfig);
+    case 'auto-registry':
+      return generateRegistryUninstallScript(appConfig, uninstallConfig);
+    default:
+      throw new Error(`Unsupported uninstall mode: ${uninstallConfig.mode}`);
+  }
+}
+
+function buildUninstallScriptShell(appConfig, uninstallConfig, body, options = {}) {
+  const safeName = sanitizeAppName(appConfig?.name || 'App');
+  const version = sanitizePSForEmbedding(appConfig?.version || '1.0.0');
+  const mode = sanitizePSForEmbedding(uninstallConfig.mode || 'manual');
+  const title = sanitizePSForEmbedding(options.title || 'UNINSTALL');
+  const detectionHelpers = options.includeDetectionHelpers ? `${getInstallerConflictLogic()}\n` : '';
+  const extraFunctions = options.extraFunctions ? `${options.extraFunctions}\n` : '';
+
+  return `# =========================================================================
+# ${title} - DROP & RUN
+# App: ${safeName}
+# Version: ${version}
+# Generado: ${new Date().toISOString()}
+# =========================================================================
+If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
+    Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { }
+    Exit
+}
+
+if (-not $PSScriptRoot) { $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
+if (-not $PSScriptRoot) { $PSScriptRoot = $PWD.Path }
+
+$NombreApp = if ($PSScriptRoot) { Split-Path -Leaf $PSScriptRoot } else { "${safeName}" }
+$LogDir = "C:\\ProgramData\\AppDeploy_Logs"
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+Get-ChildItem "$LogDir\\*.log" -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item -Force -ErrorAction SilentlyContinue
+$LogFile = "$LogDir\\Uninstall_$($NombreApp)_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+$TrackerFile = "$LogDir\\Tracker_$NombreApp.json"
+$VersionFile = Join-Path $PSScriptRoot "version.json"
+$CurrentVersion = "${version}"
+$CurrentHash = ""
+$Manifest = $null
+$ManifestUninstall = $null
+$UninstallMode = "${mode}"
+
+Start-Transcript -Path $LogFile -Force -ErrorAction SilentlyContinue
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ===== AppDeploy Manager ============================="
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] App     : $NombreApp"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Accion  : uninstall [$UninstallMode]"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Equipo  : $env:COMPUTERNAME"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Usuario : $env:USERNAME"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Fuente  : $PSScriptRoot"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ====================================================="
+
+if (Test-Path -LiteralPath $VersionFile) {
+    try {
+        $Manifest = Get-Content -LiteralPath $VersionFile -Raw | ConvertFrom-Json
+        if ($Manifest.version) { $CurrentVersion = [string]$Manifest.version }
+        if ($Manifest.hash) { $CurrentHash = [string]$Manifest.hash }
+        if ($Manifest.uninstall) { $ManifestUninstall = $Manifest.uninstall }
+    } catch {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: No se pudo leer version.json - $_"
+    }
+}
+
+function Save-UninstallTracker {
+    param(
+        [string]$Result,
+        [string]$Method,
+        [string]$ErrorMessage = '',
+        [hashtable]$Extra = @{}
+    )
+
+    $payload = [ordered]@{
+        version = $CurrentVersion
+        hash = $CurrentHash
+        computer = $env:COMPUTERNAME
+        result = $Result
+        method = $Method
+    }
+
+    if ($Result -eq 'removed') {
+        $payload.removedAt = (Get-Date).ToString('o')
+    } elseif ($Result -eq 'failed') {
+        $payload.failedAt = (Get-Date).ToString('o')
+        if ($ErrorMessage) {
+            $payload.error = $ErrorMessage
+        }
+    } else {
+        $payload.checkedAt = (Get-Date).ToString('o')
+    }
+
+    foreach ($key in $Extra.Keys) {
+        $payload[$key] = $Extra[$key]
+    }
+
+    $payload | ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+}
+
+${detectionHelpers}${extraFunctions}try {
+${body}
+} catch {
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: $_"
+    Save-UninstallTracker -Result 'failed' -Method $UninstallMode -ErrorMessage $_.ToString()
+    Stop-Transcript -ErrorAction SilentlyContinue
+    exit 1
+}
+`;
+}
+
+function generateMsiUninstallScript(appConfig, uninstallConfig) {
+  const preferredProductCode = sanitizePSForEmbedding(uninstallConfig.productCode || '');
+  const installerName = sanitizePSForEmbedding(
+    sanitizeTemplateFileName(path.basename(appConfig?.installerPath || ''))
+  );
+  const matchName = sanitizePSForEmbedding(uninstallConfig.registryMatchName || appConfig?.name || '');
+  const extraFunctions = `
+function Resolve-MsiProductCode {
+    param(
+        [string]$PreferredCode,
+        [string]$InstallerName,
+        [string]$DisplayMatchName
+    )
+
+    if ($PreferredCode) { return $PreferredCode }
+    if ($ManifestUninstall -and $ManifestUninstall.productCode) { return [string]$ManifestUninstall.productCode }
+
+    if ($InstallerName) {
+        $installerPath = Join-Path $PSScriptRoot $InstallerName
+        if (Test-Path -LiteralPath $installerPath) {
+            $productCode = Get-MsiPackageProperty -Path $installerPath -PropertyName 'ProductCode'
+            if ($productCode) { return [string]$productCode }
+        }
+    }
+
+    $normalizedName = Normalize-DetectedAppName -Value $DisplayMatchName
+    if (-not $normalizedName) { return '' }
+
+    foreach ($entry in Get-InstalledApplicationEntries) {
+        if (-not $entry.ProductCode) { continue }
+        if ($entry.NormalizedDisplayName -eq $normalizedName) {
+            return [string]$entry.ProductCode
+        }
+        if ($normalizedName.Length -ge 8 -and ($entry.NormalizedDisplayName.StartsWith($normalizedName) -or $normalizedName.StartsWith($entry.NormalizedDisplayName))) {
+            return [string]$entry.ProductCode
+        }
+    }
+
+    return ''
+}`.trim();
+
+  const body = `    $PreferredProductCode = "${preferredProductCode}"
+    $PrimaryInstallerName = "${installerName}"
+    $RegistryMatchName = "${matchName}"
+    $ProductCode = Resolve-MsiProductCode -PreferredCode $PreferredProductCode -InstallerName $PrimaryInstallerName -DisplayMatchName $RegistryMatchName
+
+    if (-not $ProductCode) {
+        throw "No se pudo determinar el ProductCode MSI para $NombreApp"
+    }
+
+    $InstalledEntry = Get-InstalledApplicationEntries | Where-Object { $_.ProductCode -eq $ProductCode } | Select-Object -First 1
+    if (-not $InstalledEntry) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: El producto MSI ya no aparece instalado ($ProductCode)"
+        Save-UninstallTracker -Result 'removed' -Method $UninstallMode -Extra @{ productCode = $ProductCode; note = 'already-absent' }
+        Stop-Transcript -ErrorAction SilentlyContinue
+        exit 0
+    }
+
+    $MsiArgs = "/x $ProductCode REBOOT=ReallySuppress /qn /norestart"
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Ejecutando: msiexec.exe $MsiArgs"
+    $Process = Start-Process -FilePath 'msiexec.exe' -ArgumentList $MsiArgs -Wait -NoNewWindow -PassThru
+    if ($Process.ExitCode -notin @(0, 3010, 1641, 1605)) {
+        throw "msiexec devolvio $($Process.ExitCode)"
+    }
+
+    Save-UninstallTracker -Result 'removed' -Method $UninstallMode -Extra @{ productCode = $ProductCode }
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: MSI desinstalado"
+    Stop-Transcript -ErrorAction SilentlyContinue
+    exit 0`;
+
+  return buildUninstallScriptShell(appConfig, uninstallConfig, body, {
+    title: 'MSI UNINSTALL',
+    includeDetectionHelpers: true,
+    extraFunctions
+  });
+}
+
+function generateRegistryUninstallScript(appConfig, uninstallConfig) {
+  const matchName = sanitizePSForEmbedding(uninstallConfig.registryMatchName || appConfig?.name || '');
+  const matchPublisher = sanitizePSForEmbedding(uninstallConfig.registryMatchPublisher || '');
+  const productCode = sanitizePSForEmbedding(uninstallConfig.productCode || '');
+  const extraFunctions = `
+function Get-RegistryUninstallEntries {
+    return @(
+        Get-ItemProperty \`
+            "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*",
+            "HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" \`
+            -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName } |
+            ForEach-Object {
+                $entryProductCode = ''
+                if ([string]$_.PSChildName -match '^\\{[0-9A-F-]+\\}$') {
+                    $entryProductCode = $Matches[0]
+                } elseif ([string]$_.UninstallString -match '\\{[0-9A-F-]+\\}') {
+                    $entryProductCode = $Matches[0]
+                } elseif ([string]$_.QuietUninstallString -match '\\{[0-9A-F-]+\\}') {
+                    $entryProductCode = $Matches[0]
+                }
+
+                [pscustomobject]@{
+                    DisplayName = [string]$_.DisplayName
+                    NormalizedDisplayName = Normalize-DetectedAppName -Value $_.DisplayName
+                    Publisher = [string]$_.Publisher
+                    PublisherNormalized = Normalize-DetectedAppName -Value $_.Publisher
+                    ProductCode = $entryProductCode
+                    QuietUninstallString = [string]$_.QuietUninstallString
+                    UninstallString = [string]$_.UninstallString
+                }
+            }
+    )
+}
+
+function Resolve-RegistryUninstallEntry {
+    param(
+        [string]$MatchName,
+        [string]$MatchPublisher,
+        [string]$PreferredProductCode
+    )
+
+    $effectiveProductCode = if ($PreferredProductCode) { $PreferredProductCode } elseif ($ManifestUninstall -and $ManifestUninstall.productCode) { [string]$ManifestUninstall.productCode } else { '' }
+    $effectiveName = if ($MatchName) { $MatchName } elseif ($ManifestUninstall -and $ManifestUninstall.registryMatchName) { [string]$ManifestUninstall.registryMatchName } else { '' }
+    $effectivePublisher = if ($MatchPublisher) { $MatchPublisher } elseif ($ManifestUninstall -and $ManifestUninstall.registryMatchPublisher) { [string]$ManifestUninstall.registryMatchPublisher } else { '' }
+
+    $normalizedName = Normalize-DetectedAppName -Value $effectiveName
+    $normalizedPublisher = Normalize-DetectedAppName -Value $effectivePublisher
+    $best = $null
+    $bestScore = -1
+
+    foreach ($entry in Get-RegistryUninstallEntries) {
+        $score = 0
+        if ($effectiveProductCode -and $entry.ProductCode -and $entry.ProductCode -eq $effectiveProductCode) {
+            $score = 100
+        }
+
+        if ($normalizedName) {
+            if ($entry.NormalizedDisplayName -eq $normalizedName) {
+                $score = [Math]::Max($score, 85)
+            } elseif ($normalizedName.Length -ge 8 -and ($entry.NormalizedDisplayName.StartsWith($normalizedName) -or $normalizedName.StartsWith($entry.NormalizedDisplayName))) {
+                $score = [Math]::Max($score, 70)
+            }
+        }
+
+        if ($normalizedPublisher -and $entry.PublisherNormalized -eq $normalizedPublisher -and $score -gt 0) {
+            $score += 5
+        }
+
+        if ($score -gt $bestScore) {
+            $best = $entry
+            $bestScore = $score
+        }
+    }
+
+    if (-not $best -or $bestScore -lt 70) { return $null }
+    return $best
+}
+
+function Split-CommandLine {
+    param([string]$CommandLine)
+    $line = [string]$CommandLine
+    if (-not $line.Trim()) { return $null }
+    $line = $line.Trim()
+    if ($line.StartsWith('"')) {
+        $closingQuote = $line.IndexOf('"', 1)
+        if ($closingQuote -gt 0) {
+            return [pscustomobject]@{
+                FilePath = $line.Substring(1, $closingQuote - 1)
+                Arguments = $line.Substring($closingQuote + 1).Trim()
+            }
+        }
+    }
+
+    $parts = $line -split '\\s+', 2
+    return [pscustomobject]@{
+        FilePath = $parts[0]
+        Arguments = if ($parts.Length -gt 1) { $parts[1] } else { '' }
+    }
+}
+
+function Get-MsiUninstallArguments {
+    param(
+        [string]$CommandLine,
+        [string]$PreferredProductCode
+    )
+
+    if ($PreferredProductCode) {
+        return "/x $PreferredProductCode REBOOT=ReallySuppress /qn /norestart"
+    }
+
+    if ([string]$CommandLine -match '\\{[0-9A-F-]+\\}') {
+        return "/x $($Matches[0]) REBOOT=ReallySuppress /qn /norestart"
+    }
+
+    return ''
+}`.trim();
+
+  const body = `    $RegistryMatchName = "${matchName}"
+    $RegistryMatchPublisher = "${matchPublisher}"
+    $PreferredProductCode = "${productCode}"
+    $TargetEntry = Resolve-RegistryUninstallEntry -MatchName $RegistryMatchName -MatchPublisher $RegistryMatchPublisher -PreferredProductCode $PreferredProductCode
+
+    if (-not $TargetEntry) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: No se encontro una coincidencia instalada para desinstalar"
+        Save-UninstallTracker -Result 'removed' -Method $UninstallMode -Extra @{ note = 'not-found' }
+        Stop-Transcript -ErrorAction SilentlyContinue
+        exit 0
+    }
+
+    $CommandLine = if ($TargetEntry.QuietUninstallString) { [string]$TargetEntry.QuietUninstallString } else { [string]$TargetEntry.UninstallString }
+    $MsiArgs = Get-MsiUninstallArguments -CommandLine $CommandLine -PreferredProductCode $TargetEntry.ProductCode
+    if ($MsiArgs) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Ejecutando MSI silent uninstall para $($TargetEntry.DisplayName)"
+        $Process = Start-Process -FilePath 'msiexec.exe' -ArgumentList $MsiArgs -Wait -NoNewWindow -PassThru
+        if ($Process.ExitCode -notin @(0, 3010, 1641, 1605)) {
+            throw "msiexec devolvio $($Process.ExitCode)"
+        }
+    } else {
+        if (-not $CommandLine) {
+            throw "La entrada de registro no tiene comando de desinstalacion"
+        }
+
+        $ParsedCommand = Split-CommandLine -CommandLine $CommandLine
+        if (-not $ParsedCommand -or -not $ParsedCommand.FilePath) {
+            throw "No se pudo interpretar el comando de desinstalacion: $CommandLine"
+        }
+
+        $ExpandedPath = [System.Environment]::ExpandEnvironmentVariables([string]$ParsedCommand.FilePath)
+        $ExpandedArgs = [System.Environment]::ExpandEnvironmentVariables([string]$ParsedCommand.Arguments)
+        if ($ExpandedPath.ToLowerInvariant().EndsWith('.ps1')) {
+            $Process = Start-Process -FilePath 'PowerShell.exe' -ArgumentList "-ExecutionPolicy Bypass -File \`"$ExpandedPath\`" $ExpandedArgs" -Wait -NoNewWindow -PassThru
+        } else {
+            $Process = Start-Process -FilePath $ExpandedPath -ArgumentList $ExpandedArgs -Wait -NoNewWindow -PassThru
+        }
+
+        if ($Process.ExitCode -notin @(0, 3010, 1641, 1605)) {
+            throw "El desinstalador devolvio $($Process.ExitCode)"
+        }
+    }
+
+    Save-UninstallTracker -Result 'removed' -Method $UninstallMode -Extra @{ displayName = $TargetEntry.DisplayName; productCode = $TargetEntry.ProductCode }
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: Desinstalacion completada para $($TargetEntry.DisplayName)"
+    Stop-Transcript -ErrorAction SilentlyContinue
+    exit 0`;
+
+  return buildUninstallScriptShell(appConfig, uninstallConfig, body, {
+    title: 'REGISTRY UNINSTALL',
+    includeDetectionHelpers: true,
+    extraFunctions
+  });
+}
+
+function generateManualUninstallScript(appConfig, uninstallConfig) {
+  const command = sanitizePSForEmbedding(uninstallConfig.command || '');
+  const args = sanitizePSForEmbedding(uninstallConfig.args || '');
+  const body = `    $CommandPath = [System.Environment]::ExpandEnvironmentVariables("${command}")
+    $CommandArgs = [System.Environment]::ExpandEnvironmentVariables("${args}")
+    if (-not $CommandPath) {
+        throw "No se configuro un comando de desinstalacion"
+    }
+
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Ejecutando comando manual: $CommandPath $CommandArgs"
+    if ($CommandPath.ToLowerInvariant().EndsWith('.ps1')) {
+        $Process = Start-Process -FilePath 'PowerShell.exe' -ArgumentList "-ExecutionPolicy Bypass -File \`"$CommandPath\`" $CommandArgs" -Wait -NoNewWindow -PassThru
+    } else {
+        $Process = Start-Process -FilePath $CommandPath -ArgumentList $CommandArgs -Wait -NoNewWindow -PassThru
+    }
+
+    if ($Process.ExitCode -notin @(0, 3010, 1641, 1605)) {
+        throw "El comando manual devolvio $($Process.ExitCode)"
+    }
+
+    Save-UninstallTracker -Result 'removed' -Method $UninstallMode -Extra @{ command = $CommandPath; args = $CommandArgs }
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: Comando manual completado"
+    Stop-Transcript -ErrorAction SilentlyContinue
+    exit 0`;
+
+  return buildUninstallScriptShell(appConfig, uninstallConfig, body, {
+    title: 'MANUAL UNINSTALL'
+  });
+}
+
+function generateWingetUninstallScript(appConfig, uninstallConfig) {
+  const wingetId = sanitizePSForEmbedding(uninstallConfig.wingetId || appConfig?.wingetId || '');
+  const wingetSource = sanitizePSForEmbedding(uninstallConfig.wingetSource || appConfig?.wingetSource || 'winget');
+  const extraFunctions = `
+function Resolve-WingetPath {
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\\WindowsApps\\winget.exe'),
+        (Join-Path $env:ProgramFiles 'WindowsApps\\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\\winget.exe'),
+        'winget.exe'
+    )
+
+    foreach ($candidate in $candidates) {
+        try {
+            $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+            if ($cmd) { return $cmd.Source }
+        } catch {}
+        if ($candidate -ne 'winget.exe' -and (Test-Path -LiteralPath $candidate)) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
+function Test-WingetPackageInstalled {
+    param(
+        [string]$WingetPath,
+        [string]$PackageId,
+        [string]$PackageSource
+    )
+
+    if (-not $WingetPath -or -not $PackageId) { return $false }
+    $args = @('list', '--id', $PackageId, '--exact', '--accept-source-agreements')
+    if ($PackageSource) { $args += @('--source', $PackageSource) }
+
+    try {
+        $output = & $WingetPath @args 2>$null
+        return [string]::Join("\`n", $output) -match [regex]::Escape($PackageId)
+    } catch {
+        return $false
+    }
+}`.trim();
+
+  const body = `    $wingetId = "${wingetId}"
+    $wingetSource = "${wingetSource}"
+    if (-not $wingetId) {
+        throw "No se configuro un package id de winget"
+    }
+
+    $Winget = Resolve-WingetPath
+    if (-not $Winget) {
+        throw "No se encontro winget.exe en el equipo"
+    }
+
+    if (-not (Test-WingetPackageInstalled -WingetPath $Winget -PackageId $wingetId -PackageSource $wingetSource)) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: $wingetId ya no aparece instalado"
+        Save-UninstallTracker -Result 'removed' -Method $UninstallMode -Extra @{ wingetId = $wingetId; note = 'already-absent' }
+        Stop-Transcript -ErrorAction SilentlyContinue
+        exit 0
+    }
+
+    $args = @('uninstall', '--id', $wingetId, '--exact', '--silent', '--accept-source-agreements', '--disable-interactivity')
+    if ($wingetSource) { $args += @('--source', $wingetSource) }
+
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Ejecutando: winget $($args -join ' ')"
+    & $Winget @args 2>&1 | Out-Null
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -notin @(0, 1605, 1614)) {
+        throw "winget devolvio $exitCode"
+    }
+
+    Save-UninstallTracker -Result 'removed' -Method $UninstallMode -Extra @{ wingetId = $wingetId; source = $wingetSource }
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: Winget desinstalado"
+    Stop-Transcript -ErrorAction SilentlyContinue
+    exit 0`;
+
+  return buildUninstallScriptShell(appConfig, uninstallConfig, body, {
+    title: 'WINGET UNINSTALL',
+    extraFunctions
+  });
+}
 
 function sanitizeTemplateFileName(fileName) {
   if (typeof fileName !== 'string') return '';
@@ -635,6 +1314,8 @@ function Get-InstallerDetectionMetadata {
     $productVersionRaw = ''
 
     $candidateSeed = @()
+    $fileBaseName = [System.IO.Path]::GetFileNameWithoutExtension([string]$InstallerPath)
+    $fileBaseNameWithoutVersion = ($fileBaseName -replace '([._-]?\d+(\.\d+){1,4}.*)$', '')
     if ($extension -eq '.msi') {
         $candidateSeed += Get-MsiPackageProperty -Path $InstallerPath -PropertyName 'ProductName'
         $productVersionRaw = Get-MsiPackageProperty -Path $InstallerPath -PropertyName 'ProductVersion'
@@ -646,11 +1327,15 @@ function Get-InstallerDetectionMetadata {
         if ($fileInfo) {
             $candidateSeed += [string]$fileInfo.ProductName
             $candidateSeed += [string]$fileInfo.FileDescription
+            $candidateSeed += [System.IO.Path]::GetFileNameWithoutExtension([string]$fileInfo.OriginalFilename)
+            $candidateSeed += [string]$fileInfo.InternalName
             $publisher = [string]$fileInfo.CompanyName
             $productVersionRaw = [string]$fileInfo.ProductVersion
         }
     }
 
+    $candidateSeed += $fileBaseName
+    $candidateSeed += $fileBaseNameWithoutVersion
     $candidateSeed += $FallbackDisplayName
     foreach ($candidate in $candidateSeed) {
         $candidateText = [string]$candidate
@@ -683,9 +1368,11 @@ function Get-InstalledApplicationMatch {
 
     $bestMatch = $null
     $bestScore = -1
+    $bestPublisherMatched = $false
 
     foreach ($entry in Get-InstalledApplicationEntries) {
         $score = 0
+        $publisherMatched = $false
 
         if ($InstallerMetadata.ProductCode -and $entry.ProductCode -and $InstallerMetadata.ProductCode -eq $entry.ProductCode) {
             $score = 100
@@ -700,13 +1387,17 @@ function Get-InstalledApplicationMatch {
             }
         }
 
-        if ($score -gt 0 -and $InstallerMetadata.PublisherNormalized -and $entry.PublisherNormalized -eq $InstallerMetadata.PublisherNormalized) {
-            $score += 5
+        if ($InstallerMetadata.PublisherNormalized -and $entry.PublisherNormalized -eq $InstallerMetadata.PublisherNormalized) {
+            $publisherMatched = $true
+            if ($score -gt 0) {
+                $score += 5
+            }
         }
 
         if ($score -gt $bestScore) {
             $bestScore = $score
             $bestMatch = $entry
+            $bestPublisherMatched = $publisherMatched
         }
     }
 
@@ -720,6 +1411,7 @@ function Get-InstalledApplicationMatch {
         VersionObject = $bestMatch.VersionObject
         ProductCode = $bestMatch.ProductCode
         MatchScore = $bestScore
+        PublisherMatched = $bestPublisherMatched
     }
 }
 
@@ -740,13 +1432,18 @@ function Resolve-InstallerConflictState {
     $reason = ''
 
     if ($match) {
+        $trustedUpgradeMatch = $match.ProductCode -and (
+            $match.MatchScore -ge 85 -or
+            ($match.PublisherMatched -and $match.MatchScore -ge 75)
+        )
+
         if ($InstallerMetadata.ProductCode -and $match.ProductCode -and $InstallerMetadata.ProductCode -eq $match.ProductCode) {
             $skipInstall = $true
             $reason = 'same-product-code'
         } elseif ($match.VersionObject -and $targetVersionObject -and $match.VersionObject -ge $targetVersionObject) {
             $skipInstall = $true
             $reason = 'same-or-newer-version'
-        } elseif ($InstallerMetadata.Extension -eq '.msi' -and $match.ProductCode -and $match.VersionObject -and $targetVersionObject -and $match.VersionObject -lt $targetVersionObject -and $match.MatchScore -ge 85) {
+        } elseif ($trustedUpgradeMatch -and $match.VersionObject -and $targetVersionObject -and $match.VersionObject -lt $targetVersionObject) {
             $canAutoUninstall = $true
             $reason = 'older-version-conflict'
         } else {
@@ -826,7 +1523,7 @@ function Invoke-ManagedInstaller {
             return [pscustomobject]@{ Status = 'skipped'; ExitCode = 1638 }
         }
 
-        if ($Kind -eq 'msi' -and $conflictState.CanAutoUninstall) {
+        if ($conflictState.CanAutoUninstall) {
             $conflictLabel = Get-InstallerConflictLabel -Conflict $conflictState
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Se detecto una version anterior que bloquea la actualizacion ($conflictLabel). Desinstalando y reintentando..."
             $uninstallArgs = "/x $($conflictState.Match.ProductCode) REBOOT=ReallySuppress /qn"
@@ -1069,7 +1766,7 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
     '}',
     'if (-not $InstaladorRed) {',
     '    $InstaladorRed = Get-ChildItem -Path $PSScriptRoot -File -ErrorAction SilentlyContinue |',
-    '                     Where-Object { $_.Extension -match "' + safeFilter + '" -and $_.Name -ne "install.ps1" } |',
+    '                     Where-Object { $_.Extension -match "' + safeFilter + '" -and $_.Name -ne "install.ps1" -and $_.Name -ne "uninstall.ps1" } |',
     '                     Select-Object -First 1',
     '}',
     'if (-not $InstaladorRed) {',
@@ -1106,7 +1803,7 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
     '}',
     'if (-not $Instalador) {',
     '    $Instalador = Get-ChildItem -Path $CacheDir -File |',
-    '                  Where-Object { $_.Extension -match "' + safeFilter + '" -and $_.Name -ne "install.ps1" } |',
+    '                  Where-Object { $_.Extension -match "' + safeFilter + '" -and $_.Name -ne "install.ps1" -and $_.Name -ne "uninstall.ps1" } |',
     '                  Select-Object -First 1',
     '}',
     'if (-not $Instalador) {',
@@ -1316,7 +2013,9 @@ ${getTrackerSaveLogic(notify)}
 }
 
 function generateOffice(cfg) {
-  const configXml = sanitizeAppName(cfg.customParams?.configXml || 'config_office.xml');
+  const configXml = cfg.configXmlPath
+    ? sanitizeTemplateFileName(path.basename(cfg.configXmlPath))
+    : (sanitizeTemplateFileName(cfg.customParams?.configXml || 'config_office.xml') || 'config_office.xml');
   const notify = cfg.notifyUser || false;
   return `# =========================================================================
 # MICROSOFT OFFICE - DROP & RUN
@@ -1328,7 +2027,7 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
 }
 ${getLocalCachingLogic("\\.exe$", notify, sanitizeAppName(cfg.name))}
 try {
-    $RutaXML = Join-Path -Path $CacheDir -ChildPath "$configXml"
+    $RutaXML = Join-Path -Path $CacheDir -ChildPath "${configXml}"
     ${getManagedInstallerInvocation('exe', '"/configure \`"$RutaXML\`""')}
 ${getTrackerSaveLogic(notify)}
 `;
@@ -1660,6 +2359,7 @@ ${getTrackerSaveLogic(notify)}
 
 function generateWinget(cfg) {
   const wingetId = sanitizePSForEmbedding(cfg.wingetId || '');
+  const wingetSource = sanitizePSForEmbedding(sanitizeWingetSource(cfg.wingetSource || 'winget'));
   const version  = sanitizePSForEmbedding(cfg.version || '1.0.0');
   const notify   = cfg.notifyUser || false;
   const config   = configService.getConfig();
@@ -1680,6 +2380,7 @@ function generateWinget(cfg) {
 # Generado: ${new Date().toISOString()}
 # =========================================================================
 $wingetId = "${wingetId}"
+$wingetSource = "${wingetSource}"
 If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
     Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
 }
@@ -1697,7 +2398,7 @@ $LogFile   = "$LogDir\\Install_$($NombreApp)_$(Get-Date -Format 'yyyyMMdd_HHmmss
 Start-Transcript -Path $LogFile -Force -ErrorAction SilentlyContinue
 
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ===== AppDeploy Manager ============================="
-Write-Host "[$(Get-Date -Format 'HH:mm:ss')] App     : $NombreApp [winget: $wingetId]"
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] App     : $NombreApp [winget: $wingetId | source: $wingetSource]"
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Equipo  : $env:COMPUTERNAME"
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Usuario : $env:USERNAME"
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ====================================================="
@@ -1732,17 +2433,6 @@ if (Test-Path $VersionFile) {
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Version : $CurrentVersion"
 
 # ── Salir si ya esta instalado en esta version ───────────
-if (Test-Path $TrackerFile) {
-    try {
-        $t = Get-Content $TrackerFile -Raw | ConvertFrom-Json
-        if ($t.version -eq $CurrentVersion -and $t.result -in @('success', 'scheduled')) {
-            if ($t.result -eq 'success') { Clear-UserWingetArtifacts -Quiet }
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Ya instalado/programado (v$CurrentVersion, estado: $($t.result))"
-            Stop-Transcript -ErrorAction SilentlyContinue
-            exit 0
-        }
-    } catch {}
-}
 ${notifyPrefix}
 
 # ── Localizar winget (contexto SYSTEM / GPO startup) ─────
@@ -1787,6 +2477,79 @@ if (-not $Winget) {
 }
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] winget: $Winget"
 
+function Test-WingetPackageInstalled {
+    param(
+        [string]$WingetPath,
+        [string]$PackageId,
+        [string]$PackageSource = ''
+    )
+
+    try {
+        $listArgs = @('list', '--id', "$PackageId", '--exact', '--accept-source-agreements', '--disable-interactivity')
+        if ($PackageSource) { $listArgs += @('--source', "$PackageSource") }
+        $output = & $WingetPath @listArgs 2>&1 | Out-String
+        return ($LASTEXITCODE -eq 0 -and $output -match [regex]::Escape($PackageId))
+    } catch {
+        return $false
+    }
+}
+
+function Wait-WingetPackageInstalled {
+    param(
+        [string]$WingetPath,
+        [string]$PackageId,
+        [string]$PackageSource = '',
+        [int]$MaxAttempts = 5,
+        [int]$SleepSeconds = 3
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        if (Test-WingetPackageInstalled -WingetPath $WingetPath -PackageId $PackageId -PackageSource $PackageSource) {
+            return $true
+        }
+        if ($attempt -lt $MaxAttempts) {
+            Start-Sleep -Seconds $SleepSeconds
+        }
+    }
+    return $false
+}
+
+function Test-WingetUserTaskPending {
+    try {
+        return [bool](Get-ScheduledTask -TaskName $UserTaskName -ErrorAction SilentlyContinue)
+    } catch {
+        return $false
+    }
+}
+
+if (Test-Path $TrackerFile) {
+    try {
+        $t = Get-Content $TrackerFile -Raw | ConvertFrom-Json
+        if ($t.version -eq $CurrentVersion -and $t.result -in @('success', 'scheduled')) {
+            $installedNow = Wait-WingetPackageInstalled -WingetPath $Winget -PackageId $wingetId -PackageSource $wingetSource -MaxAttempts 2 -SleepSeconds 2
+            if ($installedNow) {
+                Clear-UserWingetArtifacts -Quiet
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Ya instalado (v$CurrentVersion, estado real verificado)"
+                Stop-Transcript -ErrorAction SilentlyContinue
+                exit 0
+            }
+
+            if ($t.result -eq 'scheduled' -and (Test-WingetUserTaskPending)) {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Instalacion programada pendiente para $wingetId"
+                Stop-Transcript -ErrorAction SilentlyContinue
+                exit 0
+            }
+
+            if ($t.result -eq 'success') {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Tracker marcaba exito, pero $wingetId no aparece instalado. Se reintentara."
+            } else {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Tracker marcaba instalacion programada, pero no hay app ni tarea pendiente. Se reintentara."
+            }
+            Clear-UserWingetArtifacts -Quiet
+        }
+    } catch {}
+}
+
 # Actualizar fuentes (necesario en contexto SYSTEM; ignorar error si falla)
 try { & $Winget source update --disable-interactivity 2>&1 | Out-Null } catch {}
 
@@ -1802,19 +2565,34 @@ $WingetSuccess = @(0, 1618, -1978335212, -1978335189, -1978335140)
 $WingetNoScope = @(-1978335160, -1978335215, -1978335216)  # no machine-scope installer → retry sin scope
 $WingetUserOnly = @(-1978335146, -1978335215, -1978335216) # app solo usuario → instalar via tarea programada
 try {
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Ejecutando: winget install --id $wingetId --scope machine"
-    & $Winget install --id "$wingetId" --silent --accept-package-agreements --accept-source-agreements --scope machine 2>&1 | Out-Null
+    $packageInstalled = $false
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Ejecutando: winget install --id $wingetId --source $wingetSource --scope machine"
+    & $Winget install --id "$wingetId" --source "$wingetSource" --silent --accept-package-agreements --accept-source-agreements --scope machine 2>&1 | Out-Null
     $ec = $LASTEXITCODE
     if ($ec -in $WingetNoScope) {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: --scope machine no soportado (codigo $ec). Reintentando sin --scope..."
-        & $Winget install --id "$wingetId" --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
+        & $Winget install --id "$wingetId" --source "$wingetSource" --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
         $ec = $LASTEXITCODE
+    }
+    if ($ec -in $WingetSuccess) {
+        $packageInstalled = Wait-WingetPackageInstalled -WingetPath $Winget -PackageId $wingetId -PackageSource $wingetSource
+        if (-not $packageInstalled) {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: winget devolvio codigo de exito ($ec), pero $wingetId no quedo detectable. Se intentara resolver en contexto de usuario."
+            $ec = -1
+        }
     }
     if ($ec -notin $WingetSuccess) {
         # Último intento: --scope user (apps solo usuario)
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Reintentando con --scope user (app solo usuario, codigo $ec)..."
-        & $Winget install --id "$wingetId" --silent --accept-package-agreements --accept-source-agreements --scope user 2>&1 | Out-Null
+        & $Winget install --id "$wingetId" --source "$wingetSource" --silent --accept-package-agreements --accept-source-agreements --scope user 2>&1 | Out-Null
         $ec = $LASTEXITCODE
+        if ($ec -in $WingetSuccess) {
+            $packageInstalled = Wait-WingetPackageInstalled -WingetPath $Winget -PackageId $wingetId -PackageSource $wingetSource -MaxAttempts 3 -SleepSeconds 2
+            if (-not $packageInstalled) {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: winget devolvio codigo de exito en --scope user ($ec), pero la app no quedo detectable en SYSTEM. Se programara la instalacion en la siguiente sesion."
+                $ec = -1
+            }
+        }
     }
     if ($ec -notin $WingetSuccess) {
         # App solo usuario que no puede instalarse en contexto SYSTEM → programar tarea de usuario
@@ -1827,6 +2605,7 @@ try {
             $userInstallScript = @'
 $taskName = '__TASKNAME__'
 $wingetId = '__WINGET_ID__'
+$wingetSource = '__WINGET_SOURCE__'
 $trackerFile = '__TRACKER_FILE__'
 $currentVersion = '__CURRENT_VERSION__'
 $helperPs1 = '__HELPER_PS1__'
@@ -1861,15 +2640,38 @@ function Complete-UserWingetTask {
 function Test-WingetPackageInstalled {
     param(
         [string]$WingetPath,
-        [string]$PackageId
+        [string]$PackageId,
+        [string]$PackageSource = ''
     )
 
     try {
-        $output = & $WingetPath list --id "$PackageId" --exact --accept-source-agreements --disable-interactivity 2>&1 | Out-String
+        $listArgs = @('list', '--id', "$PackageId", '--exact', '--accept-source-agreements', '--disable-interactivity')
+        if ($PackageSource) { $listArgs += @('--source', "$PackageSource") }
+        $output = & $WingetPath @listArgs 2>&1 | Out-String
         return ($LASTEXITCODE -eq 0 -and $output -match [regex]::Escape($PackageId))
     } catch {
         return $false
     }
+}
+
+function Wait-WingetPackageInstalled {
+    param(
+        [string]$WingetPath,
+        [string]$PackageId,
+        [string]$PackageSource = '',
+        [int]$MaxAttempts = 5,
+        [int]$SleepSeconds = 3
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        if (Test-WingetPackageInstalled -WingetPath $WingetPath -PackageId $PackageId -PackageSource $PackageSource) {
+            return $true
+        }
+        if ($attempt -lt $MaxAttempts) {
+            Start-Sleep -Seconds $SleepSeconds
+        }
+    }
+    return $false
 }
 
 $WingetUser = (Get-Command winget.exe -ErrorAction SilentlyContinue).Source
@@ -1883,19 +2685,20 @@ if (-not $WingetUser) {
 }
 if (-not $WingetUser) { exit 1 }
 
-if (Test-WingetPackageInstalled -WingetPath $WingetUser -PackageId $wingetId) {
+if (Test-WingetPackageInstalled -WingetPath $WingetUser -PackageId $wingetId -PackageSource $wingetSource) {
     Complete-UserWingetTask -Method 'winget-usertask-detected'
 }
 
-& $WingetUser install --id "$wingetId" --silent --accept-package-agreements --accept-source-agreements --scope user 2>&1 | Out-Null
+& $WingetUser install --id "$wingetId" --source "$wingetSource" --silent --accept-package-agreements --accept-source-agreements --scope user 2>&1 | Out-Null
 $ec = $LASTEXITCODE
-if ($ec -in $successCodes -or (Test-WingetPackageInstalled -WingetPath $WingetUser -PackageId $wingetId)) {
+if (($ec -in $successCodes) -and (Wait-WingetPackageInstalled -WingetPath $WingetUser -PackageId $wingetId -PackageSource $wingetSource)) {
     Complete-UserWingetTask
 }
 exit $ec
 '@
             $userInstallScript = $userInstallScript.Replace('__TASKNAME__', $taskName)
             $userInstallScript = $userInstallScript.Replace('__WINGET_ID__', $wingetId)
+            $userInstallScript = $userInstallScript.Replace('__WINGET_SOURCE__', $wingetSource)
             $userInstallScript = $userInstallScript.Replace('__TRACKER_FILE__', $TrackerFile)
             $userInstallScript = $userInstallScript.Replace('__CURRENT_VERSION__', $CurrentVersion)
             $userInstallScript = $userInstallScript.Replace('__HELPER_PS1__', $userInstallPs1)
@@ -1929,6 +2732,10 @@ shell.Run "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass
         } catch {
             throw "No se pudo crear la tarea programada '$taskName': $($_.Exception.Message)"
         }
+    }
+
+    if (-not $packageInstalled) {
+        throw "winget finalizo sin error bloqueante, pero no se pudo confirmar la instalacion real de $wingetId"
     }
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: $NombreApp instalado correctamente (v$CurrentVersion)"

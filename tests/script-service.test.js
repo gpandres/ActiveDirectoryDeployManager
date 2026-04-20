@@ -90,11 +90,19 @@ describe('generateScript — generic template', () => {
     expect(script).toContain('$PrimaryInstallerName = [string]($Manifest.primaryInstallerName)');
   });
 
+  it('builds installer detection candidates from the file metadata and filename', () => {
+    const script = svc.generateScript(base({ template: 'generic' }));
+    expect(script).toContain('GetFileNameWithoutExtension([string]$InstallerPath)');
+    expect(script).toContain('$fileBaseNameWithoutVersion = ($fileBaseName -replace');
+    expect(script).toContain('GetFileNameWithoutExtension([string]$fileInfo.OriginalFilename)');
+    expect(script).toContain('[string]$fileInfo.InternalName');
+  });
+
   it('supports ps1 wrappers in the generic installer flow', () => {
     const script = svc.generateScript(base({ template: 'generic', silentArgs: '-Mode Silent' }));
     expect(script).toContain('$Instalador.Extension -eq ".ps1"');
-    expect(script).toContain('Start-Process -FilePath "PowerShell.exe"');
-    expect(script).toContain('-ExecutionPolicy Bypass -File');
+    expect(script).toContain("'ps1' { 'PowerShell.exe' }");
+    expect(script).toContain('$psArgs = "-ExecutionPolicy Bypass -File');
   });
 
   it('cleans up the local cache directory after a successful install', () => {
@@ -107,6 +115,16 @@ describe('generateScript — generic template', () => {
     expect(script).toContain('function Register-DeployCacheCleanupPending');
     expect(script).toContain('function Start-DeployCacheCleanupWorker');
     expect(script).toContain('-EncodedCommand');
+  });
+
+  it('handles MSI conflict 1638 generically for wrapped executables too', () => {
+    const script = svc.generateScript(base({ template: 'generic' }));
+    expect(script).toContain('PublisherMatched = $bestPublisherMatched');
+    expect(script).toContain("$trustedUpgradeMatch = $match.ProductCode -and (");
+    expect(script).toContain('if ($conflictState.CanAutoUninstall) {');
+    expect(script).not.toContain("if ($Kind -eq 'msi' -and $conflictState.CanAutoUninstall)");
+    expect(script).toContain("Start-Process -FilePath 'msiexec.exe' -ArgumentList $uninstallArgs");
+    expect(script).toContain('$retryProcess = Start-Process -FilePath $launchPath -ArgumentList $ArgumentList -Wait -NoNewWindow -PassThru');
   });
 });
 
@@ -150,6 +168,16 @@ describe('generateScript — winget template', () => {
     expect(script).toContain('Mozilla.Firefox');
   });
 
+  it('embeds the configured winget source', () => {
+    const script = svc.generateScript(base({
+      template: 'winget',
+      wingetId: '9NKSQGP7F2NH',
+      wingetSource: 'msstore'
+    }));
+    expect(script).toContain('$wingetSource = "msstore"');
+    expect(script).toContain('--source "$wingetSource"');
+  });
+
   it('includes --scope machine flag', () => {
     const script = svc.generateScript(base({
       template: 'winget',
@@ -177,13 +205,25 @@ describe('generateScript — winget template', () => {
     expect(script).toContain('LOCALAPPDATA');
     expect(script).toContain('wscript.exe');
     expect(script).toContain('Test-WingetPackageInstalled');
-    expect(script).toContain('list --id "$PackageId" --exact');
+    expect(script).toContain("@('list', '--id', \"$PackageId\", '--exact'");
     expect(script).toContain('Complete-UserWingetTask');
     expect(script).toContain('Unregister-ScheduledTask');
     expect(script).toContain('Clear-UserWingetArtifacts');
     expect(script).toContain('WingetUserInstall_');
     expect(script).toContain('Register-ScheduledTask');
     expect(script).toContain('-ErrorAction Stop');
+  });
+
+  it('verifies the package is really installed before trusting success or stale trackers', () => {
+    const script = svc.generateScript(base({
+      template: 'winget',
+      wingetId: 'Spotify.Spotify'
+    }));
+    expect(script).toContain('function Wait-WingetPackageInstalled');
+    expect(script).toContain('Tracker marcaba exito, pero $wingetId no aparece instalado');
+    expect(script).toContain('Wait-WingetPackageInstalled -WingetPath $Winget -PackageId $wingetId -PackageSource $wingetSource');
+    expect(script).toContain('winget finalizo sin error bloqueante, pero no se pudo confirmar la instalacion real');
+    expect(script).toContain("if (($ec -in $successCodes) -and (Wait-WingetPackageInstalled -WingetPath $WingetUser -PackageId $wingetId -PackageSource $wingetSource))");
   });
 });
 
@@ -235,6 +275,17 @@ describe('generateScript — odt template', () => {
   });
 });
 
+describe('generateScript — office template', () => {
+  it('uses the uploaded xml filename directly when configXmlPath is provided', () => {
+    const script = svc.generateScript(base({
+      template: 'office',
+      configXmlPath: 'C:\\Temp\\empresa_office.xml'
+    }));
+    expect(script).toContain('$RutaXML = Join-Path -Path $CacheDir -ChildPath "empresa_office.xml"');
+    expect(script).not.toContain('config_office.xml');
+  });
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 describe('generateScript — crowdstrike template', () => {
   it('embeds the CID', () => {
@@ -254,17 +305,15 @@ describe('generateScript — crowdstrike template', () => {
 
 // ═══════════════════════════════════════════════════════════════════════════
 describe('generateScript — forticlient template', () => {
-  it('handles existing FortiClient versions before reinstalling', () => {
+  it('uses the shared installer conflict handler instead of bespoke per-app logic', () => {
     const script = svc.generateScript(base({
       template: 'forticlient',
       customParams: { vpnName: 'Corp VPN', vpnServer: 'vpn.example.com:443' }
     }));
-    expect(script).toContain('function Get-FortiClientInstallation');
-    expect(script).toContain('Convert-FortiClientVersion');
-    expect(script).toContain('Ya hay una version mas reciente de FortiClient instalada');
-    expect(script).toContain('FortiClient existente detectado');
-    expect(script).toContain('"/x $($ExistingFortiClient.ProductCode) REBOOT=ReallySuppress /qn"');
-    expect(script).toContain('Se omite el instalador para evitar error 1638');
+    expect(script).toContain("Invoke-ManagedInstaller -Kind 'msi'");
+    expect(script).toContain("Invoke-ManagedInstaller -Kind 'exe'");
+    expect(script).not.toContain('Get-FortiClientInstallation');
+    expect(script).not.toContain('Convert-FortiClientVersion');
   });
 });
 
@@ -334,5 +383,64 @@ describe('getTemplateList', () => {
     const list = svc.getTemplateList();
     const generic = list.find(t => t.id === 'generic');
     expect(generic?.noInstaller).toBe(false);
+  });
+});
+
+describe('generateUninstallScript', () => {
+  it('builds MSI uninstall scripts that resolve ProductCode automatically', () => {
+    const script = svc.generateUninstallScript(base({
+      template: 'generic',
+      installerType: 'msi',
+      installerPath: 'C:\\temp\\agent.msi',
+      uninstall: { mode: 'auto-msi' }
+    }));
+
+    expect(script).toContain('Resolve-MsiProductCode');
+    expect(script).toContain('/x $ProductCode REBOOT=ReallySuppress /qn /norestart');
+    expect(script).toContain("Save-UninstallTracker -Result 'removed'");
+  });
+
+  it('builds registry uninstall scripts for generic EXE apps', () => {
+    const script = svc.generateUninstallScript(base({
+      template: 'generic',
+      installerType: 'exe',
+      uninstall: {
+        mode: 'auto-registry',
+        registryMatchName: 'PDF24 Creator',
+        registryMatchPublisher: 'geek software GmbH'
+      }
+    }));
+
+    expect(script).toContain('Resolve-RegistryUninstallEntry');
+    expect(script).toContain('QuietUninstallString');
+    expect(script).toContain('PDF24 Creator');
+    expect(script).toContain('geek software GmbH');
+  });
+
+  it('builds manual uninstall scripts when a command is provided', () => {
+    const script = svc.generateUninstallScript(base({
+      template: 'custom',
+      uninstall: {
+        mode: 'manual',
+        command: 'C:\\Program Files\\Tool\\uninstall.exe',
+        args: '/quiet /norestart'
+      }
+    }));
+
+    expect(script).toContain('C:\\Program Files\\Tool\\uninstall.exe');
+    expect(script).toContain('/quiet /norestart');
+    expect(script).toContain('Ejecutando comando manual');
+  });
+
+  it('builds winget uninstall scripts with the configured package id', () => {
+    const script = svc.generateUninstallScript(base({
+      template: 'winget',
+      wingetId: 'Mozilla.Firefox',
+      wingetSource: 'winget'
+    }));
+
+    expect(script).toContain('Resolve-WingetPath');
+    expect(script).toContain('Mozilla.Firefox');
+    expect(script).toContain("uninstall', '--id', $wingetId");
   });
 });

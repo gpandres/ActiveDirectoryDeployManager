@@ -24,6 +24,7 @@ const App = {
   currentPage: 'dashboard',
   rsatAvailable: false,
   rsatMissingGPMC: false,
+  shareAvailable: true,
 
   async init() {
     await window.initI18n();
@@ -38,6 +39,8 @@ const App = {
       document.querySelector('.sidebar').style.display = 'none';
       this.navigate('setup');
     } else {
+      // Check share health before first navigation
+      await this.checkShareHealth();
       this.updateSidebarLanguage();
       this.navigate('dashboard');
     }
@@ -131,6 +134,7 @@ const App = {
 
   // ─── Modal ─────────────────────────────────────────
   _modalLocked: false,
+  _modalScrollRestore: null,
 
   bindModal() {
     const overlay = document.getElementById('modal-overlay');
@@ -155,28 +159,63 @@ const App = {
     if (options.size === 'full') modal.classList.add('modal-full');
   },
 
+  capturePageScroll() {
+    const mainContent = document.getElementById('main-content');
+    return {
+      mainScrollTop: mainContent ? mainContent.scrollTop : 0,
+      windowScrollY: window.scrollY || window.pageYOffset || 0
+    };
+  },
+
+  restorePageScroll(restore) {
+    if (!restore) return;
+    const mainContent = document.getElementById('main-content');
+    if (mainContent && Number.isFinite(restore.mainScrollTop)) {
+      mainContent.scrollTop = restore.mainScrollTop;
+    }
+    if (Number.isFinite(restore.windowScrollY)) {
+      window.scrollTo({ top: restore.windowScrollY, behavior: 'auto' });
+    }
+  },
+
   openModal(title, bodyHTML, footerHTML = '', options = {}) {
     this._modalLocked = false;
+    this._modalScrollRestore = this.capturePageScroll();
     document.getElementById('modal-title').textContent = title;
     document.getElementById('modal-body').innerHTML = bodyHTML;
     document.getElementById('modal-footer').innerHTML = footerHTML;
     this.applyModalOptions(options);
     document.getElementById('modal-overlay').classList.add('visible');
+    requestAnimationFrame(() => this.restorePageScroll(this._modalScrollRestore));
   },
 
   openModalLocked(title, bodyHTML, footerHTML = '', options = {}) {
     this._modalLocked = true;
+    this._modalScrollRestore = this.capturePageScroll();
     document.getElementById('modal-title').textContent = title;
     document.getElementById('modal-body').innerHTML = bodyHTML;
     document.getElementById('modal-footer').innerHTML = footerHTML;
     this.applyModalOptions(options);
     document.getElementById('modal-overlay').classList.add('visible');
+    requestAnimationFrame(() => this.restorePageScroll(this._modalScrollRestore));
   },
 
   closeModal() {
     this._modalLocked = false;
     document.getElementById('modal-overlay').classList.remove('visible');
     this.applyModalOptions();
+    requestAnimationFrame(() => this.restorePageScroll(this._modalScrollRestore));
+  },
+
+  // ─── Share error helper ────────────────────────────
+  isShareError(errorStr) {
+    return typeof errorStr === 'string' && errorStr.includes('SHARE_UNAVAILABLE');
+  },
+
+  handleShareError() {
+    this.shareAvailable = false;
+    this.updateShareBanner();
+    this.toast('El share de red no esta disponible. Comprueba la conexion y pulsa Reintentar.', 'error');
   },
 
   // ─── Toast ─────────────────────────────────────────
@@ -228,6 +267,66 @@ const App = {
           <strong>${t('common.rsatNotInstalledTitle')}</strong> — ${t('common.rsatNotInstalledMsg')}
           Ejecuta como Administrador en PowerShell:
           <code>Add-WindowsCapability -Online -Name Rsat.ActiveDirectory.DS-LDS.Tools~~~~0.0.1.0</code>
+        </div>
+      </div>`;
+  },
+
+  // ─── Share Health Check ────────────────────────────
+  async checkShareHealth() {
+    try {
+      const status = await window.api.share.checkHealth();
+      this.shareAvailable = !!status?.available;
+    } catch {
+      this.shareAvailable = false;
+    }
+    this.updateShareBanner();
+    return this.shareAvailable;
+  },
+
+  updateShareBanner() {
+    let banner = document.getElementById('share-offline-banner');
+    if (this.shareAvailable) {
+      if (banner) banner.remove();
+      return;
+    }
+    if (banner) return; // already showing
+    banner = document.createElement('div');
+    banner.id = 'share-offline-banner';
+    banner.style.cssText = 'position:fixed;top:32px;left:0;right:0;z-index:9999;display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 20px;background:rgba(239,68,68,0.95);color:#fff;font-size:13px;font-weight:600;backdrop-filter:blur(6px);';
+    banner.innerHTML = `
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+      <span>No se puede acceder al share de red. La aplicacion funciona en modo local hasta que se restablezca la conexion.</span>
+      <button id="btn-retry-share" style="margin-left:auto;background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.4);color:#fff;border-radius:6px;padding:4px 14px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;">Reintentar</button>
+    `;
+    document.body.appendChild(banner);
+    document.getElementById('btn-retry-share').addEventListener('click', async () => {
+      const btn = document.getElementById('btn-retry-share');
+      if (btn) { btn.disabled = true; btn.textContent = 'Comprobando...'; }
+      const ok = await this.checkShareHealth();
+      if (ok) {
+        this.toast('Conexion al share restablecida', 'success');
+        // Re-render current page to refresh data
+        this.navigate(this.currentPage);
+      } else {
+        this.toast('El share sigue sin estar disponible', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Reintentar'; }
+      }
+    });
+  },
+
+  shareWarningHTML() {
+    if (this.shareAvailable) return '';
+    return `
+      <div class="rsat-warning" style="border-left-color:#ef4444;background:rgba(239,68,68,0.08);">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        <div>
+          <strong style="color:#ef4444;">Share no disponible</strong> — Los datos mostrados pueden estar desactualizados. Las operaciones de despliegue no funcionaran hasta que se restablezca la conexion.
         </div>
       </div>`;
   },

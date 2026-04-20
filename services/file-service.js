@@ -2,10 +2,14 @@ const fs = require('fs');
 const path = require('path');
 const configService = require('./config');
 const { resolveNamedSubdirectory } = require('./path-utils');
+const shareHealth = require('./share-health');
 
 const fileService = {
   listDeployedApps() {
     try {
+      if (!shareHealth.isAvailableSync()) {
+        return { success: false, error: 'SHARE_UNAVAILABLE', data: [] };
+      }
       const config = configService.getConfig();
       const basePath = config.networkSharePath;
       const myShareId = config.shareId || '';
@@ -81,6 +85,7 @@ const fileService = {
 
   getAppContents(name) {
     try {
+      if (!shareHealth.isAvailableSync()) return { success: false, error: 'SHARE_UNAVAILABLE', data: [] };
       const config = configService.getConfig();
       const { path: dirPath } = resolveNamedSubdirectory(config.networkSharePath, name, 'App');
 
@@ -107,6 +112,7 @@ const fileService = {
 
   createAppFolder(name) {
     try {
+      if (!shareHealth.isAvailableSync()) return { success: false, error: 'SHARE_UNAVAILABLE' };
       const config = configService.getConfig();
       const { path: dirPath } = resolveNamedSubdirectory(config.networkSharePath, name, 'App');
 
