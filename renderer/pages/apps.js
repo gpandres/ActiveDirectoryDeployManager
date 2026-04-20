@@ -553,6 +553,60 @@ const AppsPage = {
     });
   },
 
+  captureWizardScrollState() {
+    const overlay = document.getElementById('modal-overlay');
+    const modalBody = document.getElementById('modal-body');
+    if (!overlay?.classList.contains('visible') || !modalBody?.querySelector('.wizard-content')) {
+      return null;
+    }
+
+    const activeStepText = modalBody.querySelector('.wizard-step.active .wizard-step-number')?.textContent || '';
+    const activeStep = Number.parseInt(activeStepText, 10);
+
+    return {
+      step: Number.isFinite(activeStep) ? activeStep : null,
+      modalBodyScrollTop: modalBody.scrollTop || 0,
+      catalogScrollTop: document.getElementById('wiz-catalog-results')?.scrollTop || 0,
+      plantillaScrollTop: document.getElementById('wiz-plantilla-results')?.scrollTop || 0,
+      manualScrollTop: document.getElementById('wiz-manual-results')?.scrollTop || 0
+    };
+  },
+
+  restoreWizardScrollState(snapshot, state) {
+    if (!snapshot || snapshot.step !== state.step) return;
+
+    requestAnimationFrame(() => {
+      const modalBody = document.getElementById('modal-body');
+      if (modalBody && Number.isFinite(snapshot.modalBodyScrollTop)) {
+        modalBody.scrollTop = snapshot.modalBodyScrollTop;
+      }
+
+      const catalogResults = document.getElementById('wiz-catalog-results');
+      if (catalogResults && Number.isFinite(snapshot.catalogScrollTop)) {
+        catalogResults.scrollTop = snapshot.catalogScrollTop;
+      }
+
+      const plantillaResults = document.getElementById('wiz-plantilla-results');
+      if (plantillaResults && Number.isFinite(snapshot.plantillaScrollTop)) {
+        plantillaResults.scrollTop = snapshot.plantillaScrollTop;
+      }
+
+      const manualResults = document.getElementById('wiz-manual-results');
+      if (manualResults && Number.isFinite(snapshot.manualScrollTop)) {
+        manualResults.scrollTop = snapshot.manualScrollTop;
+      }
+
+      if (state.step === 1) {
+        const selectedCard = document.querySelector(
+          '#wiz-catalog-results .catalog-item.selected, #wiz-winget-section .catalog-item.selected, #wiz-plantilla-results .template-card.selected, #wiz-manual-results .template-card.selected'
+        );
+        if (selectedCard) {
+          selectedCard.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        }
+      }
+    });
+  },
+
   // Returns the installer path inside the app's share folder, or null if
   // the app isn't deployed / no installer is present on the share.
   async resolveSharedInstaller(appName, preferredInstallerPath = '') {
@@ -1612,6 +1666,7 @@ const AppsPage = {
     };
 
     const renderWizard = () => {
+      const wizardScrollState = this.captureWizardScrollState();
       let body = `
         <div class="wizard-steps">
           <div class="wizard-step ${state.step >= 1 ? (state.step > 1 ? 'done' : 'active') : ''}">
@@ -1657,7 +1712,7 @@ const AppsPage = {
                 ${cats.map(cat => `<button class="catalog-cat-btn" data-cat="${this.esc(cat)}" style="${catBtnStyle(activeCat===cat)}">${this.esc(cat)}</button>`).join('')}
               </div>
             </div>
-            <div style="max-height:330px;overflow-y:auto;padding-right:2px;">
+            <div id="wiz-catalog-results" style="max-height:330px;overflow-y:auto;padding-right:2px;">
           `;
 
           // Winget catalog by category
@@ -1779,7 +1834,7 @@ const AppsPage = {
           `;
 
           const pq = (state.plantillaSearch || '').toLowerCase();
-          body += `<div style="max-height:330px;overflow-y:auto;padding-right:2px;">`;
+          body += `<div id="wiz-plantilla-results" style="max-height:330px;overflow-y:auto;padding-right:2px;">`;
 
           // Office XML template at the top of Plantilla tab
           const officeTmpl = templates.find(tmpl => tmpl.id === 'office');
@@ -1831,7 +1886,7 @@ const AppsPage = {
           // â”€â”€ Manual tab: only GenÃ©rica and Script Custom â”€â”€
           const manualTmpls = templates.filter(tmpl => tmpl.id === 'generic' || tmpl.id === 'custom');
           body += `
-            <div style="max-height:360px;overflow-y:auto;padding-right:2px;">
+            <div id="wiz-manual-results" style="max-height:360px;overflow-y:auto;padding-right:2px;">
               <div style="margin-bottom:var(--space-sm);">
                 <div>
                   <div style="font-size:12px;font-weight:700;color:var(--text-primary);">${this.tr('apps.manualTemplatesTitle', 'Plantillas manuales')}</div>
@@ -2249,6 +2304,7 @@ const AppsPage = {
 
       App.openModal(isEdit ? t('apps.edit') : t('apps.newApp'), body, footer); // isEdit is !!(existingApp?.id)
       this.bindWizardEvents(state, templates, renderWizard, isEdit, existingApp);
+      this.restoreWizardScrollState(wizardScrollState, state);
     };
 
     App._modalLocked = false;  // unlock before rendering the interactive wizard
