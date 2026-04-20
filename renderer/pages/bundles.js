@@ -161,12 +161,21 @@ const BundlesPage = {
         document.querySelectorAll('.app-card-dropdown.visible').forEach(d => d.classList.remove('visible'));
       }
     });
+
+    if (this._pendingFocusBundleId) {
+      const focusId = this._pendingFocusBundleId;
+      this._pendingFocusBundleId = null;
+      this.keepBundleCardVisible(focusId);
+    }
   },
 
   renderBundleCard(bundle) {
     const isDeployed = bundle.deployed && bundle.deployedPath;
-    const statusClass = isDeployed ? 'deployed' : 'pending';
-    const statusText = isDeployed ? t('apps.deployedBadge') : t('apps.detailNotDeployed');
+    const publishedAction = this.getPublishedAction(bundle);
+    const statusClass = this.getDeploymentVisualState(bundle);
+    const statusText = this.getDeploymentStatusLabel(bundle);
+    const canPublishUninstall = isDeployed && publishedAction !== 'uninstall';
+    const installActionLabel = this.getInstallActionLabel(bundle);
     return `
       <div class="bundle-card bundle-card--${statusClass}" data-deployed="${!!isDeployed}" data-id="${bundle.id}" onclick="BundlesPage.showBundleDetail('${bundle.id}')">
         <input type="checkbox" class="checkbox-select bundle-card-cb" data-id="${bundle.id}" onchange="BundlesPage.toggleSelect('${bundle.id}', this.checked)" onclick="event.stopPropagation()">
@@ -179,6 +188,7 @@ const BundlesPage = {
         </div>
         <div class="app-card-badges">
           <span class="badge badge-info">v${this.esc(bundle.version)}</span>
+          ${statusClass === 'uninstalling' ? `<span class="badge badge-warning">${this.tr('apps.uninstallPublished', 'Desinstalacion')}</span>` : ''}
           <span class="badge badge-primary">${bundle.apps.length} ${t('bundles.appsIncluded')}</span>
           ${bundle.gpoName ? `<span class="badge badge-info">${this.esc(bundle.gpoName)}</span>` : ''}
           ${bundle.createGPO ? `<span class="badge badge-info">${t('bundles.autoGpo')}</span>` : ''}
@@ -188,7 +198,7 @@ const BundlesPage = {
         <div class="bundle-card-apps">
           ${bundle.apps.map(a => `<span class="app-chip">${this.esc(a.name)}</span>`).join('')}
         </div>
-        <div class="bundle-card-footer">
+        <div class="bundle-card-footer" onclick="event.stopPropagation()">
           <span class="app-status-label ${statusClass}">${statusText}</span>
           <div class="app-card-menu">
             <button class="app-card-menu-btn" onclick="event.stopPropagation(); BundlesPage.toggleMenu(this)" title="${t('apps.edit') || 'Acciones'}">
@@ -210,10 +220,17 @@ const BundlesPage = {
                 </button>
               ` : ''}
               ${isDeployed ? `
+                ${canPublishUninstall ? `
                 <button class="dropdown-item dropdown-item--warning" onclick="BundlesPage.uninstallBundle('${bundle.id}')">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                   ${this.tr('apps.uninstallAction', 'Desinstalar')}
                 </button>
+                ` : `
+                <button class="dropdown-item dropdown-item--success" onclick="BundlesPage.deployBundle('${bundle.id}')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                  ${installActionLabel}
+                </button>
+                `}
                 <button class="dropdown-item dropdown-item--warning" onclick="BundlesPage.disableDeploy('${bundle.id}')">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
                   ${t('apps.disable')}
@@ -221,7 +238,7 @@ const BundlesPage = {
               ` : `
                 <button class="dropdown-item dropdown-item--success" onclick="BundlesPage.deployBundle('${bundle.id}')">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                  ${t('apps.deploy')}
+                  ${installActionLabel}
                 </button>
               `}
               <button class="dropdown-item" onclick="BundlesPage.editBundle('${bundle.id}')">
@@ -263,6 +280,41 @@ const BundlesPage = {
 
   getBundleOUs(bundle) {
     return this.normalizeOUDNs(bundle?.ouDNs || bundle?.ouDN);
+  },
+
+  getPublishedAction(bundle) {
+    const normalized = String(bundle?.publishedAction || '').trim().toLowerCase();
+    if (normalized === 'install' || normalized === 'uninstall') return normalized;
+    return (bundle?.deployed && bundle?.deployedPath) ? 'install' : 'pending';
+  },
+
+  getDeploymentVisualState(bundle) {
+    const isDeployed = !!(bundle?.deployed && bundle?.deployedPath);
+    if (!isDeployed) return 'pending';
+    return this.getPublishedAction(bundle) === 'uninstall' ? 'uninstalling' : 'deployed';
+  },
+
+  getDeploymentStatusLabel(bundle) {
+    const state = this.getDeploymentVisualState(bundle);
+    if (state === 'uninstalling') return this.tr('apps.uninstallPublished', 'Desinstalacion');
+    if (state === 'deployed') return this.tr('apps.installPublished', 'Instalacion');
+    return t('apps.detailNotDeployed');
+  },
+
+  getInstallActionLabel(bundle) {
+    return this.getPublishedAction(bundle) === 'uninstall'
+      ? this.tr('apps.reinstallAction', 'Volver a instalar')
+      : t('apps.deploy');
+  },
+
+  keepBundleCardVisible(id) {
+    if (!id) return;
+    requestAnimationFrame(() => {
+      const card = document.querySelector(`.bundle-card[data-id="${id}"]`);
+      if (card) {
+        card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    });
   },
 
   canUninstallAppRecord(app) {
@@ -380,17 +432,20 @@ const BundlesPage = {
   async bulkDisable() {
     if (this.selectedIds.size === 0) return;
     try {
-      const ids = Array.from(this.selectedIds);
-      for (const id of ids) {
-        const bundle = await window.api.bundles.get(id);
-        if (bundle && bundle.deployed) {
-          bundle.deployed = false;
-          await window.api.bundles.update(id, bundle);
+        const ids = Array.from(this.selectedIds);
+        for (const id of ids) {
+          const bundle = await window.api.bundles.get(id);
+          if (bundle && bundle.deployed) {
+            bundle.deployed = false;
+            bundle.publishedAction = 'pending';
+            bundle.publishedAt = '';
+            await window.api.bundles.update(id, bundle);
+          }
         }
-      }
-      App.toast(t('apps.bulkDisableSuccess') || `Deshabilitados ${ids.length} bundles correctamente`, 'success');
-      this.clearSelection();
-      App.navigate('bundles');
+        App.toast(t('apps.bulkDisableSuccess') || `Deshabilitados ${ids.length} bundles correctamente`, 'success');
+        this.clearSelection();
+        this._pendingFocusBundleId = ids[ids.length - 1] || null;
+        App.navigate('bundles');
     } catch (err) {
       App.toast('Error: ' + err.message, 'error');
     }
@@ -481,6 +536,10 @@ const BundlesPage = {
     if (!bundle) return;
 
     const isDeployed = bundle.deployed && bundle.deployedPath;
+    const publishedAction = this.getPublishedAction(bundle);
+    const statusClass = this.getDeploymentVisualState(bundle);
+    const statusText = this.getDeploymentStatusLabel(bundle);
+    const canPublishUninstall = isDeployed && publishedAction !== 'uninstall';
     
     const row = (label, value) => value ? `
       <div style="display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border-color);">
@@ -508,7 +567,11 @@ const BundlesPage = {
         <!-- Status badges -->
         <div style="display:flex; flex-wrap:wrap; gap:6px;">
           <span class="badge badge-info">v${this.esc(bundle.version || '1.0.0')}</span>
-          ${isDeployed ? `<span class="badge badge-success">${t('apps.deployedBadge')}</span>` : `<span class="badge badge-neutral">${t('apps.detailNotDeployed')}</span>`}
+          ${statusClass === 'uninstalling'
+            ? `<span class="badge badge-warning">${this.tr('apps.uninstallPublished', 'Desinstalacion')}</span>`
+            : (isDeployed
+                ? `<span class="badge badge-success">${this.tr('apps.installPublished', 'Instalacion')}</span>`
+                : `<span class="badge badge-neutral">${t('apps.detailNotDeployed')}</span>`)}
           ${bundle.gpoName ? `<span class="badge badge-info">${this.esc(bundle.gpoName)}</span>` : `<span class="badge badge-neutral">${t('bundles.autoGpo') || 'GPO'}</span>`}
           ${bundle.notifyUser ? `<span class="badge badge-warning">${t('apps.detailNotifyEnabled')}</span>` : ''}
         </div>
@@ -523,6 +586,7 @@ const BundlesPage = {
         <div class="card" style="padding:12px 16px; margin:0;">
           <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionGeneral')}</div>
           ${row(t('apps.detailVersion'), this.esc(bundle.version || '1.0.0'))}
+          ${row(this.tr('apps.publishedState', 'Estado publicado'), this.esc(statusText))}
           ${row(t('apps.detailNotifyUser'), bundle.notifyUser ? '&#10003;' : '&#10007;')}
           ${row(t('bundles.createGpo') || 'Crear GPO automáticamente', bundle.createGPO ? '&#10003;' : '&#10007;')}
         </div>
@@ -550,8 +614,11 @@ const BundlesPage = {
 
     App.openModal(t('common.details') || 'Detalles del Bundle', body, `
       <button class="btn btn-secondary" onclick="App.closeModal()">${t('common.close') || 'Cerrar'}</button>
-      ${isDeployed ? `<button class="btn btn-warning" onclick="App.closeModal(); BundlesPage.uninstallBundle('${bundle.id}')">${this.tr('apps.uninstallAction', 'Desinstalar')}</button>` : ''}
+      ${canPublishUninstall ? `<button class="btn btn-warning" onclick="App.closeModal(); BundlesPage.uninstallBundle('${bundle.id}')">${this.tr('apps.uninstallAction', 'Desinstalar')}</button>` : ''}
+      ${(!isDeployed || publishedAction === 'uninstall') ? `<button class="btn btn-success" onclick="App.closeModal(); BundlesPage.deployBundle('${bundle.id}')">${this.getInstallActionLabel(bundle)}</button>` : ''}
     `);
+
+    this.keepBundleCardVisible(id);
   },
 
   // ─── Flatten OU tree for select dropdowns ──────────
@@ -1139,6 +1206,17 @@ const BundlesPage = {
     try {
       const result = await window.api.bundles.deploy(id);
       if (result.success) {
+        const publishedAt = new Date().toISOString();
+        const allApps = await window.api.apps.getAll().catch(() => []);
+        for (const entry of bundle.apps || []) {
+          const app = allApps.find(item => item.id === entry.appId);
+          if (!app) continue;
+          await window.api.apps.update(app.id, {
+            publishedAction: 'install',
+            publishedAt
+          });
+        }
+
         // Create GPO if the bundle has it configured
         if (bundle.createGPO && (bundle.gpoName || bundle.name)) {
           const gpoName = bundle.gpoName || `Deploy_Bundle_${bundle.name.replace(/\s/g, '_')}`;
@@ -1168,6 +1246,7 @@ const BundlesPage = {
           }
         }
         App.toast(t('apps.deploySuccess'), 'success');
+        this._pendingFocusBundleId = id;
         App.navigate('bundles');
       } else {
         if (App.isShareError(result.error)) { App.handleShareError(); } else {
@@ -1242,12 +1321,12 @@ const BundlesPage = {
           if (deleteGPO) {
             const r = await window.api.ad.deleteGPO(bundle.gpoName);
             if (r.success) App.toast(t('bundles.gpoDeletedSuccess').replace('{gpo}', bundle.gpoName), 'success');
-            await window.api.bundles.update(id, { deployed: false, deployedPath: '', gpoName: '' });
+            await window.api.bundles.update(id, { deployed: false, deployedPath: '', gpoName: '', publishedAction: 'pending', publishedAt: '' });
           } else {
-            await window.api.bundles.update(id, { deployed: false, deployedPath: '' });
+            await window.api.bundles.update(id, { deployed: false, deployedPath: '', publishedAction: 'pending', publishedAt: '' });
           }
         } else {
-          await window.api.bundles.update(id, { deployed: false, deployedPath: '' });
+          await window.api.bundles.update(id, { deployed: false, deployedPath: '', publishedAction: 'pending', publishedAt: '' });
         }
 
         await window.api.activity.add('bundle_disable', { bundleId: id, bundleName: bundle.name });
@@ -1323,6 +1402,7 @@ const BundlesPage = {
       btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;"></span>';
 
       try {
+        const publishedAt = new Date().toISOString();
         for (const entry of bundle.apps) {
           const app = allApps.find(item => item.id === entry.appId);
           if (!app) continue;
@@ -1331,7 +1411,9 @@ const BundlesPage = {
             throw new Error(`${app.name}: ${result.error || 'No se pudo preparar uninstall.ps1'}`);
           }
           await window.api.apps.update(app.id, {
-            uninstallDeployedPath: result.uninstallPath || result.path || ''
+            uninstallDeployedPath: result.uninstallPath || result.path || '',
+            publishedAction: 'uninstall',
+            publishedAt
           });
         }
 
@@ -1342,7 +1424,9 @@ const BundlesPage = {
 
         await window.api.bundles.update(id, {
           uninstallDeployedPath: bundleResult.path,
-          uninstallPreparedAt: new Date().toISOString()
+          uninstallPreparedAt: publishedAt,
+          publishedAction: 'uninstall',
+          publishedAt
         });
 
         const switchGPO = document.getElementById('chk-bundle-switch-uninstall-gpo')?.checked ?? false;
@@ -1359,6 +1443,7 @@ const BundlesPage = {
 
         App.toast(this.tr('bundles.uninstallPrepared', 'Bundle de desinstalacion preparado correctamente.'), 'success');
         App.closeModal();
+        this._pendingFocusBundleId = id;
         App.navigate('bundles');
       } catch (err) {
         App.toast(`${t('common.error')}: ${err.message}`, 'error');

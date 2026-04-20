@@ -134,6 +134,7 @@ const App = {
 
   // ─── Modal ─────────────────────────────────────────
   _modalLocked: false,
+  _modalScrollRestore: null,
 
   bindModal() {
     const overlay = document.getElementById('modal-overlay');
@@ -158,28 +159,52 @@ const App = {
     if (options.size === 'full') modal.classList.add('modal-full');
   },
 
+  capturePageScroll() {
+    const mainContent = document.getElementById('main-content');
+    return {
+      mainScrollTop: mainContent ? mainContent.scrollTop : 0,
+      windowScrollY: window.scrollY || window.pageYOffset || 0
+    };
+  },
+
+  restorePageScroll(restore) {
+    if (!restore) return;
+    const mainContent = document.getElementById('main-content');
+    if (mainContent && Number.isFinite(restore.mainScrollTop)) {
+      mainContent.scrollTop = restore.mainScrollTop;
+    }
+    if (Number.isFinite(restore.windowScrollY)) {
+      window.scrollTo({ top: restore.windowScrollY, behavior: 'auto' });
+    }
+  },
+
   openModal(title, bodyHTML, footerHTML = '', options = {}) {
     this._modalLocked = false;
+    this._modalScrollRestore = this.capturePageScroll();
     document.getElementById('modal-title').textContent = title;
     document.getElementById('modal-body').innerHTML = bodyHTML;
     document.getElementById('modal-footer').innerHTML = footerHTML;
     this.applyModalOptions(options);
     document.getElementById('modal-overlay').classList.add('visible');
+    requestAnimationFrame(() => this.restorePageScroll(this._modalScrollRestore));
   },
 
   openModalLocked(title, bodyHTML, footerHTML = '', options = {}) {
     this._modalLocked = true;
+    this._modalScrollRestore = this.capturePageScroll();
     document.getElementById('modal-title').textContent = title;
     document.getElementById('modal-body').innerHTML = bodyHTML;
     document.getElementById('modal-footer').innerHTML = footerHTML;
     this.applyModalOptions(options);
     document.getElementById('modal-overlay').classList.add('visible');
+    requestAnimationFrame(() => this.restorePageScroll(this._modalScrollRestore));
   },
 
   closeModal() {
     this._modalLocked = false;
     document.getElementById('modal-overlay').classList.remove('visible');
     this.applyModalOptions();
+    requestAnimationFrame(() => this.restorePageScroll(this._modalScrollRestore));
   },
 
   // ─── Share error helper ────────────────────────────

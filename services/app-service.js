@@ -28,14 +28,15 @@ function loadApps() {
     try {
       fs.writeFileSync(getAppsPath(), JSON.stringify(normalized, null, 2), 'utf-8');
     } catch (e) {}
-    return normalized;
+    return normalized.map(hydrateAppShareState);
   }
   // Fallback to local cache (offline or share not yet configured)
   try {
     const p = getAppsPath();
     if (fs.existsSync(p)) {
       const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
-      return Array.isArray(parsed) ? parsed.map(normalizeAppRecord) : [];
+      const normalized = Array.isArray(parsed) ? parsed.map(normalizeAppRecord) : [];
+      return normalized.map(hydrateAppShareState);
     }
   } catch (err) {
     console.error('Error loading apps:', err);
@@ -81,6 +82,12 @@ function inferInstallerType(installerType, installerPath, template) {
   if (ext === '.msi') return 'msi';
   if (ext === '.ps1') return 'ps1';
   return 'exe';
+}
+
+function normalizePublishedAction(value, fallback = 'pending') {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['install', 'uninstall', 'pending'].includes(normalized)) return normalized;
+  return fallback;
 }
 
 function normalizeUninstallConfig(value, context = {}) {
@@ -131,8 +138,173 @@ function normalizeAppRecord(app) {
   normalized.uninstallDeployedPath = typeof normalized.uninstallDeployedPath === 'string'
     ? normalized.uninstallDeployedPath
     : (normalized.uninstall?.scriptPath || '');
+  normalized.publishedAction = normalizePublishedAction(
+    normalized.publishedAction,
+    normalized.deployed ? 'install' : 'pending'
+  );
+  normalized.publishedAt = typeof normalized.publishedAt === 'string' ? normalized.publishedAt : '';
 
   return normalized;
+}
+
+function readAppDeploymentManifest(appRecord) {
+  try {
+    const shareHealth = require('./share-health');
+    if (!shareHealth.isAvailableSync()) return null;
+    const configService = require('./config');
+    const config = configService.getConfig();
+    if (!config?.networkSharePath || !appRecord?.name) return null;
+
+    const { path: appFolder } = resolveNamedSubdirectory(config.networkSharePath, appRecord.name, 'App');
+    const manifestPath = path.join(appFolder, 'version.json');
+    if (!fs.existsSync(manifestPath)) return null;
+    return JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+  } catch (err) {
+    return null;
+  }
+}
+
+function hydrateAppShareState(appRecord) {
+  const normalized = normalizeAppRecord(appRecord);
+  const manifest = readAppDeploymentManifest(normalized);
+  if (!manifest || typeof manifest !== 'object') {
+    return normalized;
+  }
+
+  const uninstallMeta = manifest.uninstall && typeof manifest.uninstall === 'object'
+    ? manifest.uninstall
+    : {};
+
+  const manifestActionValue = String(manifest.publishedAction || manifest.currentAction || '').trim().toLowerCase();
+  const hasExplicitPublishedAction = ['install', 'uninstall', 'pending'].includes(manifestActionValue);
+  let publishedAction = normalizePublishedAction(
+    manifestActionValue,
+    normalized.publishedAction
+  );
+
+  if (!hasExplicitPublishedAction && publishedAction === 'pending') {
+    const activeScriptPath = String(manifest.activeScriptPath || '').trim().toLowerCase();
+    const uninstallScriptPath = String(uninstallMeta.scriptPath || '').trim().toLowerCase();
+    if (activeScriptPath && uninstallScriptPath && activeScriptPath === uninstallScriptPath) {
+      publishedAction = 'uninstall';
+    } else if (manifest.installScriptPath || manifest.deployedAt) {
+      publishedAction = 'install';
+    }
+  }
+
+  const hydrated = {
+    ...normalized,
+    deployedPath: typeof manifest.installScriptPath === 'string' && manifest.installScriptPath
+      ? manifest.installScriptPath
+      : normalized.deployedPath,
+    uninstallDeployedPath: typeof uninstallMeta.scriptPath === 'string' && uninstallMeta.scriptPath
+      ? uninstallMeta.scriptPath
+      : normalized.uninstallDeployedPath,
+    publishedAction,
+    publishedAt: typeof manifest.publishedAt === 'string' && manifest.publishedAt
+      ? manifest.publishedAt
+      : (
+        typeof manifest.lastUninstallPreparedAt === 'string' && manifest.lastUninstallPreparedAt
+          ? manifest.lastUninstallPreparedAt
+          : (
+            typeof manifest.lastInstallAt === 'string' && manifest.lastInstallAt
+              ? manifest.lastInstallAt
+              : normalized.publishedAt
+          )
+      )
+  };
+
+  hydrated.uninstall = normalizeUninstallConfig({
+    ...hydrated.uninstall,
+    mode: uninstallMeta.mode || hydrated.uninstall?.mode,
+    command: uninstallMeta.command || hydrated.uninstall?.command,
+    args: uninstallMeta.args || hydrated.uninstall?.args,
+    registryMatchName: uninstallMeta.registryMatchName || hydrated.uninstall?.registryMatchName,
+    registryMatchPublisher: uninstallMeta.registryMatchPublisher || hydrated.uninstall?.registryMatchPublisher,
+    productCode: uninstallMeta.productCode || hydrated.uninstall?.productCode,
+    scriptPath: uninstallMeta.scriptPath || hydrated.uninstall?.scriptPath,
+    preparedAt: uninstallMeta.generatedAt || hydrated.uninstall?.preparedAt
+  }, hydrated);
+
+  return hydrated;
+}
+
+function syncAppShareManifest(appRecord) {
+  try {
+    const normalized = normalizeAppRecord(appRecord);
+    const manifest = readAppDeploymentManifest(normalized);
+    if (!manifest || typeof manifest !== 'object') return;
+
+    const publishedAction = normalizePublishedAction(
+      normalized.publishedAction,
+      manifest.publishedAction || (normalized.deployed ? 'install' : 'pending')
+    );
+    const publishedAt = typeof normalized.publishedAt === 'string' && normalized.publishedAt
+      ? normalized.publishedAt
+      : (typeof manifest.publishedAt === 'string' ? manifest.publishedAt : '');
+    const installScriptPath = typeof normalized.deployedPath === 'string' && normalized.deployedPath
+      ? normalized.deployedPath
+      : (typeof manifest.installScriptPath === 'string' ? manifest.installScriptPath : '');
+    const existingUninstall = manifest.uninstall && typeof manifest.uninstall === 'object'
+      ? manifest.uninstall
+      : {};
+    const uninstallScriptPath = typeof normalized.uninstallDeployedPath === 'string' && normalized.uninstallDeployedPath
+      ? normalized.uninstallDeployedPath
+      : (typeof existingUninstall.scriptPath === 'string' ? existingUninstall.scriptPath : '');
+    const uninstallConfig = normalizeUninstallConfig({
+      ...existingUninstall,
+      ...normalized.uninstall,
+      scriptPath: uninstallScriptPath
+    }, normalized);
+    const activeScriptPath = publishedAction === 'uninstall'
+      ? uninstallScriptPath
+      : (publishedAction === 'install' ? installScriptPath : '');
+
+    const nextManifest = {
+      ...manifest,
+      app: normalized.name || manifest.app,
+      version: normalized.version || manifest.version || '1.0.0',
+      template: normalized.template || manifest.template || 'generic',
+      notifyUser: typeof normalized.notifyUser === 'boolean' ? normalized.notifyUser : !!manifest.notifyUser,
+      installScriptPath,
+      publishedAction,
+      activeScriptPath,
+      publishedAt,
+      deployedAt: publishedAction === 'install'
+        ? (publishedAt || manifest.deployedAt || '')
+        : (manifest.deployedAt || ''),
+      lastInstallAt: publishedAction === 'install'
+        ? (publishedAt || manifest.lastInstallAt || manifest.deployedAt || '')
+        : (manifest.lastInstallAt || manifest.deployedAt || ''),
+      lastUninstallPreparedAt: publishedAction === 'uninstall'
+        ? (publishedAt || manifest.lastUninstallPreparedAt || existingUninstall.generatedAt || '')
+        : (manifest.lastUninstallPreparedAt || existingUninstall.generatedAt || ''),
+      uninstall: {
+        ...existingUninstall,
+        mode: uninstallConfig.mode,
+        available: !!uninstallScriptPath,
+        command: uninstallConfig.command || '',
+        args: uninstallConfig.args || '',
+        registryMatchName: uninstallConfig.registryMatchName || '',
+        registryMatchPublisher: uninstallConfig.registryMatchPublisher || '',
+        productCode: uninstallConfig.productCode || '',
+        wingetId: uninstallConfig.wingetId || existingUninstall.wingetId || '',
+        wingetSource: uninstallConfig.wingetSource || existingUninstall.wingetSource || '',
+        scriptPath: uninstallScriptPath,
+        generatedAt: publishedAction === 'uninstall'
+          ? (publishedAt || existingUninstall.generatedAt || '')
+          : (existingUninstall.generatedAt || '')
+      }
+    };
+
+    const configService = require('./config');
+    const config = configService.getConfig();
+    if (!config?.networkSharePath || !normalized.name) return;
+
+    const { path: appFolder } = resolveNamedSubdirectory(config.networkSharePath, normalized.name, 'App');
+    const manifestPath = path.join(appFolder, 'version.json');
+    fs.writeFileSync(manifestPath, JSON.stringify(nextManifest, null, 2), 'utf-8');
+  } catch (err) {}
 }
 
 const appService = {
@@ -174,12 +346,15 @@ const appService = {
       deployedPath: data.deployedPath || '',
       uninstall: data.uninstall || null,
       uninstallDeployedPath: data.uninstallDeployedPath || '',
+      publishedAction: data.publishedAction || (data.deployed ? 'install' : 'pending'),
+      publishedAt: data.publishedAt || '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
     apps.push(newApp);
     saveApps(apps);
-    return newApp;
+    syncAppShareManifest(newApp);
+    return hydrateAppShareState(newApp);
   },
 
   update(id, data) {
@@ -197,7 +372,8 @@ const appService = {
       updatedAt: new Date().toISOString()
     });
     saveApps(apps);
-    return apps[idx];
+    syncAppShareManifest(apps[idx]);
+    return hydrateAppShareState(apps[idx]);
   },
 
   remove(id, deleteFiles) {

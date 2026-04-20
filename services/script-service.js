@@ -278,7 +278,16 @@ async function deployAppScripts(appConfig, options = {}) {
       }
     }
 
+    const manifestPath = path.join(appFolder, 'version.json');
+    let existingManifest = {};
+    try {
+      if (fs.existsSync(manifestPath)) {
+        existingManifest = JSON.parse(await fs.promises.readFile(manifestPath, 'utf-8'));
+      }
+    } catch (e) {}
+
     const deployedAt = new Date().toISOString();
+    const currentAction = writeInstall ? 'install' : 'uninstall';
     const manifest = buildAppDeploymentManifest(resolvedAppConfig, {
       safeName,
       customTemplate,
@@ -286,11 +295,13 @@ async function deployAppScripts(appConfig, options = {}) {
       installPath: writeInstall ? (installPath || path.join(appFolder, 'install.ps1')) : path.join(appFolder, 'install.ps1'),
       uninstallPath,
       uninstallConfig,
-      deployedAt
+      deployedAt,
+      currentAction,
+      existingManifest
     });
 
     await fs.promises.writeFile(
-      path.join(appFolder, 'version.json'),
+      manifestPath,
       JSON.stringify(manifest, null, 2),
       'utf-8'
     );
@@ -310,12 +321,19 @@ async function deployAppScripts(appConfig, options = {}) {
 
 function buildAppDeploymentManifest(appConfig, details = {}) {
   const cfgForManifest = require('./config').getConfig();
+  const existingManifest = details.existingManifest && typeof details.existingManifest === 'object'
+    ? details.existingManifest
+    : {};
   const uninstallConfig = resolveEffectiveUninstallConfig({
     ...appConfig,
     uninstall: details.uninstallConfig || appConfig?.uninstall
   });
   const generatedAt = details.deployedAt || new Date().toISOString();
+  const currentAction = details.currentAction === 'uninstall' ? 'uninstall' : 'install';
+  const installScriptPath = details.installPath || existingManifest.installScriptPath || '';
+  const uninstallScriptPath = details.uninstallPath || existingManifest?.uninstall?.scriptPath || '';
   return {
+    ...existingManifest,
     app: appConfig.name,
     deploymentFolder: details.safeName || '',
     version: appConfig.version || '1.0.0',
@@ -326,12 +344,21 @@ function buildAppDeploymentManifest(appConfig, details = {}) {
     template: appConfig.template || 'generic',
     templateSource: details.customTemplate ? 'user' : 'builtin',
     notifyUser: appConfig.notifyUser || false,
-    deployedAt: generatedAt,
+    deployedAt: currentAction === 'install' ? generatedAt : (existingManifest.deployedAt || ''),
+    lastInstallAt: currentAction === 'install'
+      ? generatedAt
+      : (existingManifest.lastInstallAt || existingManifest.deployedAt || ''),
+    lastUninstallPreparedAt: currentAction === 'uninstall'
+      ? generatedAt
+      : (existingManifest.lastUninstallPreparedAt || existingManifest?.uninstall?.generatedAt || ''),
+    publishedAction: currentAction,
+    activeScriptPath: currentAction === 'uninstall' ? uninstallScriptPath : installScriptPath,
+    publishedAt: generatedAt,
     shareId: cfgForManifest.shareId || '',
-    installScriptPath: details.installPath || '',
+    installScriptPath,
     uninstall: {
       mode: uninstallConfig.mode,
-      available: supportsUninstallScript(appConfig, uninstallConfig) && !!details.uninstallPath,
+      available: supportsUninstallScript(appConfig, uninstallConfig) && !!uninstallScriptPath,
       command: uninstallConfig.command || '',
       args: uninstallConfig.args || '',
       registryMatchName: uninstallConfig.registryMatchName || '',
@@ -339,7 +366,7 @@ function buildAppDeploymentManifest(appConfig, details = {}) {
       productCode: uninstallConfig.productCode || '',
       wingetId: uninstallConfig.wingetId || '',
       wingetSource: uninstallConfig.wingetSource || '',
-      scriptPath: details.uninstallPath || '',
+      scriptPath: uninstallScriptPath,
       generatedAt
     }
   };

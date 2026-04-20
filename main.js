@@ -420,7 +420,12 @@ app.whenReady().then(() => {
       const config = configService.getConfig();
       const result = await bundleService.deployBundle(bundle, apps, config);
       if (result.success) {
-        bundleService.update(bundleId, { deployed: true, deployedPath: result.path });
+        bundleService.update(bundleId, {
+          deployed: true,
+          deployedPath: result.path,
+          publishedAction: 'install',
+          publishedAt: new Date().toISOString()
+        });
         activityLog.add('bundle_deploy', { bundleName: bundle.name, version: bundle.version });
       }
       return result;
@@ -444,7 +449,9 @@ app.whenReady().then(() => {
       if (result.success) {
         bundleService.update(bundleId, {
           uninstallDeployedPath: result.path,
-          uninstallPreparedAt: new Date().toISOString()
+          uninstallPreparedAt: new Date().toISOString(),
+          publishedAction: 'uninstall',
+          publishedAt: new Date().toISOString()
         });
         activityLog.add('bundle_uninstall_prepare', { bundleName: bundle.name, version: bundle.version });
       }

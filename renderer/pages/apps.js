@@ -205,14 +205,23 @@ const AppsPage = {
 
     // Load GPOs for bulk select
     this.loadGPOsForBulk();
+
+    if (this._pendingFocusAppId) {
+      const focusId = this._pendingFocusAppId;
+      this._pendingFocusAppId = null;
+      this.keepAppCardVisible(focusId);
+    }
   },
 
   renderAppCard(app, templates) {
     const templateInfo = templates.find(tmpl => tmpl.id === app.template) || { name: app.templateDefinition?.name || app.template };
     const isDeployed = app.deployed !== false && app.deployedPath;
     const canUninstall = this.canGenerateUninstall(app);
-    const statusClass = isDeployed ? 'deployed' : 'pending';
-    const statusText = isDeployed ? t('apps.deployedBadge') : t('apps.detailNotDeployed');
+    const publishedAction = this.getPublishedAction(app);
+    const statusClass = this.getDeploymentVisualState(app);
+    const statusText = this.getDeploymentStatusLabel(app);
+    const canPublishUninstall = isDeployed && publishedAction !== 'uninstall';
+    const installActionLabel = this.getInstallActionLabel(app);
     const icon = this.templateIcon(app.template);
     return `
       <div class="app-card app-card--${statusClass} ${this.selectedIds?.has(app.id) ? 'selected' : ''}" data-id="${app.id}" data-deployed="${!!isDeployed}" onclick="AppsPage.showAppDetail('${app.id}')">
@@ -226,6 +235,7 @@ const AppsPage = {
         </div>
         <div class="app-card-badges">
           <span class="badge badge-info app-card-version">v${this.esc(app.version || '1.0.0')}</span>
+          ${statusClass === 'uninstalling' ? `<span class="badge badge-warning">${this.tr('apps.uninstallPublished', 'Desinstalacion')}</span>` : ''}
           ${app.gpoName ? `<span class="badge badge-info" title="GPO">${this.esc(app.gpoName)}</span>` : ''}
           ${(() => { const n = Array.isArray(app.assignedOUs) ? app.assignedOUs.length : (app.ouDN ? 1 : 0); return n > 0 ? `<span class="badge badge-neutral" title="${t('apps.detailAssignedOUs')}">&#127970; ${n} OU${n > 1 ? 's' : ''}</span>` : ''; })()}
         </div>
@@ -253,21 +263,27 @@ const AppsPage = {
                 </button>
               ` : ''}
               ${isDeployed ? `
-                ${app.template === 'winget' ? `
+                ${canPublishUninstall && app.template === 'winget' ? `
                 <button class="dropdown-item" onclick="AppsPage.wingetUpdateDialog('${app.id}')">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg>
                   ${t('apps.checkUpdates')}
                 </button>
-                ` : `
+                ` : (canPublishUninstall ? `
                 <button class="dropdown-item" onclick="AppsPage.quickUpdate('${app.id}')">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg>
                   ${t('apps.quickUpdate')}
                 </button>
-                `}
-                ${canUninstall ? `
+                ` : '')}
+                ${canPublishUninstall && canUninstall ? `
                   <button class="dropdown-item dropdown-item--warning" onclick="AppsPage.uninstallApp('${app.id}')">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                     ${this.tr('apps.uninstallAction', 'Desinstalar')}
+                  </button>
+                ` : ''}
+                ${publishedAction === 'uninstall' ? `
+                  <button class="dropdown-item dropdown-item--success" onclick="AppsPage.deployApp('${app.id}')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                    ${installActionLabel}
                   </button>
                 ` : ''}
                 <button class="dropdown-item dropdown-item--warning" onclick="AppsPage.disableDeploy('${app.id}')">
@@ -277,7 +293,7 @@ const AppsPage = {
               ` : `
                 <button class="dropdown-item dropdown-item--success" onclick="AppsPage.deployApp('${app.id}')">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                  ${t('apps.deploy')}
+                  ${installActionLabel}
                 </button>
               `}
               <button class="dropdown-item" onclick="AppsPage.editApp('${app.id}')">
@@ -502,6 +518,41 @@ const AppsPage = {
     }
   },
 
+  getPublishedAction(appLike) {
+    const normalized = String(appLike?.publishedAction || '').trim().toLowerCase();
+    if (normalized === 'install' || normalized === 'uninstall') return normalized;
+    return (appLike?.deployed !== false && appLike?.deployedPath) ? 'install' : 'pending';
+  },
+
+  getDeploymentVisualState(appLike) {
+    const isDeployed = appLike?.deployed !== false && !!appLike?.deployedPath;
+    if (!isDeployed) return 'pending';
+    return this.getPublishedAction(appLike) === 'uninstall' ? 'uninstalling' : 'deployed';
+  },
+
+  getDeploymentStatusLabel(appLike) {
+    const state = this.getDeploymentVisualState(appLike);
+    if (state === 'uninstalling') return this.tr('apps.uninstallPublished', 'Desinstalacion');
+    if (state === 'deployed') return this.tr('apps.installPublished', 'Instalacion');
+    return t('apps.detailNotDeployed');
+  },
+
+  getInstallActionLabel(appLike) {
+    return this.getPublishedAction(appLike) === 'uninstall'
+      ? this.tr('apps.reinstallAction', 'Volver a instalar')
+      : t('apps.deploy');
+  },
+
+  keepAppCardVisible(id) {
+    if (!id) return;
+    requestAnimationFrame(() => {
+      const card = document.querySelector(`.app-card[data-id="${id}"]`);
+      if (card) {
+        card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    });
+  },
+
   // Returns the installer path inside the app's share folder, or null if
   // the app isn't deployed / no installer is present on the share.
   async resolveSharedInstaller(appName, preferredInstallerPath = '') {
@@ -567,6 +618,9 @@ const AppsPage = {
     const templates = await window.api.scripts.getTemplates();
     const templateInfo = templates.find(tmpl => tmpl.id === app.template) || { name: app.templateDefinition?.name || app.template };
     const isDeployed = app.deployed !== false && app.deployedPath;
+    const publishedAction = this.getPublishedAction(app);
+    const statusClass = this.getDeploymentVisualState(app);
+    const statusText = this.getDeploymentStatusLabel(app);
 
     // Prefer the share location for the installer (where it actually lives now)
     const sharedInstaller = await this.resolveSharedInstaller(app.name, app.installerPath);
@@ -592,6 +646,7 @@ const AppsPage = {
       : '';
     const uninstallSummary = this.getUninstallSummary(app);
     const canUninstall = this.canGenerateUninstall(app);
+    const canPublishUninstall = isDeployed && publishedAction !== 'uninstall';
 
     const body = `
       <div style="display:flex; flex-direction:column; gap:16px;">
@@ -610,7 +665,11 @@ const AppsPage = {
         <div style="display:flex; flex-wrap:wrap; gap:6px;">
           <span class="badge badge-primary">${this.esc((app.installerType || 'exe').toUpperCase())}</span>
           <span class="badge badge-info">v${this.esc(app.version || '1.0.0')}</span>
-          ${isDeployed ? `<span class="badge badge-success">${t('apps.deployedBadge')}</span>` : `<span class="badge badge-neutral">${t('apps.detailNotDeployed')}</span>`}
+          ${statusClass === 'uninstalling'
+            ? `<span class="badge badge-warning">${this.tr('apps.uninstallPublished', 'Desinstalacion')}</span>`
+            : (isDeployed
+                ? `<span class="badge badge-success">${this.tr('apps.installPublished', 'Instalacion')}</span>`
+                : `<span class="badge badge-neutral">${t('apps.detailNotDeployed')}</span>`)}
           ${app.gpoName ? `<span class="badge badge-info">${this.esc(app.gpoName)}</span>` : `<span class="badge badge-neutral">${t('apps.noGpoBadge')}</span>`}
           ${app.notifyUser ? `<span class="badge badge-warning">${t('apps.detailNotifyEnabled')}</span>` : ''}
         </div>
@@ -626,6 +685,7 @@ const AppsPage = {
               : row(t('apps.detailInstallerType'), this.esc((app.installerType || 'exe').toUpperCase()))
           }
           ${(app.template !== 'winget' && app.template !== 'odt') ? row(t('apps.detailSilentArgs'), app.silentArgs ? '<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">' + this.esc(app.silentArgs) + '</code>' : '-') : ''}
+          ${row(this.tr('apps.publishedState', 'Estado publicado'), this.esc(statusText))}
           ${row(this.tr('apps.uninstallMode', 'Modo de desinstalacion'), this.esc(uninstallSummary))}
           ${row(t('apps.detailVersion'), this.esc(app.version || '1.0.0'))}
           ${row(t('apps.detailNotifyUser'), app.notifyUser ? '&#10003;' : '&#10007;')}
@@ -687,12 +747,15 @@ const AppsPage = {
 
     App.openModal(t('apps.detailTitle'), body, `
       <button class="btn btn-secondary" onclick="App.closeModal()">${t('common.close')}</button>
-      ${canUninstall && isDeployed ? `<button class="btn btn-warning" onclick="App.closeModal(); AppsPage.uninstallApp('${app.id}')">${this.tr('apps.uninstallAction', 'Desinstalar')}</button>` : ''}
+      ${canPublishUninstall && canUninstall ? `<button class="btn btn-warning" onclick="App.closeModal(); AppsPage.uninstallApp('${app.id}')">${this.tr('apps.uninstallAction', 'Desinstalar')}</button>` : ''}
+      ${(!isDeployed || publishedAction === 'uninstall') ? `<button class="btn btn-success" onclick="App.closeModal(); AppsPage.deployApp('${app.id}')">${this.getInstallActionLabel(app)}</button>` : ''}
       <button class="btn btn-secondary" onclick="App.closeModal(); AppsPage.editApp('${app.id}')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         ${t('apps.edit')}
       </button>
     `);
+
+    this.keepAppCardVisible(id);
   },
 
   // â”€â”€â”€ Quick Update â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -918,7 +981,9 @@ const AppsPage = {
       await window.api.apps.update(app.id, {
         deployed: true,
         deployedPath: deployResult.path,
-        lastDeployHash: deployResult.hash || state.newHash
+        lastDeployHash: deployResult.hash || state.newHash,
+        publishedAction: 'install',
+        publishedAt: new Date().toISOString()
       });
 
       // 6. Activity log
@@ -930,6 +995,7 @@ const AppsPage = {
 
       App.toast(t('apps.quickUpdateSuccess').replace('{version}', state.newVersion || '?'), 'success');
       App.closeModal();
+      this._pendingFocusAppId = app.id;
       App.navigate('apps');
     } catch (err) {
       App.toast('Error: ' + err.message, 'error');
@@ -1159,7 +1225,12 @@ const AppsPage = {
         throw new Error(deployResult.error);
       }
 
-      await window.api.apps.update(appId, { deployed: true, deployedPath: deployResult.path });
+      await window.api.apps.update(appId, {
+        deployed: true,
+        deployedPath: deployResult.path,
+        publishedAction: 'install',
+        publishedAt: new Date().toISOString()
+      });
       await window.api.activity.add('app_auto_update', { appName, newVersion });
 
       App.toast(t('apps.updateSuccess').replace('{name}', appName).replace('{version}', newVersion), 'success');
@@ -1326,14 +1397,16 @@ const AppsPage = {
   async bulkDisable() {
     if (this.selectedIds.size === 0) return;
     try {
-      const ids = Array.from(this.selectedIds);
-      for (const id of ids) {
-        const app = await window.api.apps.get(id);
-        if (app && app.deployed) {
-          app.deployed = false;
-          await window.api.apps.update(id, app);
+        const ids = Array.from(this.selectedIds);
+        for (const id of ids) {
+          const app = await window.api.apps.get(id);
+          if (app && app.deployed) {
+            app.deployed = false;
+            app.publishedAction = 'pending';
+            app.publishedAt = '';
+            await window.api.apps.update(id, app);
+          }
         }
-      }
       App.toast(t('apps.bulkDisableSuccess') || `Deshabilitadas ${ids.length} apps correctamente`, 'success');
       this.clearSelection();
       App.navigate('apps');
@@ -3233,7 +3306,9 @@ const AppsPage = {
           deployed: true,
           deployedPath: deployResult.path,
           uninstallDeployedPath: deployResult.uninstallPath || '',
-          lastDeployHash: deployResult.hash || ''
+          lastDeployHash: deployResult.hash || '',
+          publishedAction: 'install',
+          publishedAt: new Date().toISOString()
         });
         // Log activity
         await window.api.activity.add(isEdit ? 'app_update' : 'app_create', {
@@ -3262,6 +3337,7 @@ const AppsPage = {
       }
 
       App.closeModal();
+      this._pendingFocusAppId = app.id;
       App.navigate('apps');
     } catch (err) {
       App.toast('Error: ' + err.message, 'error');
@@ -3382,9 +3458,12 @@ const AppsPage = {
         await window.api.apps.update(id, {
           deployed: true,
           deployedPath: result.path,
-          uninstallDeployedPath: result.uninstallPath || ''
+          uninstallDeployedPath: result.uninstallPath || '',
+          publishedAction: 'install',
+          publishedAt: new Date().toISOString()
         });
         App.toast(t('apps.deployedToPath').replace('{app}', app.name).replace('{path}', result.path), 'success');
+        this._pendingFocusAppId = id;
         App.navigate('apps');
       } else {
         if (App.isShareError(result.error)) { App.handleShareError(); return; }
@@ -3442,7 +3521,9 @@ const AppsPage = {
 
         const uninstallPath = deployResult.uninstallPath || deployResult.path || '';
         await window.api.apps.update(app.id, {
-          uninstallDeployedPath: uninstallPath
+          uninstallDeployedPath: uninstallPath,
+          publishedAction: 'uninstall',
+          publishedAt: new Date().toISOString()
         });
 
         const switchGPO = document.getElementById('chk-switch-uninstall-gpo')?.checked ?? false;
@@ -3463,6 +3544,7 @@ const AppsPage = {
         });
         App.toast(this.tr('apps.uninstallPrepared', 'Script de desinstalacion preparado correctamente.'), 'success');
         App.closeModal();
+        this._pendingFocusAppId = id;
         App.navigate('apps');
       } catch (err) {
         App.toast(`${t('common.error')}: ${err.message}`, 'error');
@@ -3563,13 +3645,15 @@ const AppsPage = {
           delete freshApp.id;
           freshApp.deployed = false;
           freshApp.deployedPath = '';
+          freshApp.publishedAction = 'pending';
+          freshApp.publishedAt = '';
           freshApp.gpoName = deleteGPO ? '' : app.gpoName;
           freshApp.assignedOUs = (unlinkGPO || deleteGPO) ? [] : app.assignedOUs;
           await window.api.apps.create(freshApp);
           await window.api.activity.add('app_disable', { appName: app.name, deletedFiles: true, deletedGPO: deleteGPO });
         } else {
           // Just update the app status
-          const updateData = { deployed: false, deployedPath: '' };
+          const updateData = { deployed: false, deployedPath: '', publishedAction: 'pending', publishedAt: '' };
           if (deleteGPO) updateData.gpoName = '';
           if (unlinkGPO || deleteGPO) updateData.assignedOUs = [];
           await window.api.apps.update(id, updateData);

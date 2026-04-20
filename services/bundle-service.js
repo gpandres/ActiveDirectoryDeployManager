@@ -24,14 +24,15 @@ function loadBundles() {
     try {
       fs.writeFileSync(getBundlesPath(), JSON.stringify(normalized, null, 2), 'utf-8');
     } catch (e) {}
-    return normalized;
+    return normalized.map(hydrateBundleShareState);
   }
   // Fallback to local cache
   try {
     const p = getBundlesPath();
     if (fs.existsSync(p)) {
       const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
-      return Array.isArray(parsed) ? parsed.map(normalizeBundleRecord) : [];
+      const normalized = Array.isArray(parsed) ? parsed.map(normalizeBundleRecord) : [];
+      return normalized.map(hydrateBundleShareState);
     }
   } catch (err) {
     console.error('Error loading bundles:', err);
@@ -65,6 +66,12 @@ function normalizeDNArray(value) {
     });
 }
 
+function normalizePublishedAction(value, fallback = 'pending') {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['install', 'uninstall', 'pending'].includes(normalized)) return normalized;
+  return fallback;
+}
+
 function normalizeBundleRecord(bundle) {
   const ouDNs = normalizeDNArray(bundle?.ouDNs || bundle?.ouDN);
   return {
@@ -72,8 +79,143 @@ function normalizeBundleRecord(bundle) {
     ouDN: ouDNs[0] || '',
     ouDNs,
     uninstallDeployedPath: typeof bundle?.uninstallDeployedPath === 'string' ? bundle.uninstallDeployedPath : '',
-    uninstallPreparedAt: typeof bundle?.uninstallPreparedAt === 'string' ? bundle.uninstallPreparedAt : ''
+    uninstallPreparedAt: typeof bundle?.uninstallPreparedAt === 'string' ? bundle.uninstallPreparedAt : '',
+    publishedAction: normalizePublishedAction(bundle?.publishedAction, bundle?.deployed ? 'install' : 'pending'),
+    publishedAt: typeof bundle?.publishedAt === 'string' ? bundle.publishedAt : ''
   };
+}
+
+function readBundleDeploymentManifest(bundleRecord) {
+  try {
+    const shareHealth = require('./share-health');
+    if (!shareHealth.isAvailableSync()) return null;
+    const configService = require('./config');
+    const config = configService.getConfig();
+    if (!config?.networkSharePath || !bundleRecord?.name) return null;
+
+    const bundlesDir = resolveWithinBase(config.networkSharePath, '_bundles');
+    const { path: bundleFolder } = resolveNamedSubdirectory(bundlesDir, bundleRecord.name, 'bundle');
+    const manifestPath = path.join(bundleFolder, 'bundle.json');
+    if (!fs.existsSync(manifestPath)) return null;
+    return JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+  } catch (err) {
+    return null;
+  }
+}
+
+function hydrateBundleShareState(bundleRecord) {
+  const normalized = normalizeBundleRecord(bundleRecord);
+  const manifest = readBundleDeploymentManifest(normalized);
+  if (!manifest || typeof manifest !== 'object') {
+    return normalized;
+  }
+
+  const manifestActionValue = String(manifest.publishedAction || manifest.currentAction || '').trim().toLowerCase();
+  const hasExplicitPublishedAction = ['install', 'uninstall', 'pending'].includes(manifestActionValue);
+  let publishedAction = normalizePublishedAction(
+    manifestActionValue,
+    normalized.publishedAction
+  );
+
+  if (!hasExplicitPublishedAction && publishedAction === 'pending') {
+    const activeScriptPath = String(manifest.activeScriptPath || '').trim().toLowerCase();
+    const uninstallScriptPath = String(manifest.uninstallScriptPath || '').trim().toLowerCase();
+    if (activeScriptPath && uninstallScriptPath && activeScriptPath === uninstallScriptPath) {
+      publishedAction = 'uninstall';
+    } else if (manifest.installScriptPath || manifest.deployedAt) {
+      publishedAction = 'install';
+    }
+  }
+
+  return normalizeBundleRecord({
+    ...normalized,
+    deployedPath: typeof manifest.installScriptPath === 'string' && manifest.installScriptPath
+      ? manifest.installScriptPath
+      : normalized.deployedPath,
+    uninstallDeployedPath: typeof manifest.uninstallScriptPath === 'string' && manifest.uninstallScriptPath
+      ? manifest.uninstallScriptPath
+      : normalized.uninstallDeployedPath,
+    uninstallPreparedAt: typeof manifest.lastUninstallPreparedAt === 'string' && manifest.lastUninstallPreparedAt
+      ? manifest.lastUninstallPreparedAt
+      : (
+        typeof manifest.uninstallDeployedAt === 'string' && manifest.uninstallDeployedAt
+          ? manifest.uninstallDeployedAt
+          : normalized.uninstallPreparedAt
+      ),
+    publishedAction,
+    publishedAt: typeof manifest.publishedAt === 'string' && manifest.publishedAt
+      ? manifest.publishedAt
+      : (
+        typeof manifest.lastUninstallPreparedAt === 'string' && manifest.lastUninstallPreparedAt
+          ? manifest.lastUninstallPreparedAt
+          : (
+            typeof manifest.lastInstallAt === 'string' && manifest.lastInstallAt
+              ? manifest.lastInstallAt
+              : normalized.publishedAt
+          )
+      )
+  });
+}
+
+function syncBundleShareManifest(bundleRecord) {
+  try {
+    const normalized = normalizeBundleRecord(bundleRecord);
+    const manifest = readBundleDeploymentManifest(normalized);
+    if (!manifest || typeof manifest !== 'object') return;
+
+    const publishedAction = normalizePublishedAction(
+      normalized.publishedAction,
+      manifest.publishedAction || (normalized.deployed ? 'install' : 'pending')
+    );
+    const publishedAt = typeof normalized.publishedAt === 'string' && normalized.publishedAt
+      ? normalized.publishedAt
+      : (typeof manifest.publishedAt === 'string' ? manifest.publishedAt : '');
+    const installScriptPath = typeof normalized.deployedPath === 'string' && normalized.deployedPath
+      ? normalized.deployedPath
+      : (typeof manifest.installScriptPath === 'string' ? manifest.installScriptPath : '');
+    const uninstallScriptPath = typeof normalized.uninstallDeployedPath === 'string' && normalized.uninstallDeployedPath
+      ? normalized.uninstallDeployedPath
+      : (typeof manifest.uninstallScriptPath === 'string' ? manifest.uninstallScriptPath : '');
+    const activeScriptPath = publishedAction === 'uninstall'
+      ? uninstallScriptPath
+      : (publishedAction === 'install' ? installScriptPath : '');
+
+    const nextManifest = {
+      ...manifest,
+      name: normalized.name || manifest.name,
+      version: normalized.version || manifest.version || '1.0.0',
+      apps: Array.isArray(normalized.apps) ? normalized.apps : (Array.isArray(manifest.apps) ? manifest.apps : []),
+      notifyUser: typeof normalized.notifyUser === 'boolean' ? normalized.notifyUser : !!manifest.notifyUser,
+      installScriptPath,
+      uninstallScriptPath,
+      publishedAction,
+      activeScriptPath,
+      publishedAt,
+      deployedAt: publishedAction === 'install'
+        ? (publishedAt || manifest.deployedAt || '')
+        : (manifest.deployedAt || ''),
+      uninstallDeployedAt: publishedAction === 'uninstall'
+        ? (publishedAt || manifest.uninstallDeployedAt || '')
+        : (manifest.uninstallDeployedAt || ''),
+      lastInstallAt: publishedAction === 'install'
+        ? (publishedAt || manifest.lastInstallAt || manifest.deployedAt || '')
+        : (manifest.lastInstallAt || manifest.deployedAt || ''),
+      lastUninstallPreparedAt: publishedAction === 'uninstall'
+        ? (publishedAt || manifest.lastUninstallPreparedAt || manifest.uninstallDeployedAt || '')
+        : (manifest.lastUninstallPreparedAt || manifest.uninstallDeployedAt || '')
+    };
+
+    const shareHealth = require('./share-health');
+    if (!shareHealth.isAvailableSync()) return;
+    const configService = require('./config');
+    const config = configService.getConfig();
+    if (!config?.networkSharePath || !normalized.name) return;
+
+    const bundlesDir = resolveWithinBase(config.networkSharePath, '_bundles');
+    const { path: bundleFolder } = resolveNamedSubdirectory(bundlesDir, normalized.name, 'bundle');
+    const manifestPath = path.join(bundleFolder, 'bundle.json');
+    fs.writeFileSync(manifestPath, JSON.stringify(nextManifest, null, 2), 'utf-8');
+  } catch (err) {}
 }
 
 const bundleService = {
@@ -104,12 +246,15 @@ const bundleService = {
       deployedPath: '',
       uninstallDeployedPath: data.uninstallDeployedPath || '',
       uninstallPreparedAt: data.uninstallPreparedAt || '',
+      publishedAction: data.publishedAction || 'pending',
+      publishedAt: data.publishedAt || '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
     bundles.push(newBundle);
     saveBundles(bundles);
-    return newBundle;
+    syncBundleShareManifest(newBundle);
+    return hydrateBundleShareState(newBundle);
   },
 
   update(id, data) {
@@ -127,7 +272,8 @@ const bundleService = {
       updatedAt: new Date().toISOString()
     });
     saveBundles(bundles);
-    return bundles[idx];
+    syncBundleShareManifest(bundles[idx]);
+    return hydrateBundleShareState(bundles[idx]);
   },
 
   remove(id) {
@@ -276,6 +422,7 @@ Write-Output "=========================================="
           existingManifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
         }
       } catch (e) {}
+      const publishedAt = new Date().toISOString();
       const manifest = {
         ...existingManifest,
         name: bundle.name,
@@ -283,10 +430,17 @@ Write-Output "=========================================="
         version: bundle.version,
         apps: bundle.apps,
         notifyUser: bundle.notifyUser,
-        deployedAt: !isUninstall ? new Date().toISOString() : (existingManifest.deployedAt || ''),
-        uninstallDeployedAt: isUninstall ? new Date().toISOString() : (existingManifest.uninstallDeployedAt || ''),
+        deployedAt: !isUninstall ? publishedAt : (existingManifest.deployedAt || ''),
+        uninstallDeployedAt: isUninstall ? publishedAt : (existingManifest.uninstallDeployedAt || ''),
+        lastInstallAt: !isUninstall ? publishedAt : (existingManifest.lastInstallAt || existingManifest.deployedAt || ''),
+        lastUninstallPreparedAt: isUninstall
+          ? publishedAt
+          : (existingManifest.lastUninstallPreparedAt || existingManifest.uninstallDeployedAt || ''),
         installScriptPath: !isUninstall ? scriptPath : (existingManifest.installScriptPath || path.join(bundleFolder, 'bundle_install.ps1')),
-        uninstallScriptPath: isUninstall ? scriptPath : (existingManifest.uninstallScriptPath || '')
+        uninstallScriptPath: isUninstall ? scriptPath : (existingManifest.uninstallScriptPath || ''),
+        publishedAction: isUninstall ? 'uninstall' : 'install',
+        activeScriptPath: scriptPath,
+        publishedAt
       };
       fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
 
