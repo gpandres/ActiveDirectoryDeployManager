@@ -23,17 +23,19 @@ function loadApps() {
   // Share is authoritative — pull from there if available
   const fromShare = appsShareStore.read();
   if (fromShare !== null) {
+    const normalized = Array.isArray(fromShare) ? fromShare.map(normalizeAppRecord) : [];
     // Mirror to local cache for offline fallback
     try {
-      fs.writeFileSync(getAppsPath(), JSON.stringify(fromShare, null, 2), 'utf-8');
+      fs.writeFileSync(getAppsPath(), JSON.stringify(normalized, null, 2), 'utf-8');
     } catch (e) {}
-    return fromShare;
+    return normalized;
   }
   // Fallback to local cache (offline or share not yet configured)
   try {
     const p = getAppsPath();
     if (fs.existsSync(p)) {
-      return JSON.parse(fs.readFileSync(p, 'utf-8'));
+      const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      return Array.isArray(parsed) ? parsed.map(normalizeAppRecord) : [];
     }
   } catch (err) {
     console.error('Error loading apps:', err);
@@ -42,10 +44,11 @@ function loadApps() {
 }
 
 function saveApps(apps) {
+  const normalized = Array.isArray(apps) ? apps.map(normalizeAppRecord) : [];
   // Always write local cache
-  fs.writeFileSync(getAppsPath(), JSON.stringify(apps, null, 2), 'utf-8');
+  fs.writeFileSync(getAppsPath(), JSON.stringify(normalized, null, 2), 'utf-8');
   // Best-effort mirror to share
-  appsShareStore.write(apps);
+  appsShareStore.write(normalized);
 }
 
 function generateId() {
@@ -68,6 +71,70 @@ function normalizeDNArray(value) {
     });
 }
 
+function inferInstallerType(installerType, installerPath, template) {
+  const normalizedTemplate = String(template || '').trim().toLowerCase();
+  const normalizedType = String(installerType || '').trim().toLowerCase();
+  if (normalizedTemplate === 'winget') return 'winget';
+  if (normalizedTemplate === 'odt') return 'odt';
+  if (normalizedType) return normalizedType;
+  const ext = path.extname(String(installerPath || '')).toLowerCase();
+  if (ext === '.msi') return 'msi';
+  if (ext === '.ps1') return 'ps1';
+  return 'exe';
+}
+
+function normalizeUninstallConfig(value, context = {}) {
+  const raw = value && typeof value === 'object' ? value : {};
+  const template = String(context.template || '').trim().toLowerCase();
+  const installerType = inferInstallerType(context.installerType, context.installerPath, context.template);
+  let mode = String(raw.mode || '').trim().toLowerCase();
+
+  if (!mode) {
+    if (template === 'winget') mode = 'winget';
+    else if (installerType === 'msi') mode = 'auto-msi';
+    else if (template === 'custom' || template === 'odt') mode = 'none';
+    else mode = 'auto-registry';
+  }
+
+  if (template === 'winget') mode = 'winget';
+  if (mode === 'auto-msi' && installerType !== 'msi') {
+    mode = template === 'winget' ? 'winget' : 'auto-registry';
+  }
+  if (!['none', 'auto-msi', 'auto-registry', 'manual', 'winget'].includes(mode)) {
+    mode = 'none';
+  }
+
+  return {
+    mode,
+    command: typeof raw.command === 'string' ? raw.command : '',
+    args: typeof raw.args === 'string' ? raw.args : '',
+    registryMatchName: typeof raw.registryMatchName === 'string'
+      ? raw.registryMatchName
+      : (typeof context.name === 'string' ? context.name : ''),
+    registryMatchPublisher: typeof raw.registryMatchPublisher === 'string' ? raw.registryMatchPublisher : '',
+    productCode: typeof raw.productCode === 'string' ? raw.productCode : '',
+    scriptPath: typeof raw.scriptPath === 'string' ? raw.scriptPath : '',
+    preparedAt: typeof raw.preparedAt === 'string' ? raw.preparedAt : ''
+  };
+}
+
+function normalizeAppRecord(app) {
+  const assignedOUs = normalizeDNArray(app?.assignedOUs || app?.ouDN);
+  const normalized = {
+    ...app,
+    installerType: inferInstallerType(app?.installerType, app?.installerPath, app?.template),
+    ouDN: assignedOUs[0] || '',
+    assignedOUs
+  };
+
+  normalized.uninstall = normalizeUninstallConfig(normalized.uninstall, normalized);
+  normalized.uninstallDeployedPath = typeof normalized.uninstallDeployedPath === 'string'
+    ? normalized.uninstallDeployedPath
+    : (normalized.uninstall?.scriptPath || '');
+
+  return normalized;
+}
+
 const appService = {
   getAll() {
     return loadApps();
@@ -81,11 +148,11 @@ const appService = {
   create(data) {
     const apps = loadApps();
     const assignedOUs = normalizeDNArray(data.assignedOUs || data.ouDN);
-    const newApp = {
+    const newApp = normalizeAppRecord({
       id: generateId(),
       name: data.name || 'Nueva App',
       template: data.template || 'generic',
-      installerType: data.installerType || 'exe',
+      installerType: inferInstallerType(data.installerType, data.installerPath, data.template),
       silentArgs: data.silentArgs || '/S',
       installerPath: data.installerPath || '',
       configXmlPath: data.configXmlPath || '',
@@ -105,9 +172,11 @@ const appService = {
       versionHistory: [],
       deployed: data.deployed || false,
       deployedPath: data.deployedPath || '',
+      uninstall: data.uninstall || null,
+      uninstallDeployedPath: data.uninstallDeployedPath || '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
-    };
+    });
     apps.push(newApp);
     saveApps(apps);
     return newApp;
@@ -120,13 +189,13 @@ const appService = {
     const assignedOUs = normalizeDNArray(
       data.assignedOUs !== undefined ? data.assignedOUs : (data.ouDN !== undefined ? data.ouDN : apps[idx].assignedOUs || apps[idx].ouDN)
     );
-    apps[idx] = {
+    apps[idx] = normalizeAppRecord({
       ...apps[idx],
       ...data,
       ouDN: assignedOUs[0] || '',
       assignedOUs,
       updatedAt: new Date().toISOString()
-    };
+    });
     saveApps(apps);
     return apps[idx];
   },

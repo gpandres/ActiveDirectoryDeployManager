@@ -55,6 +55,8 @@ contextBridge.exposeInMainWorld('api', {
   scripts: {
     generate: (appConfig) => ipcRenderer.invoke('scripts:generate', appConfig),
     deploy: (appConfig) => ipcRenderer.invoke('scripts:deploy', appConfig),
+    generateUninstall: (appConfig) => ipcRenderer.invoke('scripts:generateUninstall', appConfig),
+    deployUninstall: (appConfig) => ipcRenderer.invoke('scripts:deployUninstall', appConfig),
     getTemplates: () => ipcRenderer.invoke('scripts:getTemplates')
   },
 
@@ -83,7 +85,9 @@ contextBridge.exposeInMainWorld('api', {
     update: (id, data) => ipcRenderer.invoke('bundles:update', id, data),
     delete: (id) => ipcRenderer.invoke('bundles:delete', id),
     deploy: (id) => ipcRenderer.invoke('bundles:deploy', id),
-    generateScript: (id) => ipcRenderer.invoke('bundles:generateScript', id)
+    deployUninstall: (id) => ipcRenderer.invoke('bundles:deployUninstall', id),
+    generateScript: (id) => ipcRenderer.invoke('bundles:generateScript', id),
+    generateUninstallScript: (id) => ipcRenderer.invoke('bundles:generateUninstallScript', id)
   },
 
   // Activity Log

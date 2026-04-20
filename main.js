@@ -230,10 +230,24 @@ app.whenReady().then(() => {
     catch (e) { return ''; }
     return scriptService.generateScript(appConfig);
   });
+  ipcMain.handle('scripts:generateUninstall', (_, appConfig) => {
+    try { assertObject(appConfig, 'appConfig'); }
+    catch (e) { return ''; }
+    try {
+      return scriptService.generateUninstallScript(appConfig);
+    } catch (err) {
+      return '';
+    }
+  });
   ipcMain.handle('scripts:deploy', (_, appConfig) => {
     try { assertObject(appConfig, 'appConfig'); }
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
     return scriptService.deployScript(appConfig);
+  });
+  ipcMain.handle('scripts:deployUninstall', (_, appConfig) => {
+    try { assertObject(appConfig, 'appConfig'); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    return scriptService.deployUninstallScript(appConfig);
   });
   ipcMain.handle('scripts:getTemplates', () => scriptService.getTemplateList());
   ipcMain.handle('templates:getAll', () => templateService.getAll());
@@ -414,6 +428,31 @@ app.whenReady().then(() => {
       _deployingBundles.delete(bundleId);
     }
   });
+  ipcMain.handle('bundles:deployUninstall', async (_, bundleId) => {
+    try { assertString(bundleId, 'bundleId'); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    if (_deployingBundles.has(bundleId)) {
+      return { success: false, error: 'already_deploying' };
+    }
+    _deployingBundles.add(bundleId);
+    try {
+      const bundle = bundleService.get(bundleId);
+      if (!bundle) return { success: false, error: 'Bundle not found' };
+      const apps = appService.getAll();
+      const config = configService.getConfig();
+      const result = await bundleService.deployBundleUninstall(bundle, apps, config);
+      if (result.success) {
+        bundleService.update(bundleId, {
+          uninstallDeployedPath: result.path,
+          uninstallPreparedAt: new Date().toISOString()
+        });
+        activityLog.add('bundle_uninstall_prepare', { bundleName: bundle.name, version: bundle.version });
+      }
+      return result;
+    } finally {
+      _deployingBundles.delete(bundleId);
+    }
+  });
   ipcMain.handle('bundles:generateScript', (_, bundleId) => {
     try { assertString(bundleId, 'bundleId'); }
     catch (e) { return ''; }
@@ -422,6 +461,15 @@ app.whenReady().then(() => {
     const apps = appService.getAll();
     const config = configService.getConfig();
     return bundleService.generateBundleScript(bundle, apps, config);
+  });
+  ipcMain.handle('bundles:generateUninstallScript', (_, bundleId) => {
+    try { assertString(bundleId, 'bundleId'); }
+    catch (e) { return ''; }
+    const bundle = bundleService.get(bundleId);
+    if (!bundle) return '';
+    const apps = appService.getAll();
+    const config = configService.getConfig();
+    return bundleService.generateBundleUninstallScript(bundle, apps, config);
   });
 
   // ─── IPC Handlers: Activity Log ───────────────────────────────────

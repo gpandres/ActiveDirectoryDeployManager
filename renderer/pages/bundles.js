@@ -204,6 +204,16 @@ const BundlesPage = {
                 ${t('apps.script')}
               </button>
               ${isDeployed ? `
+                <button class="dropdown-item" onclick="BundlesPage.previewUninstallScript('${bundle.id}')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  ${this.tr('apps.uninstallScript', 'Script uninstall')}
+                </button>
+              ` : ''}
+              ${isDeployed ? `
+                <button class="dropdown-item dropdown-item--warning" onclick="BundlesPage.uninstallBundle('${bundle.id}')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  ${this.tr('apps.uninstallAction', 'Desinstalar')}
+                </button>
                 <button class="dropdown-item dropdown-item--warning" onclick="BundlesPage.disableDeploy('${bundle.id}')">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
                   ${t('apps.disable')}
@@ -239,6 +249,11 @@ const BundlesPage = {
 
   esc(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; },
 
+  tr(key, fallback) {
+    const value = t(key);
+    return value === key ? fallback : value;
+  },
+
   normalizeOUDNs(value) {
     const raw = Array.isArray(value)
       ? value
@@ -248,6 +263,18 @@ const BundlesPage = {
 
   getBundleOUs(bundle) {
     return this.normalizeOUDNs(bundle?.ouDNs || bundle?.ouDN);
+  },
+
+  canUninstallAppRecord(app) {
+    if (window.AppsPage && typeof window.AppsPage.canGenerateUninstall === 'function') {
+      return window.AppsPage.canGenerateUninstall(app);
+    }
+    const uninstallMode = String(app?.uninstall?.mode || '').trim().toLowerCase();
+    if (uninstallMode === 'manual') return !!String(app?.uninstall?.command || '').trim();
+    if (uninstallMode === 'winget') return !!String(app?.wingetId || '').trim();
+    if (uninstallMode === 'auto-msi') return String(app?.installerType || '').toLowerCase() === 'msi';
+    if (uninstallMode === 'auto-registry') return !!String(app?.name || '').trim();
+    return String(app?.template || '').toLowerCase() === 'winget' || String(app?.installerType || '').toLowerCase() === 'msi';
   },
 
   getOUName(dn) {
@@ -504,6 +531,7 @@ const BundlesPage = {
         <div class="card" style="padding:12px 16px; margin:0;">
           <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionPaths') || 'Rutas de Archivo'}</div>
           ${row(t('apps.detailDeployPath'), bundle.deployedPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(bundle.deployedPath) + '</span>' : '-')}
+          ${row(this.tr('apps.uninstallDeployPath', 'Ruta uninstall'), bundle.uninstallDeployedPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(bundle.uninstallDeployedPath) + '</span>' : '-')}
         </div>
 
         <!-- Targeting -->
@@ -520,7 +548,10 @@ const BundlesPage = {
       </div>
     `;
 
-    App.openModal(t('common.details') || 'Detalles del Bundle', body, `<button class="btn btn-primary" onclick="App.closeModal()">${t('common.close') || 'Cerrar'}</button>`);
+    App.openModal(t('common.details') || 'Detalles del Bundle', body, `
+      <button class="btn btn-secondary" onclick="App.closeModal()">${t('common.close') || 'Cerrar'}</button>
+      ${isDeployed ? `<button class="btn btn-warning" onclick="App.closeModal(); BundlesPage.uninstallBundle('${bundle.id}')">${this.tr('apps.uninstallAction', 'Desinstalar')}</button>` : ''}
+    `);
   },
 
   // ─── Flatten OU tree for select dropdowns ──────────
@@ -1239,5 +1270,101 @@ const BundlesPage = {
       </div>
       <pre class="code-preview">${this.esc(script)}</pre>
     `, `<button class="btn btn-secondary" onclick="App.closeModal()">${t('deployments.close')}</button>`);
+  },
+
+  async previewUninstallScript(id) {
+    const script = await window.api.bundles.generateUninstallScript(id);
+    App.openModal(this.tr('apps.uninstallScript', 'Script uninstall'), `
+      <div class="code-header">
+        <span>bundle_uninstall.ps1</span>
+      </div>
+      <pre class="code-preview">${this.esc(script)}</pre>
+    `, `<button class="btn btn-secondary" onclick="App.closeModal()">${t('deployments.close')}</button>`);
+  },
+
+  async uninstallBundle(id) {
+    const bundle = await window.api.bundles.get(id);
+    if (!bundle) return;
+
+    const allApps = await window.api.apps.getAll().catch(() => []);
+    const missingApps = bundle.apps.filter(entry => {
+      const app = allApps.find(item => item.id === entry.appId);
+      return !app || !this.canUninstallAppRecord(app);
+    });
+
+    if (missingApps.length > 0) {
+      App.toast(
+        `${this.tr('bundles.uninstallMissingApps', 'Hay apps del bundle sin desinstalacion configurada')}: ${missingApps.map(item => item.name).join(', ')}`,
+        'warning'
+      );
+      return;
+    }
+
+    const targetOUs = this.getBundleOUs(bundle);
+    App.openModal(this.tr('apps.uninstallAction', 'Desinstalar'), `
+      <p>${this.tr('bundles.uninstallPrepareMsg', 'Se preparará el script de desinstalacion para el bundle')} <strong>${this.esc(bundle.name)}</strong>.</p>
+      <p class="form-hint">${this.tr('bundles.uninstallReverseHint', 'Las apps del bundle se ejecutarán en orden inverso para evitar conflictos entre dependencias.')}</p>
+      ${bundle.gpoName ? `
+        <label class="checkbox-wrapper checkbox-panel" style="margin-top:12px;">
+          <input type="checkbox" class="checkbox-select" id="chk-bundle-switch-uninstall-gpo" checked>
+          <span>${this.tr('apps.uninstallSwitchGpo', 'Reapuntar la GPO al uninstall.ps1')}</span>
+        </label>
+      ` : ''}
+    `, `
+      <button class="btn btn-secondary" onclick="App.closeModal()">${t('common.cancel')}</button>
+      <button class="btn btn-warning" id="btn-confirm-bundle-uninstall">${this.tr('apps.uninstallAction', 'Desinstalar')}</button>
+    `);
+
+    document.getElementById('btn-confirm-bundle-uninstall').addEventListener('click', async () => {
+      const btn = document.getElementById('btn-confirm-bundle-uninstall');
+      btn.style.width = btn.offsetWidth + 'px';
+      btn.style.height = btn.offsetHeight + 'px';
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;"></span>';
+
+      try {
+        for (const entry of bundle.apps) {
+          const app = allApps.find(item => item.id === entry.appId);
+          if (!app) continue;
+          const result = await window.api.scripts.deployUninstall(app);
+          if (!result.success) {
+            throw new Error(`${app.name}: ${result.error || 'No se pudo preparar uninstall.ps1'}`);
+          }
+          await window.api.apps.update(app.id, {
+            uninstallDeployedPath: result.uninstallPath || result.path || ''
+          });
+        }
+
+        const bundleResult = await window.api.bundles.deployUninstall(id);
+        if (!bundleResult.success) {
+          throw new Error(bundleResult.error || 'No se pudo preparar el uninstall del bundle');
+        }
+
+        await window.api.bundles.update(id, {
+          uninstallDeployedPath: bundleResult.path,
+          uninstallPreparedAt: new Date().toISOString()
+        });
+
+        const switchGPO = document.getElementById('chk-bundle-switch-uninstall-gpo')?.checked ?? false;
+        if (bundle.gpoName && switchGPO && bundleResult.path) {
+          if (!App.rsatAvailable) {
+            App.toast(this.tr('apps.uninstallGpoSkipped', 'La GPO no se pudo actualizar porque RSAT/GPMC no está disponible.'), 'warning');
+          } else {
+            const gpoResult = await window.api.ad.createGPO(bundle.gpoName, bundleResult.path, targetOUs);
+            if (!gpoResult.success) {
+              App.toast(`${this.tr('apps.uninstallGpoWarn', 'El script uninstall se generó, pero no se pudo reapuntar la GPO.')}: ${gpoResult.error}`, 'warning');
+            }
+          }
+        }
+
+        App.toast(this.tr('bundles.uninstallPrepared', 'Bundle de desinstalacion preparado correctamente.'), 'success');
+        App.closeModal();
+        App.navigate('bundles');
+      } catch (err) {
+        App.toast(`${t('common.error')}: ${err.message}`, 'error');
+        btn.disabled = false;
+        btn.textContent = this.tr('apps.uninstallAction', 'Desinstalar');
+      }
+    });
   }
 };

@@ -385,3 +385,62 @@ describe('getTemplateList', () => {
     expect(generic?.noInstaller).toBe(false);
   });
 });
+
+describe('generateUninstallScript', () => {
+  it('builds MSI uninstall scripts that resolve ProductCode automatically', () => {
+    const script = svc.generateUninstallScript(base({
+      template: 'generic',
+      installerType: 'msi',
+      installerPath: 'C:\\temp\\agent.msi',
+      uninstall: { mode: 'auto-msi' }
+    }));
+
+    expect(script).toContain('Resolve-MsiProductCode');
+    expect(script).toContain('/x $ProductCode REBOOT=ReallySuppress /qn /norestart');
+    expect(script).toContain("Save-UninstallTracker -Result 'removed'");
+  });
+
+  it('builds registry uninstall scripts for generic EXE apps', () => {
+    const script = svc.generateUninstallScript(base({
+      template: 'generic',
+      installerType: 'exe',
+      uninstall: {
+        mode: 'auto-registry',
+        registryMatchName: 'PDF24 Creator',
+        registryMatchPublisher: 'geek software GmbH'
+      }
+    }));
+
+    expect(script).toContain('Resolve-RegistryUninstallEntry');
+    expect(script).toContain('QuietUninstallString');
+    expect(script).toContain('PDF24 Creator');
+    expect(script).toContain('geek software GmbH');
+  });
+
+  it('builds manual uninstall scripts when a command is provided', () => {
+    const script = svc.generateUninstallScript(base({
+      template: 'custom',
+      uninstall: {
+        mode: 'manual',
+        command: 'C:\\Program Files\\Tool\\uninstall.exe',
+        args: '/quiet /norestart'
+      }
+    }));
+
+    expect(script).toContain('C:\\Program Files\\Tool\\uninstall.exe');
+    expect(script).toContain('/quiet /norestart');
+    expect(script).toContain('Ejecutando comando manual');
+  });
+
+  it('builds winget uninstall scripts with the configured package id', () => {
+    const script = svc.generateUninstallScript(base({
+      template: 'winget',
+      wingetId: 'Mozilla.Firefox',
+      wingetSource: 'winget'
+    }));
+
+    expect(script).toContain('Resolve-WingetPath');
+    expect(script).toContain('Mozilla.Firefox');
+    expect(script).toContain("uninstall', '--id', $wingetId");
+  });
+});

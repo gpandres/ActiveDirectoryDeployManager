@@ -210,6 +210,7 @@ const AppsPage = {
   renderAppCard(app, templates) {
     const templateInfo = templates.find(tmpl => tmpl.id === app.template) || { name: app.templateDefinition?.name || app.template };
     const isDeployed = app.deployed !== false && app.deployedPath;
+    const canUninstall = this.canGenerateUninstall(app);
     const statusClass = isDeployed ? 'deployed' : 'pending';
     const statusText = isDeployed ? t('apps.deployedBadge') : t('apps.detailNotDeployed');
     const icon = this.templateIcon(app.template);
@@ -245,6 +246,12 @@ const AppsPage = {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 ${t('apps.script')}
               </button>
+              ${canUninstall ? `
+                <button class="dropdown-item" onclick="AppsPage.previewUninstallScript('${app.id}')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  ${this.tr('apps.uninstallScript', 'Script uninstall')}
+                </button>
+              ` : ''}
               ${isDeployed ? `
                 ${app.template === 'winget' ? `
                 <button class="dropdown-item" onclick="AppsPage.wingetUpdateDialog('${app.id}')">
@@ -257,6 +264,12 @@ const AppsPage = {
                   ${t('apps.quickUpdate')}
                 </button>
                 `}
+                ${canUninstall ? `
+                  <button class="dropdown-item dropdown-item--warning" onclick="AppsPage.uninstallApp('${app.id}')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    ${this.tr('apps.uninstallAction', 'Desinstalar')}
+                  </button>
+                ` : ''}
                 <button class="dropdown-item dropdown-item--warning" onclick="AppsPage.disableDeploy('${app.id}')">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
                   ${t('apps.disable')}
@@ -408,6 +421,87 @@ const AppsPage = {
     return 'exe';
   },
 
+  getDefaultUninstallMode(template = '', installerPath = '', installerType = '') {
+    const resolvedType = String(installerType || this.getInstallerTypeFromPath(installerPath, template)).toLowerCase();
+    if (template === 'winget') return 'winget';
+    if (resolvedType === 'msi') return 'auto-msi';
+    if (template === 'custom' || template === 'odt') return 'none';
+    return 'auto-registry';
+  },
+
+  normalizeUninstallState(source = {}, fallback = {}) {
+    const raw = source?.uninstall && typeof source.uninstall === 'object'
+      ? source.uninstall
+      : (fallback?.uninstall && typeof fallback.uninstall === 'object' ? fallback.uninstall : {});
+    const template = source?.template ?? fallback?.template ?? '';
+    const installerPath = source?.installerPath ?? fallback?.installerPath ?? '';
+    const installerType = source?.installerType ?? fallback?.installerType ?? '';
+    const mode = String(
+      raw.mode
+      || source.uninstallMode
+      || fallback.uninstallMode
+      || this.getDefaultUninstallMode(template, installerPath, installerType)
+    ).trim().toLowerCase();
+
+    return {
+      mode,
+      command: String(raw.command ?? source.uninstallCommand ?? '').trim(),
+      args: String(raw.args ?? source.uninstallArgs ?? '').trim(),
+      registryMatchName: String(raw.registryMatchName ?? source.name ?? fallback.name ?? '').trim(),
+      registryMatchPublisher: String(raw.registryMatchPublisher ?? '').trim(),
+      productCode: String(raw.productCode ?? '').trim()
+    };
+  },
+
+  getUninstallModeLabel(mode) {
+    const labels = {
+      none: this.tr('apps.uninstallModeNone', 'Sin desinstalacion'),
+      'auto-msi': this.tr('apps.uninstallModeMsi', 'MSI automatico'),
+      'auto-registry': this.tr('apps.uninstallModeRegistry', 'Auto por registro'),
+      manual: this.tr('apps.uninstallModeManual', 'Comando manual'),
+      winget: this.tr('apps.uninstallModeWinget', 'Winget')
+    };
+    return labels[mode] || mode || this.tr('apps.uninstallModeNone', 'Sin desinstalacion');
+  },
+
+  canGenerateUninstall(appLike) {
+    const uninstall = this.normalizeUninstallState(appLike, appLike);
+    switch (uninstall.mode) {
+      case 'winget':
+        return !!String(appLike?.wingetId || '').trim();
+      case 'manual':
+        return !!uninstall.command;
+      case 'auto-msi':
+        return this.getInstallerTypeFromPath(appLike?.installerPath, appLike?.template) === 'msi' || !!uninstall.productCode;
+      case 'auto-registry':
+        return !!(uninstall.productCode || uninstall.registryMatchName || uninstall.registryMatchPublisher || appLike?.name);
+      default:
+        return false;
+    }
+  },
+
+  getUninstallSummary(appLike) {
+    const uninstall = this.normalizeUninstallState(appLike, appLike);
+    switch (uninstall.mode) {
+      case 'manual':
+        return uninstall.command
+          ? `${this.getUninstallModeLabel(uninstall.mode)} · ${uninstall.command}${uninstall.args ? ` ${uninstall.args}` : ''}`
+          : this.getUninstallModeLabel(uninstall.mode);
+      case 'auto-registry':
+        return uninstall.registryMatchPublisher
+          ? `${this.getUninstallModeLabel(uninstall.mode)} · ${uninstall.registryMatchName} / ${uninstall.registryMatchPublisher}`
+          : `${this.getUninstallModeLabel(uninstall.mode)} · ${uninstall.registryMatchName || appLike?.name || '-'}`;
+      case 'winget':
+        return `${this.getUninstallModeLabel(uninstall.mode)} · ${appLike?.wingetId || '-'}`;
+      case 'auto-msi':
+        return uninstall.productCode
+          ? `${this.getUninstallModeLabel(uninstall.mode)} · ${uninstall.productCode}`
+          : this.getUninstallModeLabel(uninstall.mode);
+      default:
+        return this.getUninstallModeLabel(uninstall.mode);
+    }
+  },
+
   // Returns the installer path inside the app's share folder, or null if
   // the app isn't deployed / no installer is present on the share.
   async resolveSharedInstaller(appName, preferredInstallerPath = '') {
@@ -419,6 +513,7 @@ const AppsPage = {
       const installers = result.data.filter(f =>
         this.isSupportedInstallerExtension(f.extension)
         && String(f.name || '').toLowerCase() !== 'install.ps1'
+        && String(f.name || '').toLowerCase() !== 'uninstall.ps1'
       );
       const installer = installers.find(f => String(f.name || '').toLowerCase() === preferredName) || installers[0];
       if (!installer) return null;
@@ -495,6 +590,8 @@ const AppsPage = {
     const paramsHtml = app.customParams && Object.keys(app.customParams).length > 0
       ? Object.entries(app.customParams).map(([k, v]) => row(this.esc(k), this.esc(String(v)))).join('')
       : '';
+    const uninstallSummary = this.getUninstallSummary(app);
+    const canUninstall = this.canGenerateUninstall(app);
 
     const body = `
       <div style="display:flex; flex-direction:column; gap:16px;">
@@ -529,6 +626,7 @@ const AppsPage = {
               : row(t('apps.detailInstallerType'), this.esc((app.installerType || 'exe').toUpperCase()))
           }
           ${(app.template !== 'winget' && app.template !== 'odt') ? row(t('apps.detailSilentArgs'), app.silentArgs ? '<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">' + this.esc(app.silentArgs) + '</code>' : '-') : ''}
+          ${row(this.tr('apps.uninstallMode', 'Modo de desinstalacion'), this.esc(uninstallSummary))}
           ${row(t('apps.detailVersion'), this.esc(app.version || '1.0.0'))}
           ${row(t('apps.detailNotifyUser'), app.notifyUser ? '&#10003;' : '&#10007;')}
         </div>
@@ -539,6 +637,7 @@ const AppsPage = {
           ${(app.template !== 'winget' && app.template !== 'odt') ? row(t('apps.detailInstaller'), displayInstallerPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(displayInstallerPath) + '</span>' : '-') : ''}
           ${app.configXmlPath ? row(t('apps.detailConfigXml'), '<span style="font-family:monospace; font-size:12px;">' + this.esc(app.configXmlPath) + '</span>') : ''}
           ${row(t('apps.detailDeployPath'), app.deployedPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(app.deployedPath) + '</span>' : '-')}
+          ${row(this.tr('apps.uninstallDeployPath', 'Ruta uninstall'), app.uninstallDeployedPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(app.uninstallDeployedPath) + '</span>' : '-')}
           ${app.lastDeployHash ? row(t('apps.detailHash'), '<span style="font-family:monospace; font-size:11px;">' + this.esc(app.lastDeployHash.substring(0, 16)) + '...</span>') : ''}
         </div>
 
@@ -588,6 +687,7 @@ const AppsPage = {
 
     App.openModal(t('apps.detailTitle'), body, `
       <button class="btn btn-secondary" onclick="App.closeModal()">${t('common.close')}</button>
+      ${canUninstall && isDeployed ? `<button class="btn btn-warning" onclick="App.closeModal(); AppsPage.uninstallApp('${app.id}')">${this.tr('apps.uninstallAction', 'Desinstalar')}</button>` : ''}
       <button class="btn btn-secondary" onclick="App.closeModal(); AppsPage.editApp('${app.id}')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         ${t('apps.edit')}
@@ -1422,6 +1522,16 @@ const AppsPage = {
       version: existingApp?.version || '1.0.0',
       suggestedVersion: '',
       notifyUser: existingApp?.notifyUser || false,
+      uninstallMode: this.normalizeUninstallState(existingApp || {}, {
+        template: existingApp?.template || '',
+        installerPath: initialInstallerPath || existingApp?.installerPath || '',
+        installerType: existingApp?.installerType || ''
+      }).mode,
+      uninstallCommand: this.normalizeUninstallState(existingApp || {}, existingApp || {}).command,
+      uninstallArgs: this.normalizeUninstallState(existingApp || {}, existingApp || {}).args,
+      uninstallRegistryName: this.normalizeUninstallState(existingApp || {}, existingApp || {}).registryMatchName || (existingApp?.name || ''),
+      uninstallRegistryPublisher: this.normalizeUninstallState(existingApp || {}, existingApp || {}).registryMatchPublisher,
+      uninstallProductCode: this.normalizeUninstallState(existingApp || {}, existingApp || {}).productCode,
       wizardWingetResults: [],
       wizardWingetSearching: false,
       _wizardWingetTimer: null,
@@ -1861,6 +1971,79 @@ const AppsPage = {
         }
 
         body += `
+          ${(() => {
+            const installerType = this.getInstallerTypeFromPath(state.installerPath, state.template);
+            const options = [];
+            if (state.template === 'winget') {
+              options.push(['winget', this.tr('apps.uninstallModeWinget', 'Winget')]);
+              options.push(['none', this.tr('apps.uninstallModeNone', 'Sin desinstalacion')]);
+            } else if (installerType === 'msi') {
+              options.push(['auto-msi', this.tr('apps.uninstallModeMsi', 'MSI automatico')]);
+              options.push(['auto-registry', this.tr('apps.uninstallModeRegistry', 'Auto por registro')]);
+              options.push(['manual', this.tr('apps.uninstallModeManual', 'Comando manual')]);
+              options.push(['none', this.tr('apps.uninstallModeNone', 'Sin desinstalacion')]);
+            } else if (state.template === 'custom' || state.template === 'odt') {
+              options.push(['manual', this.tr('apps.uninstallModeManual', 'Comando manual')]);
+              options.push(['none', this.tr('apps.uninstallModeNone', 'Sin desinstalacion')]);
+            } else {
+              options.push(['auto-registry', this.tr('apps.uninstallModeRegistry', 'Auto por registro')]);
+              options.push(['manual', this.tr('apps.uninstallModeManual', 'Comando manual')]);
+              options.push(['none', this.tr('apps.uninstallModeNone', 'Sin desinstalacion')]);
+            }
+
+            const selectedMode = state.uninstallMode || this.getDefaultUninstallMode(state.template, state.installerPath, installerType);
+            return `
+              <div class="card" style="padding:14px 16px; margin:0 0 14px 0;">
+                <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:10px;">${this.tr('apps.uninstallSection', 'Desinstalacion')}</div>
+                <div class="form-group">
+                  <label class="form-label">${this.tr('apps.uninstallMode', 'Modo de desinstalacion')}</label>
+                  <select class="form-select" id="wiz-uninstall-mode">
+                    ${options.map(([value, label]) => `<option value="${value}" ${selectedMode === value ? 'selected' : ''}>${this.esc(label)}</option>`).join('')}
+                  </select>
+                  <p class="form-hint">${this.tr('apps.uninstallHint', 'Define como se va a preparar el script uninstall.ps1 para esta app.')}</p>
+                </div>
+                ${selectedMode === 'auto-msi' ? `
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label">${this.tr('apps.uninstallProductCode', 'ProductCode MSI')}</label>
+                    <input class="form-input" id="wiz-uninstall-product-code" value="${this.esc(state.uninstallProductCode || '')}" placeholder="{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}">
+                    <p class="form-hint">${this.tr('apps.uninstallProductCodeHint', 'Opcional. Si lo dejas vacio, se intentara resolver automaticamente desde el MSI o el registro del equipo cliente.')}</p>
+                  </div>
+                ` : ''}
+                ${selectedMode === 'auto-registry' ? `
+                  <div class="form-group">
+                    <label class="form-label">${this.tr('apps.uninstallRegistryName', 'Nombre a buscar en registro')}</label>
+                    <input class="form-input" id="wiz-uninstall-reg-name" value="${this.esc(state.uninstallRegistryName || state.name || '')}" placeholder="Nombre del programa instalado">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label">${this.tr('apps.uninstallRegistryPublisher', 'Publisher opcional')}</label>
+                    <input class="form-input" id="wiz-uninstall-reg-publisher" value="${this.esc(state.uninstallRegistryPublisher || '')}" placeholder="Fabricante / Publisher">
+                    <p class="form-hint">${this.tr('apps.uninstallRegistryHint', 'Se usara QuietUninstallString o UninstallString de la app detectada en el registro de Windows.')}</p>
+                  </div>
+                ` : ''}
+                ${selectedMode === 'manual' ? `
+                  <div class="form-group">
+                    <label class="form-label">${this.tr('apps.uninstallCommand', 'Ruta o comando')}</label>
+                    <input class="form-input" id="wiz-uninstall-command" value="${this.esc(state.uninstallCommand || '')}" placeholder="C:\\Program Files\\App\\uninstall.exe">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label">${this.tr('apps.uninstallArgs', 'Argumentos')}</label>
+                    <input class="form-input" id="wiz-uninstall-args" value="${this.esc(state.uninstallArgs || '')}" placeholder="/S /quiet">
+                    <p class="form-hint">${this.tr('apps.uninstallManualHint', 'Usa esta opcion para EXE, scripts personalizados u otros instaladores que requieran un comando especifico.')}</p>
+                  </div>
+                ` : ''}
+                ${selectedMode === 'winget' ? `
+                  <div style="padding:10px 12px; border-radius:8px; background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.18); font-size:12px; color:var(--text-secondary);">
+                    ${this.tr('apps.uninstallWingetHint', 'Se generara automaticamente winget uninstall con el paquete seleccionado.')} <code>${this.esc(state.wingetId || '-')}</code>
+                  </div>
+                ` : ''}
+                ${selectedMode === 'none' ? `
+                  <div style="padding:10px 12px; border-radius:8px; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.18); font-size:12px; color:var(--text-secondary);">
+                    ${this.tr('apps.uninstallNoneHint', 'Esta app se desplegara sin script de desinstalacion. Podras cambiarlo mas tarde desde Editar app.')}
+                  </div>
+                ` : ''}
+              </div>
+            `;
+          })()}
           <div style="display:flex;gap:12px">
             <div class="form-group" style="flex:0 0 220px">
               <label class="form-label">${t('apps.version')}</label>
@@ -1952,7 +2135,7 @@ const AppsPage = {
           <div class="form-group mb-md">
             <label class="checkbox-wrapper checkbox-panel checkbox-panel--accent">
               <input type="checkbox" class="checkbox-select" id="wiz-create-gpo" ${state.createGPO ? 'checked' : ''}>
-              <span style="font-weight:600;color:var(--primary-color)">âœ¨ ${t('apps.createGpoCheckbox')}</span>
+              <span style="font-weight:600;color:var(--primary-color)">&#10024; ${t('apps.createGpoCheckbox')}</span>
             </label>
           </div>
 
@@ -2047,11 +2230,13 @@ const AppsPage = {
           state.wingetId = '';
           state.wingetSource = 'winget';
           state.name = 'Microsoft Office';
+          state.uninstallMode = 'none';
         } else if (catalogType === 'winget') {
           state.template = 'winget';
           state.wingetId = card.dataset.wingetId || '';
           state.wingetSource = card.dataset.wingetSource || 'winget';
           state.name = card.dataset.appName || '';
+          state.uninstallMode = 'winget';
           if (card.dataset.appVersion) state.version = card.dataset.appVersion;
           selectedPackage = {
             wingetId: state.wingetId,
@@ -2086,6 +2271,11 @@ const AppsPage = {
         // Auto-fill installer from template pre-configured installer
         const preInstaller = state.templateInstallers?.[state.template];
         if (preInstaller && !state.installerPath) state.installerPath = preInstaller;
+        state.uninstallMode = this.getDefaultUninstallMode(
+          state.template,
+          state.installerPath,
+          this.getInstallerTypeFromPath(state.installerPath, state.template)
+        );
         // Stay on step 1 so the user confirms with "Next" from the New App wizard.
         renderWizard();
       });
@@ -2211,6 +2401,16 @@ const AppsPage = {
             App.toast(this.tr('apps.customTemplateRequiredFile', 'Selecciona todos los archivos obligatorios de la plantilla.'), 'warning');
             return;
           }
+          if (state.uninstallMode === 'manual' && !String(state.uninstallCommand || '').trim()) {
+            App.toast(this.tr('apps.uninstallCommandRequired', 'Define el comando de desinstalacion manual.'), 'warning');
+            document.getElementById('wiz-uninstall-command')?.focus();
+            return;
+          }
+          if (state.uninstallMode === 'auto-registry' && !String(state.uninstallRegistryName || state.name || '').trim()) {
+            App.toast(this.tr('apps.uninstallRegistryRequired', 'Indica el nombre a buscar en el registro para desinstalar.'), 'warning');
+            document.getElementById('wiz-uninstall-reg-name')?.focus();
+            return;
+          }
           const requiresConfigXml = ['office', 'sap-gui'].includes(state.template);
           if (requiresConfigXml && !String(state.configXmlPath || '').trim()) {
             App.toast(this.tr('apps.customTemplateRequiredXml', 'Selecciona el XML requerido para esta plantilla.'), 'warning');
@@ -2254,7 +2454,15 @@ const AppsPage = {
           } else if (file.toLowerCase().endsWith('.ps1')) {
              if (!state.silentArgs || state.silentArgs === '/S' || state.silentArgs === '/qn /norestart' || state.silentArgs === '/qn') {
                  state.silentArgs = '';
-             }
+              }
+          }
+
+          if (!['manual', 'none', 'winget'].includes(state.uninstallMode)) {
+            state.uninstallMode = this.getDefaultUninstallMode(
+              state.template,
+              file,
+              this.getInstallerTypeFromPath(file, state.template)
+            );
           }
 
           // Auto-suggest name from filename â€” only if user hasn't typed one yet
@@ -2334,6 +2542,22 @@ const AppsPage = {
         }
       });
     });
+
+    const uninstallModeSelect = document.getElementById('wiz-uninstall-mode');
+    if (uninstallModeSelect) {
+      uninstallModeSelect.addEventListener('change', () => {
+        this.saveStepData(state, templates);
+        state.uninstallMode = uninstallModeSelect.value;
+        if (state.uninstallMode === 'auto-msi') {
+          state.uninstallCommand = '';
+          state.uninstallArgs = '';
+        }
+        if (state.uninstallMode !== 'auto-registry') {
+          state.uninstallRegistryPublisher = state.uninstallRegistryPublisher || '';
+        }
+        renderWizard();
+      });
+    }
 
     // Silent args helper button
     const btnArgsHelp = document.getElementById('btn-show-args-help');
@@ -2417,6 +2641,19 @@ const AppsPage = {
 
     const silentInput = document.getElementById('wiz-silentArgs');
     if (silentInput) state.silentArgs = silentInput.value;
+
+    const uninstallMode = document.getElementById('wiz-uninstall-mode');
+    if (uninstallMode) state.uninstallMode = uninstallMode.value;
+    const uninstallCommand = document.getElementById('wiz-uninstall-command');
+    if (uninstallCommand) state.uninstallCommand = uninstallCommand.value;
+    const uninstallArgs = document.getElementById('wiz-uninstall-args');
+    if (uninstallArgs) state.uninstallArgs = uninstallArgs.value;
+    const uninstallRegName = document.getElementById('wiz-uninstall-reg-name');
+    if (uninstallRegName) state.uninstallRegistryName = uninstallRegName.value;
+    const uninstallRegPublisher = document.getElementById('wiz-uninstall-reg-publisher');
+    if (uninstallRegPublisher) state.uninstallRegistryPublisher = uninstallRegPublisher.value;
+    const uninstallProductCode = document.getElementById('wiz-uninstall-product-code');
+    if (uninstallProductCode) state.uninstallProductCode = uninstallProductCode.value;
 
     const xmlInput = document.getElementById('wiz-xml');
     if (xmlInput) {
@@ -2827,6 +3064,18 @@ const AppsPage = {
               : row(t('apps.detailInstallerType'), installerType)
           }
           ${(state.template !== 'winget' && state.template !== 'odt') ? row(t('apps.detailSilentArgs'), state.silentArgs ? '<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">' + this.esc(state.silentArgs) + '</code>' : '-') : ''}
+          ${row(this.tr('apps.uninstallMode', 'Modo de desinstalacion'), this.esc(this.getUninstallSummary({
+            ...state,
+            installerType: this.getInstallerTypeFromPath(state.installerPath, state.template),
+            uninstall: {
+              mode: state.uninstallMode,
+              command: state.uninstallCommand,
+              args: state.uninstallArgs,
+              registryMatchName: state.uninstallRegistryName,
+              registryMatchPublisher: state.uninstallRegistryPublisher,
+              productCode: state.uninstallProductCode
+            }
+          })))}
           ${row(t('apps.detailVersion'), this.esc(state.version || '1.0.0'))}
           ${row(t('apps.detailNotifyUser'), state.notifyUser ? '&#10003;' : '&#10007;')}
         </div>
@@ -2901,6 +3150,18 @@ const AppsPage = {
 
       const templateDefinition = await this.fetchTemplateDefinition(state.template);
       state.templateDefinition = templateDefinition || state.templateDefinition || null;
+      const uninstallConfig = {
+        mode: state.uninstallMode || this.getDefaultUninstallMode(
+          state.template,
+          state.installerPath,
+          this.getInstallerTypeFromPath(state.installerPath, state.template)
+        ),
+        command: state.uninstallCommand || '',
+        args: state.uninstallArgs || '',
+        registryMatchName: state.uninstallRegistryName || state.name.trim(),
+        registryMatchPublisher: state.uninstallRegistryPublisher || '',
+        productCode: state.uninstallProductCode || ''
+      };
 
       const appData = {
         name: state.name.trim(),
@@ -2916,7 +3177,8 @@ const AppsPage = {
         ouDN: state.selectedOUs?.[0] || '',
         assignedOUs: Array.isArray(state.selectedOUs) ? state.selectedOUs : [],
         version: state.version || '1.0.0',
-        notifyUser: state.notifyUser || false
+        notifyUser: state.notifyUser || false,
+        uninstall: uninstallConfig
       };
 
       // Include wingetId for winget templates
@@ -2970,6 +3232,7 @@ const AppsPage = {
         await window.api.apps.update(app.id, {
           deployed: true,
           deployedPath: deployResult.path,
+          uninstallDeployedPath: deployResult.uninstallPath || '',
           lastDeployHash: deployResult.hash || ''
         });
         // Log activity
@@ -3091,6 +3354,24 @@ const AppsPage = {
     `);
   },
 
+  async previewUninstallScript(id) {
+    const app = await window.api.apps.get(id);
+    if (!app) return;
+    if (!this.canGenerateUninstall(app)) {
+      App.toast(this.tr('apps.uninstallNotConfigured', 'Esta app no tiene una desinstalacion configurada.'), 'warning');
+      return;
+    }
+
+    const script = await window.api.scripts.generateUninstall(app);
+    App.openModal(`${this.tr('apps.uninstallScript', 'Script uninstall')}: ${app.name}`, `
+      <div class="code-header">
+        <span>&#128196; uninstall.ps1</span>
+        <button class="btn btn-ghost btn-sm" onclick="AppsPage.copyScript()">${t('apps.copyBtn')}</button>
+      </div>
+      <pre class="code-preview" id="script-preview">${this.esc(script)}</pre>
+    `);
+  },
+
   async deployApp(id) {
     const app = await window.api.apps.get(id);
     if (!app) return;
@@ -3098,7 +3379,11 @@ const AppsPage = {
     try {
       const result = await window.api.scripts.deploy(app);
       if (result.success) {
-        await window.api.apps.update(id, { deployed: true, deployedPath: result.path });
+        await window.api.apps.update(id, {
+          deployed: true,
+          deployedPath: result.path,
+          uninstallDeployedPath: result.uninstallPath || ''
+        });
         App.toast(t('apps.deployedToPath').replace('{app}', app.name).replace('{path}', result.path), 'success');
         App.navigate('apps');
       } else {
@@ -3108,6 +3393,83 @@ const AppsPage = {
     } catch (err) {
       App.toast(t('apps.deployError') + ' ' + err.message, 'error');
     }
+  },
+
+  async uninstallApp(id) {
+    const app = await window.api.apps.get(id);
+    if (!app) return;
+    if (!this.canGenerateUninstall(app)) {
+      App.toast(this.tr('apps.uninstallNotConfigured', 'Esta app no tiene una desinstalacion configurada.'), 'warning');
+      return;
+    }
+
+    const hasGPO = !!app.gpoName;
+    const targetOUs = Array.isArray(app.assignedOUs) && app.assignedOUs.length > 0
+      ? app.assignedOUs
+      : (app.ouDN ? [app.ouDN] : []);
+
+    App.openModal(this.tr('apps.uninstallAction', 'Desinstalar'), `
+      <p>${this.tr('apps.uninstallPrepareMsg', 'Se preparará el script de desinstalacion para')} <strong>${this.esc(app.name)}</strong>.</p>
+      <div class="card" style="padding:12px 14px; margin:12px 0 0 0;">
+        <div style="font-size:12px; color:var(--text-secondary); margin-bottom:6px;">${this.tr('apps.uninstallMode', 'Modo de desinstalacion')}</div>
+        <div style="font-weight:600; color:var(--text-primary);">${this.esc(this.getUninstallSummary(app))}</div>
+      </div>
+      ${hasGPO ? `
+        <label class="checkbox-wrapper checkbox-panel" style="margin-top:12px;">
+          <input type="checkbox" class="checkbox-select" id="chk-switch-uninstall-gpo" checked>
+          <span>${this.tr('apps.uninstallSwitchGpo', 'Reapuntar la GPO al uninstall.ps1')}</span>
+        </label>
+        <p class="form-hint">${this.tr('apps.uninstallSwitchGpoHint', 'La GPO conservará sus enlaces OU y ejecutará ahora el script de desinstalacion.')}</p>
+      ` : ''}
+    `, `
+      <button class="btn btn-secondary" onclick="App.closeModal()">${t('common.cancel')}</button>
+      <button class="btn btn-warning" id="btn-confirm-uninstall-app">${this.tr('apps.uninstallAction', 'Desinstalar')}</button>
+    `);
+
+    document.getElementById('btn-confirm-uninstall-app').addEventListener('click', async () => {
+      const btn = document.getElementById('btn-confirm-uninstall-app');
+      btn.style.width = btn.offsetWidth + 'px';
+      btn.style.height = btn.offsetHeight + 'px';
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;"></span>';
+
+      try {
+        const deployResult = await window.api.scripts.deployUninstall(app);
+        if (!deployResult.success) {
+          if (App.isShareError(deployResult.error)) { App.handleShareError(); return; }
+          throw new Error(deployResult.error || 'No se pudo preparar uninstall.ps1');
+        }
+
+        const uninstallPath = deployResult.uninstallPath || deployResult.path || '';
+        await window.api.apps.update(app.id, {
+          uninstallDeployedPath: uninstallPath
+        });
+
+        const switchGPO = document.getElementById('chk-switch-uninstall-gpo')?.checked ?? false;
+        if (hasGPO && switchGPO && uninstallPath) {
+          if (!App.rsatAvailable) {
+            App.toast(this.tr('apps.uninstallGpoSkipped', 'La GPO no se pudo actualizar porque RSAT/GPMC no está disponible.'), 'warning');
+          } else {
+            const gpoResult = await window.api.ad.createGPO(app.gpoName, uninstallPath, targetOUs);
+            if (!gpoResult.success) {
+              App.toast(`${this.tr('apps.uninstallGpoWarn', 'El script uninstall se generó, pero no se pudo reapuntar la GPO.')}: ${gpoResult.error}`, 'warning');
+            }
+          }
+        }
+
+        await window.api.activity.add('app_uninstall_prepare', {
+          appName: app.name,
+          mode: this.normalizeUninstallState(app, app).mode
+        });
+        App.toast(this.tr('apps.uninstallPrepared', 'Script de desinstalacion preparado correctamente.'), 'success');
+        App.closeModal();
+        App.navigate('apps');
+      } catch (err) {
+        App.toast(`${t('common.error')}: ${err.message}`, 'error');
+        btn.disabled = false;
+        btn.textContent = this.tr('apps.uninstallAction', 'Desinstalar');
+      }
+    });
   },
 
   async disableDeploy(id) {

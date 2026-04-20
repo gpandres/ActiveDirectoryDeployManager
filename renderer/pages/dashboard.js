@@ -266,9 +266,12 @@ const DashboardPage = {
     const colors = {
       app_create: 'var(--accent-secondary-dim)',
       app_update: 'var(--accent-info-dim)',
+      app_uninstall_prepare: 'var(--accent-warning-dim)',
+      app_disable: 'var(--accent-warning-dim)',
       app_delete: 'var(--accent-danger-dim)',
       bundle_create: 'var(--accent-primary-dim)',
       bundle_deploy: 'var(--accent-secondary-dim)',
+      bundle_uninstall_prepare: 'var(--accent-warning-dim)',
       bundle_update: 'var(--accent-info-dim)',
       bundle_delete: 'var(--accent-danger-dim)',
       bundle_disable: 'var(--accent-warning-dim)',
@@ -280,23 +283,27 @@ const DashboardPage = {
   },
 
   getActivityIcon(action) {
-    if (action.includes('create')) return '➕';
-    if (action.includes('update')) return '✏️';
-    if (action.includes('delete')) return '🗑️';
-    if (action.includes('deploy')) return '🚀';
-    if (action.includes('disable')) return '⏹️';
-    if (action.includes('export')) return '📤';
-    if (action.includes('import')) return '📥';
-    return '📋';
+    if (action.includes('uninstall')) return '&#128465;';
+    if (action.includes('create')) return '&#10133;';
+    if (action.includes('update')) return '&#9999;&#65039;';
+    if (action.includes('delete')) return '&#128465;';
+    if (action.includes('deploy')) return '&#128640;';
+    if (action.includes('disable')) return '&#9209;&#65039;';
+    if (action.includes('export')) return '&#128228;';
+    if (action.includes('import')) return '&#128229;';
+    return '&#128203;';
   },
 
   getActivityText(entry) {
     const texts = {
       app_create: `App creada: <strong>${entry.appName || '?'}</strong> v${entry.version || '1.0.0'}`,
       app_update: `App actualizada: <strong>${entry.appName || '?'}</strong>`,
+      app_uninstall_prepare: `Desinstalacion preparada: <strong>${entry.appName || '?'}</strong>`,
+      app_disable: `App deshabilitada: <strong>${entry.appName || '?'}</strong>`,
       app_delete: `App eliminada: <strong>${entry.appName || '?'}</strong>`,
       bundle_create: `Bundle creado: <strong>${entry.bundleName || '?'}</strong> (${entry.appCount || 0} apps)`,
       bundle_deploy: `Bundle desplegado: <strong>${entry.bundleName || '?'}</strong> v${entry.version || '?'}`,
+      bundle_uninstall_prepare: `Desinstalacion de bundle preparada: <strong>${entry.bundleName || '?'}</strong>`,
       bundle_update: `Bundle actualizado: <strong>${entry.bundleName || '?'}</strong>`,
       bundle_delete: `Bundle eliminado`,
       bundle_disable: `Bundle deshabilitado`,
