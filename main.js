@@ -1,7 +1,33 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const fs = require('fs');
 const path = require('path');
 
 let mainWindow;
+
+function getCurrentAppVersion() {
+  try {
+    const currentVersion = app.getVersion();
+    if (typeof currentVersion === 'string' && currentVersion.trim()) {
+      return currentVersion.trim();
+    }
+  } catch (err) {
+    console.warn('Unable to read app version from Electron metadata:', err.message);
+  }
+
+  try {
+    const packageJsonPath = path.join(__dirname, 'package.json');
+    if (fs.existsSync(packageJsonPath)) {
+      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+      if (typeof packageJson.version === 'string' && packageJson.version.trim()) {
+        return packageJson.version.trim();
+      }
+    }
+  } catch (err) {
+    console.warn('Unable to read app version from package.json:', err.message);
+  }
+
+  return '0.0.0';
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -62,6 +88,7 @@ app.whenReady().then(() => {
   const catalogService = require('./services/catalog-service');
   const templateService = require('./services/template-service');
   const shareHealth = require('./services/share-health');
+  const updateService = require('./services/update-service');
 
   console.log('Initialize i18n...');
   i18nService.initialize();
@@ -179,6 +206,15 @@ app.whenReady().then(() => {
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
     return adService.checkGPOConflicts(ouDN);
   });
+  ipcMain.handle('ad:getManagedGPOLinks', (_, gpoNames, ouDNs = []) => {
+    try {
+      assertArray(gpoNames, 'gpoNames');
+      assertArray(ouDNs, 'ouDNs');
+    } catch (e) {
+      return { success: false, error: 'Invalid arguments', data: {} };
+    }
+    return adService.getManagedGPOLinks(gpoNames, ouDNs);
+  });
 
   // ─── IPC Handlers: App Service ───────────────────────────────────
   ipcMain.handle('apps:getAll', () => appService.getAll());
@@ -208,10 +244,16 @@ app.whenReady().then(() => {
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
     return appService.bulkAssignGPO(ids, gpoName);
   });
-  ipcMain.handle('apps:applyAssignmentPlan', (_, plan) => {
+  ipcMain.handle('apps:applyAssignmentPlan', (_, plan, allVisibleOUs) => {
     try { assertObject(plan, 'plan'); }
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
-    return appService.applyAssignmentPlan(plan);
+    const safeOUs = Array.isArray(allVisibleOUs) ? allVisibleOUs : [];
+    return appService.applyAssignmentPlan(plan, safeOUs);
+  });
+  ipcMain.handle('apps:reconcileManagedAssignments', (_, ouDNs = []) => {
+    try { assertArray(ouDNs, 'ouDNs'); }
+    catch (e) { return { success: false, error: 'Invalid arguments', data: [], links: {} }; }
+    return appService.reconcileManagedAssignments(ouDNs);
   });
   ipcMain.handle('apps:getInstallerVersion', (_, filePath) => {
     try { assertString(filePath, 'filePath', 1024); }
@@ -367,6 +409,18 @@ app.whenReady().then(() => {
     try { assertObject(reference, 'reference'); }
     catch (e) { return { wingetId: '', wingetSource: 'winget', latestVersion: null, name: '', available: false }; }
     return catalogService.resolvePackage(reference);
+  });
+  ipcMain.handle('updates:getCurrent', () => ({
+    currentVersion: getCurrentAppVersion()
+  }));
+  ipcMain.handle('updates:check', async () => updateService.checkForUpdates(getCurrentAppVersion()));
+  ipcMain.handle('updates:openReleasePage', async () => {
+    try {
+      await shell.openExternal(updateService.RELEASE_PAGE_URL);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   });
 
   // ─── IPC Handlers: File Service ──────────────────────────────────

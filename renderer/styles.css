@@ -2273,6 +2273,19 @@ tr:hover td { background: rgba(108, 99, 255, 0.03); }
   color: white;
   font-size: 10px;
   font-weight: 700;
+  flex-shrink: 0;
+}
+.tree-badge-descendant {
+  background: var(--accent-warning);
+  color: #1a1a1a;
+  margin-left: 2px;
+  position: relative;
+}
+.tree-badge-descendant::before {
+  content: "+";
+  margin-right: 1px;
+  font-weight: 800;
+  opacity: 0.85;
 }
 
 /* Panel header */
@@ -2529,10 +2542,34 @@ tr:hover td { background: rgba(108, 99, 255, 0.03); }
   cursor: pointer;
   border-bottom: 1px solid var(--border-color);
   transition: background 0.12s;
+  position: relative;
 }
 .ou-picker-row:last-child { border-bottom: none; }
 .ou-picker-row:hover { background: var(--bg-card-hover); }
 .ou-picker-row.checked { background: var(--accent-primary-dim); }
+.ou-picker-siblings-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  flex-shrink: 0;
+  transition: opacity 0.12s, background 0.12s, color 0.12s, border-color 0.12s;
+}
+.ou-picker-row:hover .ou-picker-siblings-btn,
+.ou-picker-siblings-btn:focus-visible { opacity: 1; }
+.ou-picker-siblings-btn:hover {
+  background: var(--accent-primary-dim);
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
 .ou-picker-name {
   flex: 1;
   font-size: 13px;

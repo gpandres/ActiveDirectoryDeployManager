@@ -21,7 +21,8 @@ const DEFAULT_CONFIG = {
   preferredDC: '',   // leave empty to auto-use PDC emulator; set to a DC hostname for multi-DC environments
   language: 'es',
   firstRun: true,
-  shareId: ''
+  shareId: '',
+  dismissedAppUpdateVersion: ''
 };
 
 const DANGEROUS_KEYS = /^(__proto__|constructor|prototype)$/;

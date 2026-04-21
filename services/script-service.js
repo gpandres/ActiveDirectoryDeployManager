@@ -128,13 +128,17 @@ const scriptService = {
 
   generateScript(appConfig) {
     const customTemplate = templateService.resolve(appConfig?.template, appConfig?.templateDefinition);
-    if (customTemplate) {
-      return generateUserTemplate(appConfig, customTemplate);
+    setCurrentAppCtx(appConfig);
+    try {
+      if (customTemplate) {
+        return generateUserTemplate(appConfig, customTemplate);
+      }
+      const generators = getGenerators();
+      const fn = generators[appConfig.template] ?? generators.generic;
+      return fn(appConfig);
+    } finally {
+      setCurrentAppCtx(null);
     }
-
-    const generators = getGenerators();
-    const fn = generators[appConfig.template] ?? generators.generic;
-    return fn(appConfig);
   },
 
   generateUninstallScript(appConfig) {
@@ -1675,6 +1679,144 @@ function getNotificationLogic(_appName) {
   return getToastSnippet();
 }
 
+let _currentAppCtx = null;
+function setCurrentAppCtx(cfg) { _currentAppCtx = cfg; }
+function getCurrentAppCtx() { return _currentAppCtx || {}; }
+
+// Escape a string for embedding inside a PS single-quoted literal.
+function psSingleQuote(str) {
+  return String(str == null ? '' : str).replace(/'/g, "''");
+}
+
+// Build the PS function Test-AppInstalled for the current app's detection rule.
+// Returns '' when the rule is 'tracker' (the caller's existing tracker logic handles it).
+function buildDetectionSnippet(cfg) {
+  const d = cfg?.detection;
+  if (!d || !d.type || d.type === 'tracker') return '';
+
+  if (d.type === 'file') {
+    if (!d.filePath) return '';
+    const safePath = psSingleQuote(d.filePath);
+    const expected = psSingleQuote(d.fileVersionValue || '');
+    const op = ['=', '>', '>=', '<', '<=', '!='].includes(d.fileVersionOp) ? d.fileVersionOp : '>=';
+    if (d.fileCheck === 'version' && expected) {
+      return `
+function Test-AppInstalled {
+    $p = '${safePath}'
+    if (-not (Test-Path -LiteralPath $p)) { return $false }
+    try {
+        $info = (Get-Item -LiteralPath $p).VersionInfo
+        $raw = if ($info.ProductVersion) { $info.ProductVersion } else { $info.FileVersion }
+        if (-not $raw) { return $false }
+        $actual = [version]($raw -replace '[^0-9\\.]','' -replace '^\\.+|\\.+$','')
+        $target = [version]'${expected}'
+        switch ('${op}') {
+            '='  { return ($actual -eq $target) }
+            '!=' { return ($actual -ne $target) }
+            '>'  { return ($actual -gt $target) }
+            '>=' { return ($actual -ge $target) }
+            '<'  { return ($actual -lt $target) }
+            '<=' { return ($actual -le $target) }
+        }
+    } catch { return $false }
+    return $false
+}`;
+    }
+    return `
+function Test-AppInstalled {
+    return (Test-Path -LiteralPath '${safePath}')
+}`;
+  }
+
+  if (d.type === 'registry') {
+    if (!d.registryKey) return '';
+    const hive = d.registryHive === 'HKCU' ? 'HKCU' : 'HKLM';
+    const key = psSingleQuote(d.registryKey.replace(/^\\+|\\+$/g, ''));
+    const valueName = psSingleQuote(d.registryValueName || '');
+    const expected = psSingleQuote(d.registryExpectedValue || '');
+    const op = ['=', '>', '>=', '<', '<=', '!='].includes(d.registryOp) ? d.registryOp : '>=';
+    const check = d.registryCheck || 'exists';
+    return `
+function Test-AppInstalled {
+    $path = '${hive}:\\${key}'
+    if (-not (Test-Path -LiteralPath $path)) { return $false }
+    $valueName = '${valueName}'
+    if (-not $valueName) { return $true }
+    try {
+        $item = Get-ItemProperty -LiteralPath $path -Name $valueName -ErrorAction Stop
+        $actual = $item.$valueName
+    } catch { return $false }
+    if ($null -eq $actual) { return $false }
+    $expected = '${expected}'
+    switch ('${check}') {
+        'exists'   { return $true }
+        'contains' { return ([string]$actual -like "*$expected*") }
+        'equals'   { return ([string]$actual -eq $expected) }
+        'version'  {
+            try {
+                $av = [version](([string]$actual) -replace '[^0-9\\.]','' -replace '^\\.+|\\.+$','')
+                $ev = [version]$expected
+                switch ('${op}') {
+                    '='  { return ($av -eq $ev) }
+                    '!=' { return ($av -ne $ev) }
+                    '>'  { return ($av -gt $ev) }
+                    '>=' { return ($av -ge $ev) }
+                    '<'  { return ($av -lt $ev) }
+                    '<=' { return ($av -le $ev) }
+                }
+            } catch { return $false }
+        }
+    }
+    return $false
+}`;
+  }
+
+  return '';
+}
+
+// PS code that runs early and blocks until a dependency app's tracker shows success,
+// or the timeout elapses. Behavior controls whether timeout skips or fails.
+function buildDependencyWaitSnippet(cfg) {
+  const dep = cfg?.dependsOn;
+  if (!dep || !dep.appName) return '';
+  const safeName = sanitizeAppName(dep.appName);
+  if (!safeName) return '';
+  const timeoutMin = Number.isFinite(dep.timeoutMinutes) && dep.timeoutMinutes > 0
+    ? Math.floor(dep.timeoutMinutes) : 30;
+  const behavior = dep.behavior === 'fail' ? 'fail' : 'skip';
+  return `
+# ── Esperar a que termine la dependencia (${safeName}) ───────────────────────
+$DepName = '${psSingleQuote(safeName)}'
+$DepTracker = "$LogDir\\Tracker_$DepName.json"
+$DepTimeoutSec = ${timeoutMin * 60}
+$DepBehavior = '${behavior}'
+$DepStart = Get-Date
+$DepReady = $false
+while (((Get-Date) - $DepStart).TotalSeconds -lt $DepTimeoutSec) {
+    if (Test-Path -LiteralPath $DepTracker) {
+        try {
+            $dt = Get-Content -LiteralPath $DepTracker -Raw | ConvertFrom-Json
+            if ($dt.result -eq 'success') { $DepReady = $true; break }
+        } catch {}
+    }
+    Start-Sleep -Seconds 30
+}
+if (-not $DepReady) {
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Dependencia '$DepName' no confirmada tras $DepTimeoutSec s."
+    if ($DepBehavior -eq 'fail') {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Abortando instalacion por dependencia no satisfecha."
+        Stop-Transcript -ErrorAction SilentlyContinue
+        exit 1
+    } else {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Se salta esta instalacion hasta que la dependencia termine."
+        Stop-Transcript -ErrorAction SilentlyContinue
+        exit 0
+    }
+}
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Dependencia '$DepName' lista."
+`.trim();
+}
+
 function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appDisplayName = '') {
   const config = configService.getConfig();
   const dict = i18nService.getTranslations(config.language || 'en');
@@ -1685,6 +1827,19 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
   const notifyPrefix = notifyUser ? getToastSnippet(ToastTitleProcess, ToastMsgProcess) : '';
   const notifyBefore = '';
   const safeFilter = String(filter || "\\.(exe|msi)$").replace(/"/g, '""');
+
+  const appCtx = getCurrentAppCtx();
+  const depWait = buildDependencyWaitSnippet(appCtx);
+  const detectionFn = buildDetectionSnippet(appCtx);
+  const detectionCall = detectionFn ? `
+# ── Detección de instalación previa (regla definida por el usuario) ─────────
+if (Test-AppInstalled) {
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Regla de deteccion confirma app ya instalada."
+    @{ version = $CurrentVersion; hash = $CurrentHash; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success'; method = 'detection-rule' } |
+        ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+    Stop-Transcript -ErrorAction SilentlyContinue
+    exit 0
+}` : '';
   return [
     '# ── Guardia $PSScriptRoot (puede estar vacío en GPO startup / PS4) ────────',
     'if (-not $PSScriptRoot) { $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }',
@@ -1712,6 +1867,7 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
     '$CleanupMarkerDir = Join-Path $LogDir "PendingCacheCleanup"',
     'if (-not (Test-Path -LiteralPath $CleanupMarkerDir)) { New-Item -ItemType Directory -Path $CleanupMarkerDir -Force | Out-Null }',
     '$CleanupMarkerPath = Join-Path $CleanupMarkerDir "$NombreApp.json"',
+    depWait,
     getDeployCacheCleanupLogic(),
     '',
     '# ── Leer manifiesto ─────────────────────────────────────────────────────',
@@ -1735,6 +1891,8 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
     '',
     getInstallerConflictLogic(),
     '',
+    detectionFn,
+    detectionCall,
     '# ── Comprobar si ya instalado ────────────────────────────────────────────',
     'if (Test-Path $TrackerFile) {',
     '    try {',

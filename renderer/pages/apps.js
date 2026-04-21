@@ -1567,10 +1567,11 @@ const AppsPage = {
     );
 
     try {
-      const [templates, catalogData, config] = await Promise.all([
+      const [templates, catalogData, config, existingApps] = await Promise.all([
         window.api.scripts.getTemplates(),
         window.api.winget.getCatalog().catch(() => ({ catalog: [], odtProducts: [], odtApps: [], odtLanguages: [], odtChannels: [] })),
-        window.api.config.get().catch(() => ({}))
+        window.api.config.get().catch(() => ({})),
+        window.api.apps.getAll().catch(() => [])
       ]);
       this.wingetCatalogCache = catalogData;
       const isEdit = !!(existingApp?.id);
@@ -1659,6 +1660,28 @@ const AppsPage = {
       uninstallRegistryName: this.normalizeUninstallState(existingApp || {}, existingApp || {}).registryMatchName || (existingApp?.name || ''),
       uninstallRegistryPublisher: this.normalizeUninstallState(existingApp || {}, existingApp || {}).registryMatchPublisher,
       uninstallProductCode: this.normalizeUninstallState(existingApp || {}, existingApp || {}).productCode,
+      detection: {
+        type: existingApp?.detection?.type || 'tracker',
+        filePath: existingApp?.detection?.filePath || '',
+        fileCheck: existingApp?.detection?.fileCheck || 'exists',
+        fileVersionOp: existingApp?.detection?.fileVersionOp || '>=',
+        fileVersionValue: existingApp?.detection?.fileVersionValue || '',
+        registryHive: existingApp?.detection?.registryHive || 'HKLM',
+        registryKey: existingApp?.detection?.registryKey || '',
+        registryValueName: existingApp?.detection?.registryValueName || '',
+        registryCheck: existingApp?.detection?.registryCheck || 'exists',
+        registryOp: existingApp?.detection?.registryOp || '>=',
+        registryExpectedValue: existingApp?.detection?.registryExpectedValue || ''
+      },
+      dependsOn: {
+        appId: existingApp?.dependsOn?.appId || '',
+        appName: existingApp?.dependsOn?.appName || '',
+        timeoutMinutes: existingApp?.dependsOn?.timeoutMinutes || 30,
+        behavior: existingApp?.dependsOn?.behavior || 'skip'
+      },
+      availableApps: (Array.isArray(existingApps) ? existingApps : [])
+        .filter(a => a && a.id && a.id !== existingApp?.id)
+        .map(a => ({ id: a.id, name: a.name })),
       wizardWingetResults: [],
       wizardWingetSearching: false,
       _wizardWingetTimer: null,
@@ -2172,6 +2195,125 @@ const AppsPage = {
               </div>
             `;
           })()}
+
+          ${(() => {
+            const det = state.detection || {};
+            const detType = det.type || 'tracker';
+            const fileCheck = det.fileCheck || 'exists';
+            const regCheck = det.registryCheck || 'exists';
+            const opOptions = ['>=','=','>','<','<=','!='];
+            return `
+              <div class="card" style="padding:14px 16px; margin:0 0 14px 0;">
+                <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:10px;">${this.tr('apps.detectionSection', 'Deteccion de instalacion')}</div>
+                <div class="form-group">
+                  <label class="form-label">${this.tr('apps.detectionType', 'Metodo de deteccion')}</label>
+                  <select class="form-select" id="wiz-detection-type">
+                    <option value="tracker" ${detType === 'tracker' ? 'selected' : ''}>${this.tr('apps.detectionTypeTracker', 'Tracker (predeterminado)')}</option>
+                    <option value="file" ${detType === 'file' ? 'selected' : ''}>${this.tr('apps.detectionTypeFile', 'Archivo/ruta en disco')}</option>
+                    <option value="registry" ${detType === 'registry' ? 'selected' : ''}>${this.tr('apps.detectionTypeRegistry', 'Clave o valor de registro')}</option>
+                  </select>
+                  <p class="form-hint">${this.tr('apps.detectionHint', 'Al estilo Intune: si se cumple la regla, la app se considera instalada y el script no la reinstala.')}</p>
+                </div>
+                ${detType === 'file' ? `
+                  <div class="form-group">
+                    <label class="form-label">${this.tr('apps.detectionFilePath', 'Ruta del archivo')}</label>
+                    <input class="form-input" id="wiz-detection-file-path" value="${this.esc(det.filePath || '')}" placeholder="C:\\Program Files\\App\\app.exe">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label">${this.tr('apps.detectionFileCheck', 'Que verificar')}</label>
+                    <div style="display:flex;gap:8px;">
+                      <select class="form-select" id="wiz-detection-file-check" style="flex:0 0 220px;">
+                        <option value="exists" ${fileCheck === 'exists' ? 'selected' : ''}>${this.tr('apps.detectionFileCheckExists', 'Existe el archivo')}</option>
+                        <option value="version" ${fileCheck === 'version' ? 'selected' : ''}>${this.tr('apps.detectionFileCheckVersion', 'Comparar version')}</option>
+                        <option value="date" ${fileCheck === 'date' ? 'selected' : ''}>${this.tr('apps.detectionFileCheckDate', 'Existe (fecha)')}</option>
+                      </select>
+                      ${fileCheck === 'version' ? `
+                        <select class="form-select" id="wiz-detection-file-op" style="flex:0 0 90px;">
+                          ${opOptions.map(op => `<option value="${op}" ${(det.fileVersionOp || '>=') === op ? 'selected' : ''}>${op}</option>`).join('')}
+                        </select>
+                        <input class="form-input" id="wiz-detection-file-version" value="${this.esc(det.fileVersionValue || '')}" placeholder="1.0.0" style="flex:1;">
+                      ` : ''}
+                    </div>
+                  </div>
+                ` : ''}
+                ${detType === 'registry' ? `
+                  <div class="form-group">
+                    <label class="form-label">${this.tr('apps.detectionRegistryHive', 'Hive')}</label>
+                    <select class="form-select" id="wiz-detection-reg-hive" style="max-width:220px;">
+                      <option value="HKLM" ${(det.registryHive || 'HKLM') === 'HKLM' ? 'selected' : ''}>HKLM</option>
+                      <option value="HKCU" ${det.registryHive === 'HKCU' ? 'selected' : ''}>HKCU</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">${this.tr('apps.detectionRegistryKey', 'Clave de registro')}</label>
+                    <input class="form-input" id="wiz-detection-reg-key" value="${this.esc(det.registryKey || '')}" placeholder="SOFTWARE\\MyCompany\\App">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">${this.tr('apps.detectionRegistryValueName', 'Nombre del valor (opcional)')}</label>
+                    <input class="form-input" id="wiz-detection-reg-value-name" value="${this.esc(det.registryValueName || '')}" placeholder="Version">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label">${this.tr('apps.detectionRegistryCheck', 'Comprobacion')}</label>
+                    <div style="display:flex;gap:8px;">
+                      <select class="form-select" id="wiz-detection-reg-check" style="flex:0 0 220px;">
+                        <option value="exists" ${regCheck === 'exists' ? 'selected' : ''}>${this.tr('apps.detectionRegistryCheckExists', 'Existe la clave/valor')}</option>
+                        <option value="equals" ${regCheck === 'equals' ? 'selected' : ''}>${this.tr('apps.detectionRegistryCheckEquals', 'Igual a')}</option>
+                        <option value="contains" ${regCheck === 'contains' ? 'selected' : ''}>${this.tr('apps.detectionRegistryCheckContains', 'Contiene')}</option>
+                        <option value="version" ${regCheck === 'version' ? 'selected' : ''}>${this.tr('apps.detectionRegistryCheckVersion', 'Comparar version')}</option>
+                      </select>
+                      ${regCheck === 'version' ? `
+                        <select class="form-select" id="wiz-detection-reg-op" style="flex:0 0 90px;">
+                          ${opOptions.map(op => `<option value="${op}" ${(det.registryOp || '>=') === op ? 'selected' : ''}>${op}</option>`).join('')}
+                        </select>
+                      ` : ''}
+                      ${regCheck !== 'exists' ? `
+                        <input class="form-input" id="wiz-detection-reg-expected" value="${this.esc(det.registryExpectedValue || '')}" placeholder="${regCheck === 'version' ? '1.0.0' : this.tr('apps.detectionRegistryExpectedPlaceholder', 'Valor esperado')}" style="flex:1;">
+                      ` : ''}
+                    </div>
+                  </div>
+                ` : ''}
+                ${detType === 'tracker' ? `
+                  <div style="padding:10px 12px; border-radius:8px; background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.18); font-size:12px; color:var(--text-secondary);">
+                    ${this.tr('apps.detectionTrackerHint', 'Se usara el archivo Tracker_<App>.json generado en el log local para evitar reinstalaciones.')}
+                  </div>
+                ` : ''}
+              </div>
+            `;
+          })()}
+
+          ${(() => {
+            const dep = state.dependsOn || {};
+            const apps = Array.isArray(state.availableApps) ? state.availableApps : [];
+            return `
+              <div class="card" style="padding:14px 16px; margin:0 0 14px 0;">
+                <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:10px;">${this.tr('apps.dependsOnSection', 'Dependencia de otra app')}</div>
+                <div class="form-group">
+                  <label class="form-label">${this.tr('apps.dependsOnApp', 'Esperar a que termine')}</label>
+                  <select class="form-select" id="wiz-dep-app-id">
+                    <option value="">${this.tr('apps.dependsOnNone', 'Sin dependencia')}</option>
+                    ${apps.map(a => `<option value="${this.esc(a.id)}" data-name="${this.esc(a.name || '')}" ${dep.appId === a.id ? 'selected' : ''}>${this.esc(a.name || a.id)}</option>`).join('')}
+                  </select>
+                  <p class="form-hint">${this.tr('apps.dependsOnHint', 'Si eliges una app, este instalador esperara a que termine correctamente antes de ejecutarse.')}</p>
+                </div>
+                ${dep.appId ? `
+                  <div style="display:flex;gap:12px;">
+                    <div class="form-group" style="flex:0 0 200px;">
+                      <label class="form-label">${this.tr('apps.dependsOnTimeout', 'Timeout (minutos)')}</label>
+                      <input type="number" min="1" max="1440" step="1" class="form-input" id="wiz-dep-timeout" value="${Number(dep.timeoutMinutes) || 30}">
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                      <label class="form-label">${this.tr('apps.dependsOnBehavior', 'Si expira el tiempo')}</label>
+                      <select class="form-select" id="wiz-dep-behavior">
+                        <option value="skip" ${dep.behavior !== 'fail' ? 'selected' : ''}>${this.tr('apps.dependsOnBehaviorSkip', 'Continuar de todos modos')}</option>
+                        <option value="fail" ${dep.behavior === 'fail' ? 'selected' : ''}>${this.tr('apps.dependsOnBehaviorFail', 'Fallar la instalacion')}</option>
+                      </select>
+                    </div>
+                  </div>
+                ` : ''}
+              </div>
+            `;
+          })()}
+
           <div style="display:flex;gap:12px">
             <div class="form-group" style="flex:0 0 220px">
               <label class="form-label">${t('apps.version')}</label>
@@ -2688,6 +2830,42 @@ const AppsPage = {
       });
     }
 
+    const detTypeSelect = document.getElementById('wiz-detection-type');
+    if (detTypeSelect) {
+      detTypeSelect.addEventListener('change', () => {
+        this.saveStepData(state, templates);
+        state.detection.type = detTypeSelect.value;
+        renderWizard();
+      });
+    }
+    const detFileCheck = document.getElementById('wiz-detection-file-check');
+    if (detFileCheck) {
+      detFileCheck.addEventListener('change', () => {
+        this.saveStepData(state, templates);
+        state.detection.fileCheck = detFileCheck.value;
+        renderWizard();
+      });
+    }
+    const detRegCheck = document.getElementById('wiz-detection-reg-check');
+    if (detRegCheck) {
+      detRegCheck.addEventListener('change', () => {
+        this.saveStepData(state, templates);
+        state.detection.registryCheck = detRegCheck.value;
+        renderWizard();
+      });
+    }
+
+    const depAppSelect = document.getElementById('wiz-dep-app-id');
+    if (depAppSelect) {
+      depAppSelect.addEventListener('change', () => {
+        this.saveStepData(state, templates);
+        const opt = depAppSelect.options[depAppSelect.selectedIndex];
+        state.dependsOn.appId = depAppSelect.value;
+        state.dependsOn.appName = opt ? (opt.dataset.name || opt.textContent || '') : '';
+        renderWizard();
+      });
+    }
+
     // Silent args helper button
     const btnArgsHelp = document.getElementById('btn-show-args-help');
     if (btnArgsHelp) {
@@ -2783,6 +2961,42 @@ const AppsPage = {
     if (uninstallRegPublisher) state.uninstallRegistryPublisher = uninstallRegPublisher.value;
     const uninstallProductCode = document.getElementById('wiz-uninstall-product-code');
     if (uninstallProductCode) state.uninstallProductCode = uninstallProductCode.value;
+
+    if (!state.detection) state.detection = {};
+    const detType = document.getElementById('wiz-detection-type');
+    if (detType) state.detection.type = detType.value;
+    const detFilePath = document.getElementById('wiz-detection-file-path');
+    if (detFilePath) state.detection.filePath = detFilePath.value;
+    const detFileCheckEl = document.getElementById('wiz-detection-file-check');
+    if (detFileCheckEl) state.detection.fileCheck = detFileCheckEl.value;
+    const detFileOp = document.getElementById('wiz-detection-file-op');
+    if (detFileOp) state.detection.fileVersionOp = detFileOp.value;
+    const detFileVersion = document.getElementById('wiz-detection-file-version');
+    if (detFileVersion) state.detection.fileVersionValue = detFileVersion.value;
+    const detRegHive = document.getElementById('wiz-detection-reg-hive');
+    if (detRegHive) state.detection.registryHive = detRegHive.value;
+    const detRegKey = document.getElementById('wiz-detection-reg-key');
+    if (detRegKey) state.detection.registryKey = detRegKey.value;
+    const detRegValueName = document.getElementById('wiz-detection-reg-value-name');
+    if (detRegValueName) state.detection.registryValueName = detRegValueName.value;
+    const detRegCheckEl = document.getElementById('wiz-detection-reg-check');
+    if (detRegCheckEl) state.detection.registryCheck = detRegCheckEl.value;
+    const detRegOp = document.getElementById('wiz-detection-reg-op');
+    if (detRegOp) state.detection.registryOp = detRegOp.value;
+    const detRegExpected = document.getElementById('wiz-detection-reg-expected');
+    if (detRegExpected) state.detection.registryExpectedValue = detRegExpected.value;
+
+    if (!state.dependsOn) state.dependsOn = {};
+    const depAppEl = document.getElementById('wiz-dep-app-id');
+    if (depAppEl) {
+      state.dependsOn.appId = depAppEl.value;
+      const opt = depAppEl.options[depAppEl.selectedIndex];
+      state.dependsOn.appName = opt ? (opt.dataset.name || opt.textContent || '') : '';
+    }
+    const depTimeoutEl = document.getElementById('wiz-dep-timeout');
+    if (depTimeoutEl) state.dependsOn.timeoutMinutes = Number(depTimeoutEl.value) || 30;
+    const depBehaviorEl = document.getElementById('wiz-dep-behavior');
+    if (depBehaviorEl) state.dependsOn.behavior = depBehaviorEl.value;
 
     const xmlInput = document.getElementById('wiz-xml');
     if (xmlInput) {
@@ -3307,7 +3521,16 @@ const AppsPage = {
         assignedOUs: Array.isArray(state.selectedOUs) ? state.selectedOUs : [],
         version: state.version || '1.0.0',
         notifyUser: state.notifyUser || false,
-        uninstall: uninstallConfig
+        uninstall: uninstallConfig,
+        detection: state.detection || { type: 'tracker' },
+        dependsOn: state.dependsOn && state.dependsOn.appId
+          ? {
+              appId: state.dependsOn.appId,
+              appName: state.dependsOn.appName || '',
+              timeoutMinutes: Number(state.dependsOn.timeoutMinutes) || 30,
+              behavior: state.dependsOn.behavior === 'fail' ? 'fail' : 'skip'
+            }
+          : { appId: '', appName: '', timeoutMinutes: 0, behavior: 'skip' }
       };
 
       // Include wingetId for winget templates

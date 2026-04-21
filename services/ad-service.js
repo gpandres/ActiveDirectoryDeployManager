@@ -36,6 +36,23 @@ function normalizeDNArray(value) {
     });
 }
 
+function normalizeStringArray(value) {
+  const raw = Array.isArray(value)
+    ? value
+    : (typeof value === 'string' && value.trim() ? [value.trim()] : []);
+  const seen = new Set();
+  return raw
+    .filter(item => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .filter(item => {
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
 function toPSSingleQuotedArray(values) {
   if (!values.length) return '@()';
   return '@(' + values.map(v => `'${sanitizeDN(v)}'`).join(',') + ')';
@@ -222,6 +239,11 @@ ${body}
       @{ ok = $false; code = $code; error = $msg } | ConvertTo-Json -Compress -Depth 5
     }
   `;
+}
+
+function isMissingGPOLinkError(message) {
+  if (typeof message !== 'string') return false;
+  return /is not linked|not linked|no est.*vinculad|no hay ning[uú]n gpo.*vinculad|there is no gpo.*linked/i.test(message);
 }
 
 async function runPSJson(command) {
@@ -555,10 +577,10 @@ const adService = {
     const safeGpo = sanitizePSInput(gpoName).replace(/'/g, "''");
     const safeOU = sanitizeDN(ouDN);
     const result = await runPSJson(
-      `Import-Module ActiveDirectory; Import-Module GroupPolicy; ${dcSnippet(config.preferredDC)}; Remove-GPLink -Name '${safeGpo}' -Target '${safeOU}' -Server $adServer -ErrorAction Stop; @{ ok = $true } | ConvertTo-Json -Compress`
+      `Import-Module ActiveDirectory; Import-Module GroupPolicy; ${dcSnippet(config.preferredDC)}; Remove-GPLink -Name '${safeGpo}' -Target '${safeOU}' -Server $adServer -ErrorAction Stop | Out-Null; @{ ok = $true } | ConvertTo-Json -Compress`
     );
     if (result.ok) return { success: true };
-    if (result.code === 'NOT_LINKED' || result.code === 'NOT_FOUND') {
+    if (result.code === 'NOT_LINKED' || result.code === 'NOT_FOUND' || isMissingGPOLinkError(result.error)) {
       return { success: true, message: 'GPO no estaba vinculada a esa OU' };
     }
     return { success: false, error: result.error || 'Error desconocido' };
@@ -647,6 +669,64 @@ foreach ($ou in $ous) {
   }
 }
 $map | ConvertTo-Json -Compress`
+      );
+      return { success: true, data: parseJsonObject(json) };
+    } catch (err) {
+      return { success: false, error: err.message, data: {} };
+    }
+  },
+
+  async getManagedGPOLinks(gpoNames, ouDNs = []) {
+    try {
+      const config = require('./config').getConfig();
+      const managedGpoNames = normalizeStringArray(gpoNames);
+      const targetOUs = normalizeDNArray(ouDNs);
+      if (!managedGpoNames.length) {
+        return { success: true, data: {} };
+      }
+
+      const gpoArrayLiteral = '@(' + managedGpoNames
+        .map(name => `'${sanitizePSInput(name).replace(/'/g, "''")}'`)
+        .join(',') + ')';
+      const ouArrayLiteral = toPSSingleQuotedArray(targetOUs);
+      const json = await runPowerShell(
+        `Import-Module ActiveDirectory; Import-Module GroupPolicy; ${dcSnippet(config.preferredDC)};
+$targetNames = ${gpoArrayLiteral}
+$targetLookup = @{}
+foreach ($name in $targetNames) { $targetLookup[$name.ToLower()] = $true }
+$gpoLookup = @{}
+Get-GPO -All -Server $adServer -ErrorAction Stop | ForEach-Object {
+  if ($targetLookup.ContainsKey($_.DisplayName.ToLower())) {
+    $gpoLookup[$_.Id.ToString().ToLower()] = $_.DisplayName
+  }
+}
+$ouTargets = ${ouArrayLiteral}
+if ($ouTargets.Count -gt 0) {
+  $ous = foreach ($ouDN in $ouTargets) {
+    try {
+      Get-ADOrganizationalUnit -Identity $ouDN -Server $adServer -Properties DistinguishedName,gPLink -ErrorAction Stop
+    } catch {}
+  }
+} else {
+  $ous = Get-ADOrganizationalUnit -Filter * -Server $adServer -Properties DistinguishedName,gPLink -ResultPageSize 1000
+}
+$result = @{}
+foreach ($ou in $ous) {
+  $matches = New-Object System.Collections.Generic.List[string]
+  if ($ou.gPLink) {
+    [regex]::Matches($ou.gPLink, '\\{([^}]+)\\}') | ForEach-Object {
+      $guid = $_.Groups[1].Value.ToLower()
+      if ($gpoLookup.ContainsKey($guid)) {
+        $name = $gpoLookup[$guid]
+        if (-not $matches.Contains($name)) { $matches.Add($name) }
+      }
+    }
+  }
+  if ($matches.Count -gt 0) {
+    $result[$ou.DistinguishedName] = @($matches)
+  }
+}
+$result | ConvertTo-Json -Depth 5 -Compress`
       );
       return { success: true, data: parseJsonObject(json) };
     } catch (err) {

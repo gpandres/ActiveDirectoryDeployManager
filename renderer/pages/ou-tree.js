@@ -21,6 +21,12 @@ const OUsPage = {
     pending: new Map(),
     // Sync drift: ouDN -> [{ gpoName, reason }]
     syncWarnings: new Map(),
+    managedRealLinks: {},
+    // { [ouDN]: { direct, descendant } } — descendant excludes direct
+    assignmentCounts: {},
+    // IDs of apps whose gpoName no longer exists in AD
+    orphanGPOAppIds: new Set(),
+
     loading: false,
     lastExpandedOUs: new Set(),
     // Assignments (matrix) view: which OUs the user picked to display
@@ -75,12 +81,39 @@ const OUsPage = {
       this.switchView(btn.dataset.view);
     });
 
+    this._installFocusRefresh();
+
     if (App.rsatAvailable) {
       await this.loadData();
     } else {
       document.getElementById('ous-main-area').innerHTML = `
         <div class="empty-state"><p class="empty-state-text">${t('ous.emptyOusRsat')}</p></div>`;
     }
+  },
+
+  // Auto-refresh when the user returns to the app — always queries AD live.
+  // Uses 'visibilitychange' instead of 'focus' because the focus event can
+  // fire on internal Electron clicks (e.g. switching between OU nodes),
+  // causing spurious full reloads. visibilitychange only fires when the
+  // user genuinely leaves/returns to the app window.
+  _installFocusRefresh() {
+    if (this._focusListener) {
+      document.removeEventListener('visibilitychange', this._focusListener);
+    }
+    this._focusListener = () => {
+      if (document.hidden) return;           // only act when becoming visible
+      if (this.state.loading) return;
+      if (!document.getElementById('ous-main-area')) return;
+      // Small debounce to avoid double-fire edge cases
+      if (this._focusDebounceTimer) clearTimeout(this._focusDebounceTimer);
+      this._focusDebounceTimer = setTimeout(() => {
+        this._focusDebounceTimer = null;
+        if (!this.state.loading && document.getElementById('ous-main-area')) {
+          this.loadData();
+        }
+      }, 300);
+    };
+    document.addEventListener('visibilitychange', this._focusListener);
   },
 
   // ─── Data loading ────────────────────────────────────
@@ -90,9 +123,12 @@ const OUsPage = {
     mainArea.innerHTML = `<div class="spinner"></div><p class="loading-text">${t('ous.loadingOus')}</p>`;
 
     try {
-      const [ouResult, apps] = await Promise.all([
+      // Fetch OUs and fresh GPO list in parallel. Pulling the GPO list here
+      // (mirroring what the GPOs tab does on entry) makes orphan detection
+      // possible and keeps both tabs in sync when another admin is editing AD.
+      const [ouResult, gposResult] = await Promise.all([
         window.api.ad.getOUs(),
-        window.api.apps.getAll()
+        window.api.ad.getGPOs().catch(err => ({ success: false, error: err?.message || String(err), data: [] }))
       ]);
 
       if (!ouResult.success) {
@@ -102,7 +138,37 @@ const OUsPage = {
 
       this.state.treeData = ouResult.data || [];
       this.state.flatOUs = this.flattenOUs(this.state.treeData);
-      this.state.apps = apps || [];
+      const visibleOUs = this.state.flatOUs.map(ou => ou.dn);
+      const reconcileResult = await window.api.apps.reconcileManagedAssignments(visibleOUs).catch(err => ({
+        success: false,
+        error: err?.message || 'Error desconocido',
+        data: []
+      }));
+
+      if (reconcileResult?.success && Array.isArray(reconcileResult.data)) {
+        this.state.apps = reconcileResult.data;
+      } else {
+        this.state.apps = await window.api.apps.getAll();
+      }
+      this.state.managedRealLinks = reconcileResult?.success && reconcileResult.links && typeof reconcileResult.links === 'object'
+        ? reconcileResult.links
+        : {};
+
+      // Orphan GPO detection — apps whose gpoName no longer exists in AD
+      this.state.orphanGPOAppIds = new Set();
+      if (gposResult?.success && Array.isArray(gposResult.data)) {
+        const existingGpoNames = new Set(
+          gposResult.data
+            .map(g => (g && typeof g.DisplayName === 'string' ? g.DisplayName.trim() : ''))
+            .filter(Boolean)
+        );
+        for (const app of this.state.apps) {
+          const name = typeof app?.gpoName === 'string' ? app.gpoName.trim() : '';
+          if (this.isProgramManagedGPOName(name) && !existingGpoNames.has(name)) {
+            this.state.orphanGPOAppIds.add(app.id);
+          }
+        }
+      }
 
       const validDNs = new Set(this.state.flatOUs.map(o => o.dn));
       this.state.selectedOUs = this.state.selectedOUs.filter(dn => validDNs.has(dn));
@@ -116,6 +182,21 @@ const OUsPage = {
       orphanKeys.forEach(k => this.state.pending.delete(k));
 
       this.state.syncWarnings.clear();
+      this.state.assignmentCounts = this.computeAssignmentCounts();
+
+
+      // Notify when reconcile picked up external changes (another admin
+      // linked/unlinked GPOs, drift between local and AD, etc.)
+      const externalChanged = Number(reconcileResult?.changed || 0);
+      if (externalChanged > 0) {
+        App.toast(t('ous.externalChangesDetected').replace('{n}', externalChanged), 'warning');
+        try {
+          await window.api.activity.add('ou_external_changes_detected', { changed: externalChanged });
+        } catch (e) { /* best-effort */ }
+      }
+      if (this.state.orphanGPOAppIds.size > 0) {
+        App.toast(t('ous.orphanGpoDetected').replace('{n}', this.state.orphanGPOAppIds.size), 'warning');
+      }
 
       this.renderMain();
       this.renderStatsBar();
@@ -137,9 +218,56 @@ const OUsPage = {
     return acc;
   },
 
+  isProgramManagedGPOName(gpoName) {
+    return /^(Deploy_|ADDM_)/i.test(String(gpoName || '').trim());
+  },
+
+  getManagedProgramGPONames() {
+    return Array.from(new Set(
+      this.state.apps
+        .map(app => (typeof app?.gpoName === 'string' ? app.gpoName.trim() : ''))
+        .filter(name => this.isProgramManagedGPOName(name))
+    ));
+  },
+
+  getManagedRealLinksForOU(ouDN) {
+    const links = this.state.managedRealLinks && typeof this.state.managedRealLinks === 'object'
+      ? this.state.managedRealLinks[ouDN]
+      : null;
+    return Array.isArray(links) ? links.filter(name => this.isProgramManagedGPOName(name)) : [];
+  },
+
   // ─── Computed helpers ────────────────────────────────
   assignmentCountByOU(ouDN) {
     return this.state.apps.filter(a => (a.assignedOUs || []).includes(ouDN)).length;
+  },
+
+  // Walks the tree once (post-order DFS) and returns
+  // { [dn]: { direct, descendant } } where:
+  //   direct     = apps assigned exactly to this OU
+  //   descendant = sum of (direct + descendant) across all child subtrees
+  //                (i.e. "apps in descendant OUs", EXCLUDING this OU's direct)
+  computeAssignmentCounts() {
+    const counts = {};
+    const directByDN = Object.create(null);
+    for (const ou of this.state.flatOUs) directByDN[ou.dn] = 0;
+    for (const app of this.state.apps) {
+      for (const dn of (app.assignedOUs || [])) {
+        if (dn in directByDN) directByDN[dn]++;
+      }
+    }
+    const dfs = (nodes) => {
+      let sumForParent = 0;
+      for (const node of nodes) {
+        const childSum = (node.children && node.children.length) ? dfs(node.children) : 0;
+        const d = directByDN[node.dn] || 0;
+        counts[node.dn] = { direct: d, descendant: childSum };
+        sumForParent += d + childSum;
+      }
+      return sumForParent;
+    };
+    dfs(this.state.treeData);
+    return counts;
   },
 
   effectiveAssigned(appId, ouDN) {
@@ -275,9 +403,11 @@ const OUsPage = {
     for (const node of nodes) {
       if (matchingDNs && !matchingDNs.has(node.dn)) continue;
       const hasChildren = node.children && node.children.length > 0;
-      const count = this.assignmentCountByOU(node.dn);
+      const counts = (this.state.assignmentCounts && this.state.assignmentCounts[node.dn]) || { direct: 0, descendant: 0 };
+      const direct = counts.direct;
+      const descendant = counts.descendant;
       const isSelected = this.state.selectedOUs.includes(node.dn);
-      const hasAssignments = count > 0;
+      const hasAssignments = direct > 0;
       const shouldExpand = matchingDNs !== null || this.state.lastExpandedOUs.has(node.dn);
 
       html += `
@@ -290,7 +420,8 @@ const OUsPage = {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
             </span>
             <span class="tree-label">${this.esc(node.name)}</span>
-            ${hasAssignments ? `<span class="tree-badge">${count}</span>` : ''}
+            ${direct > 0 ? `<span class="tree-badge" title="${this.escAttr(t('ous.directBadgeTooltip'))}">${direct}</span>` : ''}
+            ${descendant > 0 ? `<span class="tree-badge tree-badge-descendant" title="${this.escAttr(t('ous.descendantBadgeTooltip').replace('{n}', descendant))}">${descendant}</span>` : ''}
           </div>
           ${hasChildren ? `<div class="tree-children ${shouldExpand ? '' : 'collapsed'}">${this.treeHTML(node.children, matchingDNs)}</div>` : ''}
         </li>`;

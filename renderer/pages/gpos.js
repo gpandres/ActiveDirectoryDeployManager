@@ -71,9 +71,6 @@ const GposPage = {
     `;
 
     document.getElementById('btn-refresh-gpos').addEventListener('click', () => {
-      this.gposCache = null;
-      this.linkCounts = null;
-      this.localLinkCounts = null;
       this.selectedIds = new Set();
       this.loadGPOs();
     });
@@ -126,35 +123,29 @@ const GposPage = {
 
   async loadGPOs() {
     const tbody = document.getElementById('gpos-tbody');
+    // Always query AD fresh — no in-memory cache
+    this.gposCache = null;
+    this.linkCounts = null;
+    this.localLinkCounts = null;
     try {
-      const tasks = [];
-      if (!this.gposCache) tasks.push(window.api.ad.getGPOs());
-      else tasks.push(Promise.resolve(null));
-      if (!this.localLinkCounts) tasks.push(this.loadLocalLinkCounts());
-      else tasks.push(Promise.resolve(this.localLinkCounts));
+      const [gpoResult, localLinkCounts] = await Promise.all([
+        window.api.ad.getGPOs(),
+        this.loadLocalLinkCounts()
+      ]);
 
-      const [gpoResult, localLinkCounts] = await Promise.all(tasks);
-
-      if (gpoResult) {
-        if (!gpoResult.success) throw new Error(gpoResult.error);
-        this.gposCache = gpoResult.data.sort((a, b) => a.DisplayName.localeCompare(b.DisplayName));
-      }
-
-      if (localLinkCounts) {
-        this.localLinkCounts = localLinkCounts;
-      }
+      if (!gpoResult.success) throw new Error(gpoResult.error);
+      this.gposCache = gpoResult.data.sort((a, b) => a.DisplayName.localeCompare(b.DisplayName));
+      this.localLinkCounts = localLinkCounts;
 
       this.renderTable();
 
       // Load link counts asynchronously (may take a moment)
-      if (!this.linkCounts) {
-        window.api.ad.getGPOLinkCounts().then(res => {
-          if (res.success) {
-            this.linkCounts = res.data || {};
-            this.renderTable();
-          }
-        }).catch(() => {});
-      }
+      window.api.ad.getGPOLinkCounts().then(res => {
+        if (res.success) {
+          this.linkCounts = res.data || {};
+          this.renderTable();
+        }
+      }).catch(() => {});
     } catch (err) {
       tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 40px; color: var(--danger-color);">${t('gpos.errorConnecting')} ${err.message}</td></tr>`;
     }
@@ -197,11 +188,10 @@ const GposPage = {
       const localCount = this.localLinkCounts ? (this.localLinkCounts[gpoKey] ?? 0) : 0;
       const adCount = this.linkCounts ? (this.linkCounts[guidLower] ?? 0) : null;
       const effectiveCount = adCount === null ? localCount : Math.max(adCount, localCount);
-      const linkBadge = adCount === null && effectiveCount === 0
-        ? '<span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;"></span>'
-        : effectiveCount > 0
-          ? `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:24px;padding:2px 6px;border-radius:12px;background:rgba(59,130,246,0.12);color:var(--accent-info);font-weight:600;font-size:12px;">${effectiveCount}</span>`
-          : `<span style="color:var(--text-muted);font-size:12px;">0</span>`;
+      const isLoadingAdCount = adCount === null;
+      const linkBadge = effectiveCount > 0
+        ? `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:22px;padding:2px 6px;border-radius:12px;background:rgba(59,130,246,0.12);color:var(--accent-info);font-weight:600;font-size:12px;${isLoadingAdCount ? 'opacity:0.5;' : ''}">${effectiveCount}</span>`
+        : `<span style="color:var(--text-muted);font-size:12px;display:inline-block;min-width:24px;height:22px;line-height:22px;text-align:center;${isLoadingAdCount ? 'opacity:0.5;' : ''}">0</span>`;
 
       return `
         <tr style="border-bottom: 1px solid var(--border-color); transition: background 0.2s;${isSelected ? 'background:rgba(59,130,246,0.06);' : ''}">

@@ -4,7 +4,13 @@
 
 const SettingsPage = {
   async render(container) {
-    const config = await window.api.config.get();
+    const [config, updateInfo] = await Promise.all([
+      window.api.config.get(),
+      window.api.updates.getCurrent().catch(() => ({
+        currentVersion: App.updateCheckResult?.currentVersion || '0.0.0'
+      }))
+    ]);
+    this.currentConfig = config;
 
     container.innerHTML = `
       <div class="page-header">
@@ -137,6 +143,14 @@ const SettingsPage = {
         </div>
       </div>
 
+      <div class="settings-section">
+        <div class="settings-section-title">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+          ${t('updates.sectionTitle')}
+        </div>
+        <div id="settings-app-updates-content" style="margin-top:12px;"></div>
+      </div>
+
       <!-- Save Button -->
       <div class="flex justify-between mt-lg">
         <div></div>
@@ -158,7 +172,9 @@ const SettingsPage = {
       langSelect.appendChild(el);
     });
 
+    this.currentAppVersion = updateInfo?.currentVersion || App.updateCheckResult?.currentVersion || '0.0.0';
     this.bindEvents(config);
+    this.renderUpdateSection(this.currentAppVersion);
     this.loadGPOs(config);
     if (App.rsatAvailable) {
       this.loadOUs(config.baseOUs || (config.baseOU ? [config.baseOU] : []));
@@ -276,6 +292,7 @@ const SettingsPage = {
 
     const result = await window.api.config.set(data);
     if (result.success) {
+      this.currentConfig = result.data || { ...currentConfig, ...data };
       if (isLangChanged) {
         await window.initI18n(); // Reload the dictionary immediately 
         App.updateSidebarLanguage();
@@ -287,6 +304,130 @@ const SettingsPage = {
     } else {
       App.toast(t('common.error') + ': ' + result.error, 'error');
     }
+  },
+
+  renderUpdateSection(currentVersion = this.currentAppVersion, result = App.updateCheckResult, isChecking = App.isCheckingAppUpdates()) {
+    const container = document.getElementById('settings-app-updates-content');
+    if (!container) return;
+
+    container.innerHTML = this.getUpdateSectionHTML(currentVersion, result, isChecking);
+    this.bindUpdateActions();
+  },
+
+  bindUpdateActions() {
+    document.getElementById('btn-check-app-updates')?.addEventListener('click', async () => {
+      this.renderUpdateSection(this.currentAppVersion, App.updateCheckResult, true);
+      const result = await App.checkAppUpdates({ force: true });
+      this.currentAppVersion = result?.currentVersion || this.currentAppVersion || '0.0.0';
+      this.renderUpdateSection(this.currentAppVersion, result, false);
+    });
+
+    document.getElementById('btn-open-app-release')?.addEventListener('click', async () => {
+      await App.openLatestReleasePage();
+    });
+
+    document.getElementById('btn-reset-app-update-reminder')?.addEventListener('click', async () => {
+      const button = document.getElementById('btn-reset-app-update-reminder');
+      if (button) button.disabled = true;
+
+      try {
+        await App.clearDismissedAppUpdateVersion();
+        this.currentConfig = { ...(this.currentConfig || {}), dismissedAppUpdateVersion: '' };
+        this.renderUpdateSection(this.currentAppVersion, App.updateCheckResult, App.isCheckingAppUpdates());
+        App.updateAppUpdateBanner();
+        App.toast(t('updates.reminderRestoredToast'), 'success');
+      } catch (err) {
+        if (button) button.disabled = false;
+        App.toast(`${t('common.error')}: ${err?.message || t('updates.reminderSaveFailed')}`, 'error');
+      }
+    });
+  },
+
+  getUpdateSectionHTML(currentVersion, result, isChecking) {
+    const safeCurrentVersion = this.esc(currentVersion || result?.currentVersion || '0.0.0');
+    const safeLatestVersion = this.esc(result?.latestVersion || '');
+    const safeReleaseName = this.esc(result?.releaseName || result?.tagName || '');
+    const checkedAt = result?.checkedAt ? App.formatDate(result.checkedAt) : '—';
+    const publishedAt = result?.publishedAt ? App.formatDate(result.publishedAt) : '—';
+
+    const reminderMuted = App.isUpdateReminderDismissedPersistently(result);
+    let statusText = t('updates.statusUnknown');
+    let statusColor = 'var(--text-secondary)';
+    if (isChecking) {
+      statusText = t('updates.statusChecking');
+      statusColor = 'var(--accent-primary)';
+    } else if (result?.success && result?.hasUpdate) {
+      statusText = t('updates.statusAvailable').replace('{version}', result.latestVersion || '?');
+      statusColor = 'var(--accent-warning)';
+    } else if (result?.success) {
+      statusText = t('updates.statusUpToDate');
+      statusColor = 'var(--accent-secondary)';
+    } else if (result?.error) {
+      statusText = t('updates.statusError');
+      statusColor = 'var(--accent-danger)';
+    }
+
+    return `
+      <div style="display:grid;gap:14px;">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;">
+          <span style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,0.04);border:1px solid var(--border-color);font-size:12px;">
+            <strong style="color:var(--text-secondary);">${t('updates.currentVersion')}:</strong>
+            <span style="color:var(--text-primary);">v${safeCurrentVersion}</span>
+          </span>
+          <span style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,0.04);border:1px solid var(--border-color);font-size:12px;">
+            <strong style="color:var(--text-secondary);">${t('updates.latestVersion')}:</strong>
+            <span style="color:var(--text-primary);">${safeLatestVersion ? `v${safeLatestVersion}` : '—'}</span>
+          </span>
+          <span style="font-size:13px;font-weight:700;color:${statusColor};">${this.esc(statusText)}</span>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
+          <div style="padding:12px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-secondary);">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">${t('updates.releaseLabel')}</div>
+            <div style="font-weight:600;color:var(--text-primary);">${safeReleaseName || '—'}</div>
+          </div>
+          <div style="padding:12px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-secondary);">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">${t('updates.checkedAt')}</div>
+            <div style="font-weight:600;color:var(--text-primary);">${this.esc(checkedAt)}</div>
+          </div>
+          <div style="padding:12px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-secondary);">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">${t('updates.publishedAt')}</div>
+            <div style="font-weight:600;color:var(--text-primary);">${this.esc(publishedAt)}</div>
+          </div>
+        </div>
+
+        ${result?.error ? `
+          <div style="padding:12px;border-radius:10px;border:1px solid rgba(239,68,68,0.35);background:rgba(239,68,68,0.08);color:var(--text-primary);font-size:13px;">
+            <strong style="display:block;color:var(--accent-danger);margin-bottom:4px;">${t('updates.errorLabel')}</strong>
+            ${this.esc(result.error)}
+          </div>
+        ` : ''}
+
+        ${reminderMuted ? `
+          <div style="padding:12px;border-radius:10px;border:1px solid rgba(245,158,11,0.35);background:rgba(245,158,11,0.08);color:var(--text-primary);font-size:13px;">
+            <strong style="display:block;color:var(--accent-warning);margin-bottom:4px;">${t('updates.reminderMutedLabel')}</strong>
+            ${t('updates.reminderMutedMessage').replace('{version}', safeLatestVersion ? `v${safeLatestVersion}` : '?')}
+          </div>
+        ` : ''}
+
+        <div class="flex gap-sm" style="flex-wrap:wrap;">
+          <button class="btn btn-secondary" id="btn-check-app-updates" ${isChecking ? 'disabled' : ''}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            ${isChecking ? t('updates.statusChecking') : t('updates.checkNow')}
+          </button>
+          <button class="btn btn-secondary" id="btn-open-app-release">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3h7v7"/><path d="M10 14L21 3"/><path d="M21 14v7h-7"/><path d="M3 10V3h7"/><path d="M3 21l11-11"/></svg>
+            ${t('updates.openRelease')}
+          </button>
+          ${reminderMuted ? `
+            <button class="btn btn-secondary" id="btn-reset-app-update-reminder">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.71"/><path d="M3 3v6h6"/></svg>
+              ${t('updates.enableReminder')}
+            </button>
+          ` : ''}
+        </div>
+      </div>
+    `;
   },
 
   esc(str) {

@@ -35,7 +35,8 @@ contextBridge.exposeInMainWorld('api', {
     unlinkGPOfromOU: (gpoName, ouDN) => ipcRenderer.invoke('ad:unlinkGPOfromOU', gpoName, ouDN),
     removeGPOStartupScript: (gpoName) => ipcRenderer.invoke('ad:removeGPOStartupScript', gpoName),
     checkGPOConflicts: (ouDN) => ipcRenderer.invoke('ad:checkGPOConflicts', ouDN),
-    checkGPOExists: (gpoName) => ipcRenderer.invoke('ad:checkGPOExists', gpoName)
+    checkGPOExists: (gpoName) => ipcRenderer.invoke('ad:checkGPOExists', gpoName),
+    getManagedGPOLinks: (gpoNames, ouDNs = []) => ipcRenderer.invoke('ad:getManagedGPOLinks', gpoNames, ouDNs)
   },
 
   // Apps
@@ -46,7 +47,8 @@ contextBridge.exposeInMainWorld('api', {
     update: (id, data) => ipcRenderer.invoke('apps:update', id, data),
     delete: (id, deleteFiles) => ipcRenderer.invoke('apps:delete', id, deleteFiles),
     bulkAssignGPO: (ids, gpoName) => ipcRenderer.invoke('apps:bulkAssignGPO', ids, gpoName),
-    applyAssignmentPlan: (plan) => ipcRenderer.invoke('apps:applyAssignmentPlan', plan),
+    applyAssignmentPlan: (plan, allVisibleOUs = []) => ipcRenderer.invoke('apps:applyAssignmentPlan', plan, allVisibleOUs),
+    reconcileManagedAssignments: (ouDNs = []) => ipcRenderer.invoke('apps:reconcileManagedAssignments', ouDNs),
     getInstallerVersion: (filePath) => ipcRenderer.invoke('apps:getInstallerVersion', filePath),
     computeHash: (filePath) => ipcRenderer.invoke('apps:computeHash', filePath)
   },
@@ -106,6 +108,12 @@ contextBridge.exposeInMainWorld('api', {
   i18n: {
     getAvailable: () => ipcRenderer.invoke('i18n:getAvailable'),
     getTranslations: (langCode) => ipcRenderer.invoke('i18n:getTranslations', langCode)
+  },
+
+  updates: {
+    getCurrent: () => ipcRenderer.invoke('updates:getCurrent'),
+    check: () => ipcRenderer.invoke('updates:check'),
+    openReleasePage: () => ipcRenderer.invoke('updates:openReleasePage')
   },
 
   // Winget catalog + version checking (legacy, used by apps.js wizard)

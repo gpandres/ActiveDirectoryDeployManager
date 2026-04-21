@@ -72,6 +72,74 @@ function normalizeDNArray(value) {
     });
 }
 
+function isProgramManagedGPOName(value) {
+  return /^(Deploy_|ADDM_)/i.test(String(value || '').trim());
+}
+
+function normalizeManagedLinkMap(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const normalized = {};
+  for (const [ouDN, gpoNames] of Object.entries(value)) {
+    if (typeof ouDN !== 'string' || !ouDN.trim()) continue;
+    const safeOUDN = ouDN.trim();
+    const safeGpoNames = Array.isArray(gpoNames)
+      ? gpoNames
+        .filter(name => typeof name === 'string')
+        .map(name => name.trim())
+        .filter(Boolean)
+        .filter(isProgramManagedGPOName)
+      : [];
+    if (safeGpoNames.length) {
+      normalized[safeOUDN] = Array.from(new Set(safeGpoNames));
+    }
+  }
+  return normalized;
+}
+
+function sameDNLists(left, right) {
+  const normalize = list => normalizeDNArray(list).map(item => item.toLowerCase()).sort();
+  const a = normalize(left);
+  const b = normalize(right);
+  if (a.length !== b.length) return false;
+  return a.every((item, index) => item === b[index]);
+}
+
+function reconcileAppsWithManagedLinks(apps, managedLinks) {
+  const normalizedLinks = normalizeManagedLinkMap(managedLinks);
+  const gpoToOUs = new Map();
+  for (const [ouDN, gpoNames] of Object.entries(normalizedLinks)) {
+    for (const gpoName of gpoNames) {
+      const current = gpoToOUs.get(gpoName) || [];
+      current.push(ouDN);
+      gpoToOUs.set(gpoName, current);
+    }
+  }
+
+  let changed = 0;
+  const reconciledApps = (Array.isArray(apps) ? apps : []).map(app => {
+    const normalizedApp = normalizeAppRecord(app);
+    if (!isProgramManagedGPOName(normalizedApp.gpoName)) {
+      return normalizedApp;
+    }
+
+    const nextAssignedOUs = normalizeDNArray(gpoToOUs.get(normalizedApp.gpoName) || []);
+    const currentAssignedOUs = normalizeDNArray(normalizedApp.assignedOUs || normalizedApp.ouDN);
+    if (sameDNLists(currentAssignedOUs, nextAssignedOUs)) {
+      return normalizedApp;
+    }
+
+    changed++;
+    return normalizeAppRecord({
+      ...normalizedApp,
+      assignedOUs: nextAssignedOUs,
+      ouDN: nextAssignedOUs[0] || '',
+      updatedAt: new Date().toISOString()
+    });
+  });
+
+  return { apps: reconciledApps, changed, links: normalizedLinks };
+}
+
 function inferInstallerType(installerType, installerPath, template) {
   const normalizedTemplate = String(template || '').trim().toLowerCase();
   const normalizedType = String(installerType || '').trim().toLowerCase();
@@ -88,6 +156,55 @@ function normalizePublishedAction(value, fallback = 'pending') {
   const normalized = String(value || '').trim().toLowerCase();
   if (['install', 'uninstall', 'pending'].includes(normalized)) return normalized;
   return fallback;
+}
+
+function normalizeDetectionConfig(value) {
+  const raw = value && typeof value === 'object' ? value : {};
+  let type = String(raw.type || '').trim().toLowerCase();
+  if (!['tracker', 'file', 'registry'].includes(type)) type = 'tracker';
+
+  const str = v => (typeof v === 'string' ? v : '');
+  const upper = v => str(v).trim().toUpperCase();
+
+  const fileCheck = ['exists', 'version', 'date'].includes(String(raw.fileCheck || '').toLowerCase())
+    ? String(raw.fileCheck).toLowerCase() : 'exists';
+  const fileVersionOp = ['=', '>', '>=', '<', '<=', '!='].includes(String(raw.fileVersionOp || '').trim())
+    ? String(raw.fileVersionOp).trim() : '>=';
+
+  const registryHive = upper(raw.registryHive) === 'HKCU' ? 'HKCU' : 'HKLM';
+  const registryCheck = ['exists', 'equals', 'version', 'contains'].includes(String(raw.registryCheck || '').toLowerCase())
+    ? String(raw.registryCheck).toLowerCase() : 'exists';
+  const registryOp = ['=', '>', '>=', '<', '<=', '!='].includes(String(raw.registryOp || '').trim())
+    ? String(raw.registryOp).trim() : '>=';
+
+  return {
+    type,
+    filePath: str(raw.filePath).trim(),
+    fileCheck,
+    fileVersionOp,
+    fileVersionValue: str(raw.fileVersionValue).trim(),
+    registryHive,
+    registryKey: str(raw.registryKey).trim().replace(/^(HKLM|HKCU|HKEY_[A-Z_]+)[:\\\/]+/i, ''),
+    registryValueName: str(raw.registryValueName).trim(),
+    registryCheck,
+    registryOp,
+    registryExpectedValue: str(raw.registryExpectedValue).trim()
+  };
+}
+
+function normalizeDependency(value) {
+  const raw = value && typeof value === 'object' ? value : {};
+  const appId = typeof raw.appId === 'string' ? raw.appId.trim() : '';
+  if (!appId) {
+    return { appId: '', appName: '', timeoutMinutes: 0, behavior: 'skip' };
+  }
+  const appName = typeof raw.appName === 'string' ? raw.appName.trim() : '';
+  const timeout = Number(raw.timeoutMinutes);
+  const timeoutMinutes = Number.isFinite(timeout) && timeout > 0 && timeout <= 24 * 60
+    ? Math.floor(timeout) : 30;
+  const behavior = ['skip', 'fail'].includes(String(raw.behavior || '').toLowerCase())
+    ? String(raw.behavior).toLowerCase() : 'skip';
+  return { appId, appName, timeoutMinutes, behavior };
 }
 
 function normalizeUninstallConfig(value, context = {}) {
@@ -135,6 +252,8 @@ function normalizeAppRecord(app) {
   };
 
   normalized.uninstall = normalizeUninstallConfig(normalized.uninstall, normalized);
+  normalized.detection = normalizeDetectionConfig(normalized.detection);
+  normalized.dependsOn = normalizeDependency(normalized.dependsOn);
   normalized.uninstallDeployedPath = typeof normalized.uninstallDeployedPath === 'string'
     ? normalized.uninstallDeployedPath
     : (normalized.uninstall?.scriptPath || '');
@@ -415,74 +534,184 @@ const appService = {
     return { success: true, updated };
   },
 
+  async reconcileManagedAssignments(ouDNs = []) {
+    const adService = require('./ad-service');
+    const apps = loadApps();
+    const managedGpoNames = Array.from(new Set(
+      apps
+        .map(app => (typeof app?.gpoName === 'string' ? app.gpoName.trim() : ''))
+        .filter(isProgramManagedGPOName)
+    ));
+
+    if (managedGpoNames.length === 0) {
+      return {
+        success: true,
+        changed: 0,
+        data: apps.map(hydrateAppShareState),
+        links: {}
+      };
+    }
+
+    const adResult = await adService.getManagedGPOLinks(managedGpoNames, ouDNs);
+    if (!adResult.success) {
+      return {
+        success: false,
+        error: adResult.error || 'Error desconocido',
+        data: apps.map(hydrateAppShareState),
+        links: {}
+      };
+    }
+
+    const reconciled = reconcileAppsWithManagedLinks(apps, adResult.data);
+    if (reconciled.changed > 0) {
+      saveApps(reconciled.apps);
+    }
+
+    return {
+      success: true,
+      changed: reconciled.changed,
+      data: reconciled.apps.map(hydrateAppShareState),
+      links: reconciled.links
+    };
+  },
+
   // Apply an assignment plan in a single call.
   // plan = { toAssign: [{ appId, ouDN }], toUnassign: [{ appId, ouDN }] }
   // Calls AD link/unlink per pair and updates each app's assignedOUs
   // atomically based on the actual AD result (only persists pairs that
   // AD confirms).
-  async applyAssignmentPlan(plan) {
+  async applyAssignmentPlan(plan, allVisibleOUs = []) {
     const adService = require('./ad-service');
+    const safeVisibleOUs = Array.isArray(allVisibleOUs)
+      ? allVisibleOUs.filter(v => typeof v === 'string' && v.trim())
+      : [];
     const toAssign = Array.isArray(plan?.toAssign) ? plan.toAssign : [];
     const toUnassign = Array.isArray(plan?.toUnassign) ? plan.toUnassign : [];
+    const assignmentApps = loadApps();
+    const assignmentById = new Map(assignmentApps.map(app => [app.id, app]));
+    const operationErrors = new Map();
 
-    const results = {
-      success: true,
-      assigned: [],
-      unassigned: [],
-      failures: []
-    };
-
-    // Load once, mutate, save once at the end
-    const apps = loadApps();
-    const byId = new Map(apps.map(a => [a.id, a]));
-
-    // Unassignments first — reduces chance of unique-link conflicts
     for (const { appId, ouDN } of toUnassign) {
-      const app = byId.get(appId);
+      const app = assignmentById.get(appId);
       if (!app) {
-        results.failures.push({ action: 'unassign', appId, ouDN, error: 'App not found' });
+        operationErrors.set(`unassign::${appId}::${ouDN}`, 'App not found');
         continue;
       }
-      if (app.gpoName) {
-        const adResult = await adService.unlinkGPOfromOU(app.gpoName, ouDN);
-        if (!adResult.success) {
-          results.success = false;
-          results.failures.push({ action: 'unassign', appId, ouDN, appName: app.name, error: adResult.error });
-          continue;
-        }
+      if (!app.gpoName) continue;
+
+      const adResult = await adService.unlinkGPOfromOU(app.gpoName, ouDN);
+      if (!adResult.success) {
+        operationErrors.set(`unassign::${appId}::${ouDN}`, adResult.error || 'Error desconocido');
+      } else {
+        app.assignedOUs = (app.assignedOUs || []).filter(dn => dn !== ouDN);
+        app.updatedAt = new Date().toISOString();
       }
-      app.assignedOUs = (app.assignedOUs || []).filter(dn => dn !== ouDN);
-      app.updatedAt = new Date().toISOString();
-      results.unassigned.push({ appId, ouDN });
     }
 
     for (const { appId, ouDN } of toAssign) {
-      const app = byId.get(appId);
+      const app = assignmentById.get(appId);
       if (!app) {
-        results.failures.push({ action: 'assign', appId, ouDN, error: 'App not found' });
+        operationErrors.set(`assign::${appId}::${ouDN}`, 'App not found');
         continue;
       }
-      if (app.gpoName) {
-        const adResult = await adService.linkGPOtoOU(app.gpoName, ouDN);
-        if (!adResult.success) {
-          results.success = false;
-          results.failures.push({ action: 'assign', appId, ouDN, appName: app.name, error: adResult.error });
-          continue;
-        }
+      if (!app.gpoName) {
+        operationErrors.set(`assign::${appId}::${ouDN}`, 'App has no GPO');
+        continue;
+      }
+
+      const adResult = await adService.linkGPOtoOU(app.gpoName, ouDN);
+      if (!adResult.success) {
+        operationErrors.set(`assign::${appId}::${ouDN}`, adResult.error || 'Error desconocido');
       } else {
-        results.failures.push({ action: 'assign', appId, ouDN, appName: app.name, error: 'App has no GPO' });
-        results.success = false;
-        continue;
+        const nextOUs = new Set(app.assignedOUs || []);
+        nextOUs.add(ouDN);
+        app.assignedOUs = Array.from(nextOUs);
+        app.updatedAt = new Date().toISOString();
       }
-      const ous = new Set(app.assignedOUs || []);
-      ous.add(ouDN);
-      app.assignedOUs = Array.from(ous);
-      app.updatedAt = new Date().toISOString();
-      results.assigned.push({ appId, ouDN });
     }
 
-    saveApps(apps);
-    return results;
+    // Use all visible OUs for reconciliation so sibling OUs retain their state.
+    // Falls back to only affected OUs if the caller didn't provide the full list.
+    const reconcileOUs = safeVisibleOUs.length > 0
+      ? safeVisibleOUs
+      : Array.from(new Set([
+          ...toAssign.map(item => item.ouDN),
+          ...toUnassign.map(item => item.ouDN)
+        ].filter(Boolean)));
+
+    let reconciledApps = assignmentApps;
+    let managedLinks = {};
+    try {
+      const reconcileResult = await this.reconcileManagedAssignments(reconcileOUs);
+      if (reconcileResult.success && Array.isArray(reconcileResult.data)) {
+        reconciledApps = reconcileResult.data.map(normalizeAppRecord);
+        managedLinks = reconcileResult.links || {};
+      } else {
+        saveApps(assignmentApps);
+        reconciledApps = loadApps();
+      }
+    } catch {
+      saveApps(assignmentApps);
+      reconciledApps = loadApps();
+    }
+
+    const finalById = new Map(reconciledApps.map(app => [app.id, app]));
+    const finalAssignmentResults = {
+      success: true,
+      assigned: [],
+      unassigned: [],
+      failures: [],
+      apps: reconciledApps.map(hydrateAppShareState),
+      links: managedLinks
+    };
+
+    for (const { appId, ouDN } of toUnassign) {
+      const app = finalById.get(appId) || assignmentById.get(appId);
+      if (!app) {
+        finalAssignmentResults.success = false;
+        finalAssignmentResults.failures.push({ action: 'unassign', appId, ouDN, error: 'App not found' });
+        continue;
+      }
+
+      if (!(app.assignedOUs || []).includes(ouDN)) {
+        finalAssignmentResults.unassigned.push({ appId, ouDN });
+        continue;
+      }
+
+      finalAssignmentResults.success = false;
+      finalAssignmentResults.failures.push({
+        action: 'unassign',
+        appId,
+        ouDN,
+        appName: app.name,
+        error: operationErrors.get(`unassign::${appId}::${ouDN}`) || 'La GPO sigue vinculada en AD'
+      });
+    }
+
+    for (const { appId, ouDN } of toAssign) {
+      const app = finalById.get(appId) || assignmentById.get(appId);
+      if (!app) {
+        finalAssignmentResults.success = false;
+        finalAssignmentResults.failures.push({ action: 'assign', appId, ouDN, error: 'App not found' });
+        continue;
+      }
+
+      if ((app.assignedOUs || []).includes(ouDN)) {
+        finalAssignmentResults.assigned.push({ appId, ouDN });
+        continue;
+      }
+
+      finalAssignmentResults.success = false;
+      finalAssignmentResults.failures.push({
+        action: 'assign',
+        appId,
+        ouDN,
+        appName: app.name,
+        error: operationErrors.get(`assign::${appId}::${ouDN}`) || 'La GPO no aparece vinculada en AD'
+      });
+    }
+
+    return finalAssignmentResults;
   },
 
   getInstallerVersion(filePath) {

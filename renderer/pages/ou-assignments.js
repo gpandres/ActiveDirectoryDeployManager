@@ -26,17 +26,38 @@ Object.assign(OUsPage, {
 
     const selectedDNs = selected.map(dn => `<span class="chip" title="${this.escAttr(dn)}">${this.esc(dn.split(',')[0].replace(/^OU=/i, ''))}</span>`).join('');
 
-    // Sync warnings (if any) for single-OU selection
+    // Sync warnings (if any) for single-OU selection — interactive remediation
     let syncBanner = '';
     if (selected.length === 1 && this.state.syncWarnings.has(selected[0])) {
       const warnings = this.state.syncWarnings.get(selected[0]);
+      const ouDN = selected[0];
       if (warnings.length > 0) {
+        const warningRows = warnings.map((w, idx) => {
+          const isAdNotLocal = w.reason === t('ous.driftInAdNotLocal');
+          return `
+            <li class="drift-item" style="display:flex;align-items:center;gap:8px;padding:4px 0;flex-wrap:wrap;">
+              <span style="flex:1;min-width:180px;">${this.esc(w.gpoName)} — ${this.esc(w.reason)}</span>
+              <div class="drift-actions" style="display:flex;gap:4px;flex-shrink:0;">
+                ${isAdNotLocal ? `
+                  <button class="btn btn-sm btn-secondary drift-fix-btn" data-ou="${this.escAttr(ouDN)}" data-idx="${idx}" data-action="unlink-ad" title="${t('ous.fixDriftUnlinkAd')}">${t('ous.fixDriftUnlinkAd')}</button>
+                  <button class="btn btn-sm btn-secondary drift-fix-btn" data-ou="${this.escAttr(ouDN)}" data-idx="${idx}" data-action="add-local" title="${t('ous.fixDriftAddLocal')}">${t('ous.fixDriftAddLocal')}</button>
+                ` : `
+                  <button class="btn btn-sm btn-secondary drift-fix-btn" data-ou="${this.escAttr(ouDN)}" data-idx="${idx}" data-action="link-ad" title="${t('ous.fixDriftLinkAd')}">${t('ous.fixDriftLinkAd')}</button>
+                  <button class="btn btn-sm btn-secondary drift-fix-btn" data-ou="${this.escAttr(ouDN)}" data-idx="${idx}" data-action="remove-local" title="${t('ous.fixDriftRemoveLocal')}">${t('ous.fixDriftRemoveLocal')}</button>
+                `}
+              </div>
+            </li>`;
+        }).join('');
+
         syncBanner = `
           <div class="alert alert-warning mt-sm">
-            <strong>${t('ous.syncDriftTitle')}</strong>
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+              <strong>${t('ous.syncDriftTitle')}</strong>
+              <button class="btn btn-sm btn-primary" id="btn-fix-all-drifts" data-ou="${this.escAttr(ouDN)}">${t('ous.fixAllDrifts')}</button>
+            </div>
             <p class="text-sm mt-xs">${t('ous.syncDriftDesc')}</p>
-            <ul class="mt-xs" style="margin-left:18px;">
-              ${warnings.map(w => `<li>${this.esc(w.gpoName)} — ${this.esc(w.reason)}</li>`).join('')}
+            <ul class="mt-xs" style="margin-left:0;list-style:none;padding:0;">
+              ${warningRows}
             </ul>
           </div>`;
       }
@@ -86,6 +107,7 @@ Object.assign(OUsPage, {
     const state = this.aggregateState(app.id, selected);
     const hasPendingForRow = selected.some(dn => this.hasPending(app.id, dn));
     const hasGPO = !!app.gpoName;
+    const isOrphan = this.state.orphanGPOAppIds && this.state.orphanGPOAppIds.has(app.id);
     const disabled = !hasGPO;
 
     const checkboxClass = `assignment-checkbox state-${state} ${hasPendingForRow ? 'pending' : ''} ${disabled ? 'disabled' : ''}`;
@@ -100,6 +122,7 @@ Object.assign(OUsPage, {
           <div class="assignment-app-name">${this.esc(app.name)}</div>
           <div class="assignment-app-meta">
             ${hasGPO ? `<span class="badge badge-info">${this.esc(app.gpoName)}</span>` : `<span class="badge badge-warning">${t('ous.noGpoBadge')}</span>`}
+            ${isOrphan ? `<span class="badge badge-warning" title="${this.escAttr(t('ous.orphanGpoDetected').replace('{n}', 1))}">GPO missing</span>` : ''}
             ${app.installerType ? `<span class="badge badge-neutral">${this.esc(app.installerType.toUpperCase())}</span>` : ''}
             ${hasPendingForRow ? `<span class="badge badge-pending">${t('ous.pendingBadge')}</span>` : ''}
           </div>
@@ -139,6 +162,26 @@ Object.assign(OUsPage, {
         this.toggleAppForSelection(appId);
       });
     });
+
+    // Drift fix buttons (per-discrepancy)
+    panel.querySelectorAll('.drift-fix-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const ouDN = btn.dataset.ou;
+        const idx = parseInt(btn.dataset.idx, 10);
+        const action = btn.dataset.action;
+        this.fixSyncDrift(ouDN, idx, action);
+      });
+    });
+
+    // Fix all drifts button
+    const fixAllBtn = panel.querySelector('#btn-fix-all-drifts');
+    if (fixAllBtn) {
+      fixAllBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.fixAllSyncDrifts(fixAllBtn.dataset.ou);
+      });
+    }
   },
 
   refreshAssignmentPanel() {
@@ -234,14 +277,25 @@ Object.assign(OUsPage, {
   // ─── Sync check (local config vs real AD state) ──────
   async runSyncCheck(ouDN) {
     try {
-      const result = await window.api.ad.checkGPOConflicts(ouDN);
+      const managedGpoNames = this.getManagedProgramGPONames();
+      if (managedGpoNames.length === 0) {
+        this.state.syncWarnings.delete(ouDN);
+        App.toast(t('ous.syncCheckClean'), 'success');
+        return;
+      }
+
+      const result = await window.api.ad.getManagedGPOLinks(managedGpoNames, [ouDN]);
       if (!result.success) {
         App.toast(t('ous.syncCheckFailed') + ': ' + result.error, 'error');
         return;
       }
-      const realLinks = (result.data || []).map(l => l.DisplayName).filter(Boolean);
+      this.state.managedRealLinks = {
+        ...(this.state.managedRealLinks || {}),
+        [ouDN]: Array.isArray(result.data?.[ouDN]) ? result.data[ouDN] : []
+      };
+      const realLinks = this.getManagedRealLinksForOU(ouDN);
       const localAssigned = this.state.apps
-        .filter(a => a.gpoName && (a.assignedOUs || []).includes(ouDN))
+        .filter(a => this.isProgramManagedGPOName(a.gpoName) && (a.assignedOUs || []).includes(ouDN))
         .map(a => a.gpoName);
 
       const warnings = [];
@@ -268,6 +322,97 @@ Object.assign(OUsPage, {
     } catch (err) {
       App.toast(t('ous.syncCheckFailed') + ': ' + err.message, 'error');
     }
+  },
+
+  // ─── Drift fix: individual discrepancy ────────────────
+  async fixSyncDrift(ouDN, warningIdx, action) {
+    const warnings = this.state.syncWarnings.get(ouDN);
+    if (!warnings || !warnings[warningIdx]) return;
+    const warning = warnings[warningIdx];
+
+    try {
+      if (action === 'unlink-ad') {
+        // GPO linked in AD but not in local config → unlink from AD
+        const res = await window.api.ad.unlinkGPOfromOU(warning.gpoName, ouDN);
+        if (!res.success) throw new Error(res.error || 'Unknown error');
+      } else if (action === 'add-local') {
+        // GPO linked in AD but not in local config → add to local config
+        const app = this.state.apps.find(a => a.gpoName === warning.gpoName);
+        if (app) {
+          const nextOUs = new Set(app.assignedOUs || []);
+          nextOUs.add(ouDN);
+          await window.api.apps.update(app.id, { assignedOUs: Array.from(nextOUs) });
+        }
+      } else if (action === 'link-ad') {
+        // Assigned locally but not linked in AD → link in AD
+        const res = await window.api.ad.linkGPOtoOU(warning.gpoName, ouDN);
+        if (!res.success) throw new Error(res.error || 'Unknown error');
+      } else if (action === 'remove-local') {
+        // Assigned locally but not linked in AD → remove from local config
+        const app = this.state.apps.find(a => a.gpoName === warning.gpoName);
+        if (app) {
+          const nextOUs = (app.assignedOUs || []).filter(dn => dn !== ouDN);
+          await window.api.apps.update(app.id, { assignedOUs: nextOUs });
+        }
+      }
+
+      App.toast(t('ous.fixDriftSuccess'), 'success');
+    } catch (err) {
+      App.toast(t('ous.fixDriftFailed') + ': ' + err.message, 'error');
+    }
+
+    // Re-run sync check and refresh
+    await this.runSyncCheck(ouDN);
+    // Reload apps to reflect any local config changes
+    this.state.apps = await window.api.apps.getAll();
+    this.state.assignmentCounts = this.computeAssignmentCounts();
+    this.refreshAssignmentPanel();
+    this.renderStatsBar();
+  },
+
+  // ─── Drift fix: all discrepancies at once ─────────────
+  async fixAllSyncDrifts(ouDN) {
+    const warnings = this.state.syncWarnings.get(ouDN);
+    if (!warnings || warnings.length === 0) return;
+
+    const fixAllBtn = document.getElementById('btn-fix-all-drifts');
+    if (fixAllBtn) {
+      fixAllBtn.disabled = true;
+      fixAllBtn.textContent = t('ous.fixingDrift');
+    }
+
+    let ok = 0;
+    let fail = 0;
+    for (const warning of warnings) {
+      try {
+        const isAdNotLocal = warning.reason === t('ous.driftInAdNotLocal');
+        if (isAdNotLocal) {
+          // Default: unlink from AD (AD adjusts to program)
+          const res = await window.api.ad.unlinkGPOfromOU(warning.gpoName, ouDN);
+          if (!res.success) throw new Error(res.error);
+        } else {
+          // Default: link in AD (AD adjusts to program)
+          const res = await window.api.ad.linkGPOtoOU(warning.gpoName, ouDN);
+          if (!res.success) throw new Error(res.error);
+        }
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+
+    if (fail === 0) {
+      App.toast(t('ous.fixAllSuccess').replace('{n}', ok), 'success');
+    } else {
+      App.toast(t('ous.fixAllPartial').replace('{ok}', ok).replace('{fail}', fail), 'warning');
+    }
+
+    // Re-run sync check and refresh
+    await this.runSyncCheck(ouDN);
+    this.state.apps = await window.api.apps.getAll();
+    this.state.assignmentCounts = this.computeAssignmentCounts();
+    this.refreshAssignmentPanel();
+    this.renderStatsBar();
   },
 
   // ─── Pending changes bar (apply / discard) ───────────
@@ -308,6 +453,9 @@ Object.assign(OUsPage, {
 
   async applyChanges() {
     if (this.state.pending.size === 0) return;
+    // Guard against double-click / concurrent apply
+    if (this._applying) return;
+    this._applying = true;
 
     const toAssign = [];
     const toUnassign = [];
@@ -324,10 +472,19 @@ Object.assign(OUsPage, {
     }
 
     try {
-      const result = await window.api.apps.applyAssignmentPlan({ toAssign, toUnassign });
+      // Pass ALL visible OUs so reconciliation covers siblings too
+      const visibleOUs = this.state.flatOUs.map(o => o.dn);
+      const result = await window.api.apps.applyAssignmentPlan({ toAssign, toUnassign }, visibleOUs);
 
-      // Update local state.apps with the returned server state
-      this.state.apps = await window.api.apps.getAll();
+      if (Array.isArray(result?.apps)) {
+        this.state.apps = result.apps;
+      } else {
+        this.state.apps = await window.api.apps.getAll();
+      }
+      this.state.managedRealLinks = result?.links && typeof result.links === 'object'
+        ? result.links
+        : (this.state.managedRealLinks || {});
+      this.state.assignmentCounts = this.computeAssignmentCounts();
 
       // Keep only entries that failed (so user can retry or investigate)
       const succeededKeys = new Set([
@@ -372,6 +529,8 @@ Object.assign(OUsPage, {
         applyBtn.disabled = false;
         applyBtn.textContent = t('ous.applyBtn');
       }
+    } finally {
+      this._applying = false;
     }
   }
 
