@@ -1,4 +1,4 @@
-﻿// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // Apps Page â€“ CRUD, Wizard, Bulk GPO Assignment
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
@@ -88,8 +88,10 @@ const AppsPage = {
 
       <!-- Bulk Action Bar -->
       <div class="action-bar" id="bulk-action-bar">
-        <span class="action-bar-text"><span id="selected-count">0</span> ${t('apps.selected')}</span>
-        <button class="btn btn-ghost btn-sm" id="btn-select-all" onclick="AppsPage.selectAll()">${t('apps.filterAll')}</button>
+        <div style="display:flex; align-items:center; gap:16px;">
+          <span class="action-bar-text"><span id="selected-count">0</span> ${t('apps.selected')}</span>
+          <button class="btn btn-ghost btn-sm" id="btn-select-all" onclick="AppsPage.selectAll()">${t('apps.filterAll')}</button>
+        </div>
         <div class="action-bar-buttons" style="display:flex; gap:10px; align-items:center;">
           <select class="form-select" id="bulk-gpo-select" style="width:200px; padding:6px 10px;">
             <option value="">${t('apps.selectGpo')}</option>
@@ -1387,9 +1389,21 @@ const AppsPage = {
     if (selectAllBtn) {
       const visibleCards = Array.from(document.querySelectorAll('#apps-grid .app-card')).filter(c => c.style.display !== 'none');
       const total = visibleCards.length;
-      selectAllBtn.textContent = count === total && total > 0
-        ? t('common.cancel')
-        : `${t('apps.filterAll')} (${total})`;
+      
+      // Si todos están seleccionados, ocultamos el botón izquierdo porque ya tenemos el de Cancelar a la derecha
+      if (count === total && total > 0) {
+        selectAllBtn.style.display = 'none';
+      } else {
+        selectAllBtn.style.display = '';
+        selectAllBtn.textContent = `${t('apps.filterAll')} (${total})`;
+      }
+    }
+
+    const deployBtn = document.getElementById('btn-bulk-gpo');
+    if (deployBtn) {
+      deployBtn.textContent = count > 0 
+        ? `Aplicar ${count} Cambios Pendientes` 
+        : (t('apps.deploy') || 'Desplegar');
     }
   },
 

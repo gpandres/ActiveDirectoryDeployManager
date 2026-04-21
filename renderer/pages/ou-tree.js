@@ -419,7 +419,7 @@ const OUsPage = {
             <span class="tree-icon">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
             </span>
-            <span class="tree-label">${this.esc(node.name)}</span>
+            <span class="tree-label marquee-text-container"><span class="marquee-text">${this.esc(node.name)}</span></span>
             ${direct > 0 ? `<span class="tree-badge" title="${this.escAttr(t('ous.directBadgeTooltip'))}">${direct}</span>` : ''}
             ${descendant > 0 ? `<span class="tree-badge tree-badge-descendant" title="${this.escAttr(t('ous.descendantBadgeTooltip').replace('{n}', descendant))}">${descendant}</span>` : ''}
           </div>

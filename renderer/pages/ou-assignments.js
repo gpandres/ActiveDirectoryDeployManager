@@ -36,7 +36,7 @@ Object.assign(OUsPage, {
           const isAdNotLocal = w.reason === t('ous.driftInAdNotLocal');
           return `
             <li class="drift-item" style="display:flex;align-items:center;gap:8px;padding:4px 0;flex-wrap:wrap;">
-              <span style="flex:1;min-width:180px;">${this.esc(w.gpoName)} — ${this.esc(w.reason)}</span>
+              <span class="marquee-text-container" style="flex:1;min-width:180px;"><span class="marquee-text">${this.esc(w.gpoName)} — ${this.esc(w.reason)}</span></span>
               <div class="drift-actions" style="display:flex;gap:4px;flex-shrink:0;">
                 ${isAdNotLocal ? `
                   <button class="btn btn-sm btn-secondary drift-fix-btn" data-ou="${this.escAttr(ouDN)}" data-idx="${idx}" data-action="unlink-ad" title="${t('ous.fixDriftUnlinkAd')}">${t('ous.fixDriftUnlinkAd')}</button>
@@ -118,8 +118,8 @@ Object.assign(OUsPage, {
           ${state === 'all' ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>' : ''}
           ${state === 'some' ? '<div class="checkbox-dash"></div>' : ''}
         </div>
-        <div class="assignment-app-info">
-          <div class="assignment-app-name">${this.esc(app.name)}</div>
+        <div class="assignment-app-info" style="min-width: 0;">
+          <div class="assignment-app-name marquee-text-container" style="max-width: 100%;"><span class="marquee-text">${this.esc(app.name)}</span></div>
           <div class="assignment-app-meta">
             ${hasGPO ? `<span class="badge badge-info">${this.esc(app.gpoName)}</span>` : `<span class="badge badge-warning">${t('ous.noGpoBadge')}</span>`}
             ${isOrphan ? `<span class="badge badge-warning" title="${this.escAttr(t('ous.orphanGpoDetected').replace('{n}', 1))}">GPO missing</span>` : ''}

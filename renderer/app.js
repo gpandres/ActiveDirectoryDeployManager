@@ -35,6 +35,8 @@ const App = {
 
     this.bindWindowControls();
     this.bindNavigation();
+    this.bindSidebarToggle();
+    this.bindMarqueeHover();
     this.bindModal();
     await this.checkRSAT();
 
@@ -149,13 +151,43 @@ const App = {
     const closeBtn = document.getElementById('modal-close');
 
     closeBtn.addEventListener('click', () => { if (!this._modalLocked) this.closeModal(); });
-    overlay.addEventListener('click', (e) => {
+    // overlay auto-close disabled to prevent accidental data loss
+    /* overlay.addEventListener('click', (e) => {
       if (e.target === overlay && !this._modalLocked) this.closeModal();
-    });
+    }); */
 
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && !this._modalLocked) this.closeModal();
     });
+  },
+
+  // ─── Sidebar Toggle ────────────────────────────────
+  bindSidebarToggle() {
+    const sidebar = document.querySelector('.sidebar');
+    const toggleBtn = document.getElementById('sidebar-toggle');
+    if (!sidebar || !toggleBtn) return;
+    toggleBtn.addEventListener('click', () => {
+      sidebar.classList.toggle('collapsed');
+    });
+  },
+
+  // ─── Marquee Hover Effect ──────────────────────────
+  bindMarqueeHover() {
+    document.addEventListener('mouseenter', (e) => {
+      const target = e.target.closest('.marquee-text');
+      if (target && target.scrollWidth > target.clientWidth) {
+        const overflow = target.scrollWidth - target.clientWidth;
+        target.style.transition = `transform \${overflow * 18}ms linear`;
+        target.style.transform = `translateX(-\${overflow + 10}px)`; // extra pixels to see end
+      }
+    }, true);
+    document.addEventListener('mouseleave', (e) => {
+      const target = e.target.closest('.marquee-text');
+      if (target) {
+        target.style.transition = 'transform 0.2s ease-out';
+        target.style.transform = 'translateX(0)';
+      }
+    }, true);
   },
 
   applyModalOptions(options = {}) {

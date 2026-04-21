@@ -281,10 +281,20 @@ app.whenReady().then(() => {
       return '';
     }
   });
-  ipcMain.handle('scripts:deploy', (_, appConfig) => {
+  const _deployingScripts = new Set();
+  ipcMain.handle('scripts:deploy', async (_, appConfig) => {
     try { assertObject(appConfig, 'appConfig'); }
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
-    return scriptService.deployScript(appConfig);
+    
+    const appId = appConfig.id || appConfig.name;
+    if (_deployingScripts.has(appId)) return { success: false, error: 'Deploy in progress' };
+    _deployingScripts.add(appId);
+    
+    try {
+      return await scriptService.deployScript(appConfig);
+    } finally {
+      _deployingScripts.delete(appId);
+    }
   });
   ipcMain.handle('scripts:deployUninstall', (_, appConfig) => {
     try { assertObject(appConfig, 'appConfig'); }
@@ -337,8 +347,9 @@ app.whenReady().then(() => {
 
       const entries = await fs.promises.readdir(destDir, { withFileTypes: true }).catch(() => []);
       for (const entry of entries) {
-        if (entry.name === tempName) continue;
-        await fs.promises.rm(pathMod.join(destDir, entry.name), { recursive: true, force: true });
+        if (!entry.name.startsWith('.__uploading__')) {
+          await fs.promises.rm(pathMod.join(destDir, entry.name), { recursive: true, force: true });
+        }
       }
 
       await fs.promises.rename(tempPath, destPath);
