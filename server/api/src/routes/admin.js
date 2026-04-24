@@ -69,7 +69,9 @@ module.exports = async function adminRoutes(fastify) {
       }
     }
   }, async (req, reply) => {
-    const secret = randomToken(32);
+    // Hex format: the column is CHAR(64) (32 bytes × 2 chars) and
+    // the client signs via crypto.createHmac using Buffer.from(hex, 'hex').
+    const secret = require('crypto').randomBytes(32).toString('hex');
     await getPool().execute(
       `INSERT INTO share_secrets (share_id, secret_hex)
             VALUES (?, ?)

@@ -160,6 +160,10 @@ const DashboardPage = {
             <div class="spinner" style="width:10px;height:10px;border-width:2px;margin:0;"></div>
             <span style="color:var(--text-muted)">${t('dashboard.netShareChecking')}</span>
           </div>
+          <div id="log-backend-status" style="display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="App.navigate('logs')" title="${t('nav.logs') || 'Logs'}">
+            <div class="spinner" style="width:10px;height:10px;border-width:2px;margin:0;"></div>
+            <span style="color:var(--text-muted)">${t('logs.title') || 'Logs'}...</span>
+          </div>
         </div>
         ${!App.rsatAvailable ? `
           <div style="margin-top:12px;padding:12px;background:var(--accent-danger-dim);border:1px solid rgba(239,68,68,0.25);border-radius:var(--radius-sm);">
@@ -180,6 +184,27 @@ const DashboardPage = {
 
     // Check network share connectivity asynchronously
     this.checkNetworkShare();
+    this.checkLogBackend();
+  },
+
+  async checkLogBackend() {
+    const el = document.getElementById('log-backend-status');
+    if (!el) return;
+    let st;
+    try { st = await window.api.logs.status(); }
+    catch { return; }
+    const isD = st.mode === 'dedicated';
+    const dotColor = (isD && !st.online) ? 'var(--accent-warning)' : 'var(--accent-secondary)';
+    const shadow   = (isD && !st.online) ? 'rgba(245,158,11,.5)'   : 'rgba(0,212,170,.5)';
+    const label = isD
+      ? (st.online
+          ? `${t('logs.backendDedicated') || 'Servidor dedicado'} — ${st.host || ''}`
+          : `${t('logs.backendOffline') || 'Servidor no alcanzable'} · cola ${st.queueSize}`)
+      : (t('logs.backendLocal') || 'Almacenamiento local');
+    el.innerHTML = `
+      <div style="width:10px;height:10px;border-radius:50%;background:${dotColor};box-shadow:0 0 8px ${shadow};flex-shrink:0;"></div>
+      <span style="color:var(--text-secondary);">Logs — ${App.escapeHtml ? App.escapeHtml(label) : label}</span>
+    `;
   },
 
   async checkNetworkShare() {

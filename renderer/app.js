@@ -64,6 +64,8 @@ const App = {
     document.querySelector('.nav-item[data-page="catalog"] span').textContent = t('nav.catalog');
     document.querySelector('.nav-item[data-page="bundles"] span').textContent = t('nav.bundles');
     document.querySelector('.nav-item[data-page="deployments"] span').textContent = t('nav.deployments');
+    const logsNav = document.querySelector('.nav-item[data-page="logs"] span');
+    if (logsNav) logsNav.textContent = t('nav.logs');
     document.querySelector('.nav-item[data-page="settings"] span').textContent = t('nav.settings');
   },
 
@@ -110,6 +112,7 @@ const App = {
         case 'catalog': await CatalogPage.render(container); break;
         case 'bundles': await BundlesPage.render(container); break;
         case 'deployments': await DeploymentsPage.render(container); break;
+        case 'logs': await LogsPage.render(container); break;
         case 'settings': await SettingsPage.render(container); break;
         default: container.innerHTML = '<p>' + t('common.pageNotFound') + '</p>';
       }
