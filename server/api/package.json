@@ -1,0 +1,20 @@
+{
+  "name": "addeploy-logs-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Log ingestion + query API for AD Deploy Manager",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "@fastify/rate-limit": "^9.1.0",
+    "@fastify/sensible": "^5.6.0",
+    "fastify": "^4.28.1",
+    "mysql2": "^3.11.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

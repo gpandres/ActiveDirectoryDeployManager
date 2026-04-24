@@ -67,6 +67,26 @@ const SetupPage = {
           <input type="hidden" id="setup-baseou" value="${JSON.stringify(config.baseOUs || (config.baseOU ? [config.baseOU] : [])).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">
         </div>
 
+        <div class="form-group" id="setup-logmode-group" style="margin-top: var(--space-lg);">
+          <label class="form-label">${t('setup.logMode') || 'Sistema de logs'}</label>
+          <div id="setup-logmode-banner" style="display:none;margin-bottom:8px;padding:8px 10px;border-radius:6px;background:var(--accent-primary-dim);color:var(--accent-primary);font-size:12px;"></div>
+          <div style="display:flex;gap:8px;">
+            <label style="flex:1;cursor:pointer;border:1px solid var(--border-color);border-radius:6px;padding:10px;">
+              <input type="radio" name="setup-logmode" value="local" ${config.logMode === 'local' || !config.logMode ? 'checked' : ''}>
+              <strong style="margin-left:6px;">${t('setup.logModeLocal') || 'Local'}</strong>
+              <p class="form-hint" style="margin:4px 0 0 22px;">${t('setup.logModeLocalHint') || 'Guarda los logs en este equipo.'}</p>
+            </label>
+            <label style="flex:1;cursor:pointer;border:1px solid var(--border-color);border-radius:6px;padding:10px;">
+              <input type="radio" name="setup-logmode" value="dedicated" ${config.logMode === 'dedicated' ? 'checked' : ''}>
+              <strong style="margin-left:6px;">${t('setup.logModeDedicated') || 'Servidor dedicado'}</strong>
+              <p class="form-hint" style="margin:4px 0 0 22px;">${t('setup.logModeDedicatedHint') || 'Centraliza los logs via API.'}</p>
+            </label>
+          </div>
+          <p class="form-hint" id="setup-logmode-readonly" style="display:none;margin-top:6px;color:var(--text-muted);">
+            ${t('setup.logModeReadonly') || 'Configuración detectada en el share. Los campos están bloqueados para evitar sobrescribir la configuración del servidor.'}
+          </p>
+        </div>
+
         <div style="margin-top: var(--space-xl); display: flex; justify-content: flex-end;">
           <button class="btn btn-primary btn-lg" id="btn-save-setup">
             ${t('setup.saveAndContinue')}
@@ -75,6 +95,27 @@ const SetupPage = {
         </div>
       </div>
     `;
+
+    // Debounced share-config detection: when the user enters a
+    // share path, peek for logging-config.json and lock the form
+    // into dedicated mode if one is present.
+    this._logModeState = { present: false, detail: null };
+    const networkInput = document.getElementById('setup-network');
+    let detectTimer = null;
+    const runDetection = async () => {
+      if (!networkInput.value.trim()) return;
+      // Persist share path before detection so the main process sees it.
+      await window.api.config.set({ networkSharePath: networkInput.value.trim() });
+      const res = await window.api.share.detectLoggingConfig();
+      this._applyLogModeDetection(res);
+    };
+    networkInput.addEventListener('blur', runDetection);
+    networkInput.addEventListener('input', () => {
+      clearTimeout(detectTimer);
+      detectTimer = setTimeout(runDetection, 500);
+    });
+    // Run once on load in case the share is already configured.
+    if (config.networkSharePath) runDetection();
 
     document.getElementById('setup-lang').addEventListener('change', async (e) => {
       // Re-fetch translations and re-render if user changes language during setup
@@ -95,6 +136,7 @@ const SetupPage = {
     }
 
     document.getElementById('btn-save-setup').addEventListener('click', async () => {
+      const selectedMode = document.querySelector('input[name="setup-logmode"]:checked')?.value || 'local';
       const newConfig = {
         language: document.getElementById('setup-lang').value,
         networkSharePath: document.getElementById('setup-network').value.trim(),
@@ -102,7 +144,7 @@ const SetupPage = {
         defaultGPO: document.getElementById('setup-gpo').value.trim(),
         preferredDC: document.getElementById('setup-dc').value.trim(),
         baseOUs: this.getSelectedDNs(),
-        // setting firstRun to false will let them enter the app
+        logMode: selectedMode,
         firstRun: false
       };
 
@@ -112,16 +154,51 @@ const SetupPage = {
       }
 
       await window.api.config.set(newConfig);
-      await window.initI18n(); // Ensure i18n is updated
-      
-      // Restore the sidebar which we hid
+
+      // When dedicated mode comes from the share, run the enrollment
+      // flow to obtain a per-equipo ingest API key.
+      if (selectedMode === 'dedicated' && this._logModeState?.present) {
+        const res = await window.api.share.enrollFromConfig();
+        if (!res?.success) {
+          App.toast(
+            `${t('setup.enrollFailed') || 'No se pudo enrolar el equipo'}: ${res?.error || 'unknown'}`,
+            'error'
+          );
+          return;
+        }
+        App.toast(t('setup.enrollOk') || 'Equipo enrolado correctamente', 'success');
+      } else if (selectedMode === 'local') {
+        await window.api.logs.useLocal();
+      }
+
+      await window.initI18n();
       document.querySelector('.sidebar').style.display = 'flex';
-      
-      // Update sidebar texts as it might still be in old language
       App.updateSidebarLanguage();
-      
       App.navigate('dashboard');
     });
+  },
+
+  _applyLogModeDetection(detection) {
+    const banner   = document.getElementById('setup-logmode-banner');
+    const readonly = document.getElementById('setup-logmode-readonly');
+    const radios   = document.querySelectorAll('input[name="setup-logmode"]');
+    this._logModeState = detection || { present: false };
+
+    if (detection && detection.present) {
+      banner.style.display = 'block';
+      banner.textContent = (t('setup.logModeShareDetected')
+        || 'Configuración de logs detectada en el share') + ` — ${detection.apiBaseUrl}`;
+      readonly.style.display = 'block';
+      // Force dedicated + lock local option.
+      radios.forEach(r => {
+        r.checked = r.value === 'dedicated';
+        r.disabled = true;
+      });
+    } else {
+      banner.style.display = 'none';
+      readonly.style.display = 'none';
+      radios.forEach(r => { r.disabled = false; });
+    }
   },
 
   esc(str) {

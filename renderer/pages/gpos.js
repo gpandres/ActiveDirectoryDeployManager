@@ -102,6 +102,7 @@ const GposPage = {
 
     if (App.rsatAvailable && !App.rsatMissingGPMC) {
       await this.loadGPOs();
+      this._installFocusRefresh();
     } else {
       document.getElementById('gpos-tbody').innerHTML = `
         <tr>
@@ -113,9 +114,27 @@ const GposPage = {
     }
   },
 
+  _installFocusRefresh() {
+    if (this._focusListener) {
+      document.removeEventListener('visibilitychange', this._focusListener);
+    }
+    this._focusListener = () => {
+      if (document.hidden) return;
+      if (!document.getElementById('gpos-tbody')) return;
+      if (this._focusDebounceTimer) clearTimeout(this._focusDebounceTimer);
+      this._focusDebounceTimer = setTimeout(() => {
+        this._focusDebounceTimer = null;
+        if (document.getElementById('gpos-tbody')) {
+          this.loadGPOs();
+        }
+      }, 300);
+    };
+    document.addEventListener('visibilitychange', this._focusListener);
+  },
+
   getVisibleGPOs() {
     if (!this.gposCache) return [];
-    let list = this.gposCache.filter(g => g.DisplayName.startsWith('Deploy_'));
+    let list = this.gposCache;
     const q = this.searchQuery.trim().toLowerCase();
     if (q) list = list.filter(g => g.DisplayName.toLowerCase().includes(q));
     return list;

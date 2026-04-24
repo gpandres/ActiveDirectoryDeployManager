@@ -219,7 +219,7 @@ const OUsPage = {
   },
 
   isProgramManagedGPOName(gpoName) {
-    return /^(Deploy_|ADDM_)/i.test(String(gpoName || '').trim());
+    return String(gpoName || '').trim().length > 0;
   },
 
   getManagedProgramGPONames() {

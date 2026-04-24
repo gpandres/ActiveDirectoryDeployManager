@@ -22,7 +22,24 @@ const DEFAULT_CONFIG = {
   language: 'es',
   firstRun: true,
   shareId: '',
-  dismissedAppUpdateVersion: ''
+  dismissedAppUpdateVersion: '',
+
+  // ── Logging backend selection ──
+  // 'local'     → writes to the per-user activity-log file (default)
+  // 'dedicated' → ships logs to the API defined in remoteLogging
+  logMode: 'local',
+
+  // Populated when a signed logging-config.json is detected on
+  // the share. The apiKey and readApiKey are NOT stored here in
+  // plain text — they live in the encrypted secret store. This
+  // object keeps non-sensitive display metadata.
+  remoteLogging: {
+    apiBaseUrl: '',        // e.g. https://logs.empresa.local
+    tlsFingerprint: null,  // sha256//... for certificate pinning
+    readonly: false,       // true when the setup came from the share
+    enrolledAt: null,      // ISO timestamp of last successful enroll
+    equipoId: null
+  }
 };
 
 const DANGEROUS_KEYS = /^(__proto__|constructor|prototype)$/;

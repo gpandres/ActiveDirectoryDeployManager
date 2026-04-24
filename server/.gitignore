@@ -1,0 +1,4 @@
+secrets/*.txt
+!secrets/README.md
+api/node_modules/
+*.log

@@ -19,6 +19,19 @@ function getAppsPath() {
 const { createShareStore } = require('./share-store');
 const appsShareStore = createShareStore('apps-config.json');
 
+function loadLocalCachedApps() {
+  try {
+    const p = getAppsPath();
+    if (fs.existsSync(p)) {
+      const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      return Array.isArray(parsed) ? parsed.map(normalizeAppRecord) : [];
+    }
+  } catch (err) {
+    console.error('Error loading cached apps:', err);
+  }
+  return [];
+}
+
 function loadApps() {
   // Share is authoritative — pull from there if available
   const fromShare = appsShareStore.read();
@@ -31,17 +44,7 @@ function loadApps() {
     return normalized.map(hydrateAppShareState);
   }
   // Fallback to local cache (offline or share not yet configured)
-  try {
-    const p = getAppsPath();
-    if (fs.existsSync(p)) {
-      const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
-      const normalized = Array.isArray(parsed) ? parsed.map(normalizeAppRecord) : [];
-      return normalized.map(hydrateAppShareState);
-    }
-  } catch (err) {
-    console.error('Error loading apps:', err);
-  }
-  return [];
+  return loadLocalCachedApps().map(hydrateAppShareState);
 }
 
 function saveApps(apps) {
@@ -73,7 +76,7 @@ function normalizeDNArray(value) {
 }
 
 function isProgramManagedGPOName(value) {
-  return /^(Deploy_|ADDM_)/i.test(String(value || '').trim());
+  return String(value || '').trim().length > 0;
 }
 
 function normalizeManagedLinkMap(value) {
@@ -367,6 +370,18 @@ function syncAppShareManifest(appRecord) {
     const existingUninstall = manifest.uninstall && typeof manifest.uninstall === 'object'
       ? manifest.uninstall
       : {};
+    const existingScripts = manifest.scripts && typeof manifest.scripts === 'object'
+      ? manifest.scripts
+      : {};
+    const existingInstallScript = existingScripts.install && typeof existingScripts.install === 'object'
+      ? existingScripts.install
+      : {};
+    const existingUninstallScript = existingScripts.uninstall && typeof existingScripts.uninstall === 'object'
+      ? existingScripts.uninstall
+      : {};
+    const existingUpdater = existingScripts.updater && typeof existingScripts.updater === 'object'
+      ? existingScripts.updater
+      : {};
     const uninstallScriptPath = typeof normalized.uninstallDeployedPath === 'string' && normalized.uninstallDeployedPath
       ? normalized.uninstallDeployedPath
       : (typeof existingUninstall.scriptPath === 'string' ? existingUninstall.scriptPath : '');
@@ -382,6 +397,7 @@ function syncAppShareManifest(appRecord) {
     const nextManifest = {
       ...manifest,
       app: normalized.name || manifest.app,
+      appVersion: typeof manifest.appVersion === 'string' ? manifest.appVersion : '',
       version: normalized.version || manifest.version || '1.0.0',
       template: normalized.template || manifest.template || 'generic',
       notifyUser: typeof normalized.notifyUser === 'boolean' ? normalized.notifyUser : !!manifest.notifyUser,
@@ -413,6 +429,38 @@ function syncAppShareManifest(appRecord) {
         generatedAt: publishedAction === 'uninstall'
           ? (publishedAt || existingUninstall.generatedAt || '')
           : (existingUninstall.generatedAt || '')
+      },
+      scripts: {
+        ...existingScripts,
+        install: {
+          ...existingInstallScript,
+          path: installScriptPath,
+          generatedAt: typeof existingInstallScript.generatedAt === 'string'
+            ? existingInstallScript.generatedAt
+            : '',
+          generatedByAppVersion: typeof existingInstallScript.generatedByAppVersion === 'string'
+            ? existingInstallScript.generatedByAppVersion
+            : (typeof manifest.appVersion === 'string' ? manifest.appVersion : '')
+        },
+        uninstall: {
+          ...existingUninstallScript,
+          path: uninstallScriptPath,
+          generatedAt: typeof existingUninstallScript.generatedAt === 'string'
+            ? existingUninstallScript.generatedAt
+            : (typeof existingUninstall.generatedAt === 'string' ? existingUninstall.generatedAt : ''),
+          generatedByAppVersion: typeof existingUninstallScript.generatedByAppVersion === 'string'
+            ? existingUninstallScript.generatedByAppVersion
+            : (typeof manifest.appVersion === 'string' ? manifest.appVersion : '')
+        },
+        updater: {
+          lastCheckedAt: typeof existingUpdater.lastCheckedAt === 'string' ? existingUpdater.lastCheckedAt : '',
+          lastUpdatedAt: typeof existingUpdater.lastUpdatedAt === 'string' ? existingUpdater.lastUpdatedAt : '',
+          lastError: typeof existingUpdater.lastError === 'string' ? existingUpdater.lastError : '',
+          needsUpdate: typeof existingUpdater.needsUpdate === 'boolean' ? existingUpdater.needsUpdate : false,
+          status: typeof existingUpdater.status === 'string' && existingUpdater.status
+            ? existingUpdater.status
+            : 'current'
+        }
       }
     };
 
@@ -429,6 +477,10 @@ function syncAppShareManifest(appRecord) {
 const appService = {
   getAll() {
     return loadApps();
+  },
+
+  getCachedAll() {
+    return loadLocalCachedApps();
   },
 
   get(id) {

@@ -11,7 +11,20 @@ contextBridge.exposeInMainWorld('api', {
   // Share Health
   share: {
     checkHealth: () => ipcRenderer.invoke('share:checkHealth'),
-    getStatus: () => ipcRenderer.invoke('share:getStatus')
+    getStatus: () => ipcRenderer.invoke('share:getStatus'),
+    detectLoggingConfig: () => ipcRenderer.invoke('share:detectLoggingConfig'),
+    enrollFromConfig: () => ipcRenderer.invoke('share:enrollFromConfig')
+  },
+
+  // Logging backend (local vs dedicated)
+  logs: {
+    query: (filters) => ipcRenderer.invoke('logs:query', filters),
+    recent: (count) => ipcRenderer.invoke('logs:recent', count),
+    statsSummary: (win) => ipcRenderer.invoke('logs:statsSummary', win),
+    equipos: (search) => ipcRenderer.invoke('logs:equipos', search),
+    status: () => ipcRenderer.invoke('logs:status'),
+    reload: () => ipcRenderer.invoke('logs:reload'),
+    useLocal: () => ipcRenderer.invoke('logs:useLocal')
   },
 
   // Config
@@ -57,9 +70,14 @@ contextBridge.exposeInMainWorld('api', {
   scripts: {
     generate: (appConfig) => ipcRenderer.invoke('scripts:generate', appConfig),
     deploy: (appConfig) => ipcRenderer.invoke('scripts:deploy', appConfig),
+    regenerate: (appConfig) => ipcRenderer.invoke('scripts:regenerate', appConfig),
     generateUninstall: (appConfig) => ipcRenderer.invoke('scripts:generateUninstall', appConfig),
     deployUninstall: (appConfig) => ipcRenderer.invoke('scripts:deployUninstall', appConfig),
     getTemplates: () => ipcRenderer.invoke('scripts:getTemplates')
+  },
+
+  scriptUpdates: {
+    getStatus: () => ipcRenderer.invoke('scriptUpdates:getStatus')
   },
 
   templates: {

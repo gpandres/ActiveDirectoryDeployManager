@@ -1,33 +1,8 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
-const fs = require('fs');
 const path = require('path');
+const { getCurrentAppVersion } = require('./services/app-version');
 
 let mainWindow;
-
-function getCurrentAppVersion() {
-  try {
-    const currentVersion = app.getVersion();
-    if (typeof currentVersion === 'string' && currentVersion.trim()) {
-      return currentVersion.trim();
-    }
-  } catch (err) {
-    console.warn('Unable to read app version from Electron metadata:', err.message);
-  }
-
-  try {
-    const packageJsonPath = path.join(__dirname, 'package.json');
-    if (fs.existsSync(packageJsonPath)) {
-      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
-      if (typeof packageJson.version === 'string' && packageJson.version.trim()) {
-        return packageJson.version.trim();
-      }
-    }
-  } catch (err) {
-    console.warn('Unable to read app version from package.json:', err.message);
-  }
-
-  return '0.0.0';
-}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -89,6 +64,7 @@ app.whenReady().then(() => {
   const templateService = require('./services/template-service');
   const shareHealth = require('./services/share-health');
   const updateService = require('./services/update-service');
+  const scriptUpdateService = require('./services/script-update-service');
 
   console.log('Initialize i18n...');
   i18nService.initialize();
@@ -104,6 +80,10 @@ app.whenReady().then(() => {
   console.log('Services loaded, creating window...');
   createWindow();
   console.log('Window created');
+
+  scriptUpdateService.ensureBackgroundSync(getCurrentAppVersion()).catch(err => {
+    console.warn('Background script update sync failed:', err?.message || err);
+  });
 
   // Run initial share health check (non-blocking) so the cache is warm
   // before the renderer starts making sync share calls.
@@ -296,6 +276,20 @@ app.whenReady().then(() => {
       _deployingScripts.delete(appId);
     }
   });
+  ipcMain.handle('scripts:regenerate', async (_, appConfig) => {
+    try { assertObject(appConfig, 'appConfig'); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+
+    const appId = appConfig.id || appConfig.name;
+    if (_deployingScripts.has(appId)) return { success: false, error: 'Deploy in progress' };
+    _deployingScripts.add(appId);
+
+    try {
+      return await scriptService.regenerateScripts(appConfig);
+    } finally {
+      _deployingScripts.delete(appId);
+    }
+  });
   ipcMain.handle('scripts:deployUninstall', (_, appConfig) => {
     try { assertObject(appConfig, 'appConfig'); }
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
@@ -421,6 +415,7 @@ app.whenReady().then(() => {
     catch (e) { return { wingetId: '', wingetSource: 'winget', latestVersion: null, name: '', available: false }; }
     return catalogService.resolvePackage(reference);
   });
+  ipcMain.handle('scriptUpdates:getStatus', () => scriptUpdateService.getStatus());
   ipcMain.handle('updates:getCurrent', () => ({
     currentVersion: getCurrentAppVersion()
   }));
@@ -547,6 +542,112 @@ app.whenReady().then(() => {
   // ─── IPC Handlers: Activity Log ───────────────────────────────────
   ipcMain.handle('activity:getRecent', (_, count) => activityLog.getRecent(count));
   ipcMain.handle('activity:add', (_, action, details) => activityLog.add(action, details));
+
+  // ─── IPC Handlers: Logging backend (local vs dedicated) ──────────
+  const logSink = require('./services/log-sink');
+  const configShare = require('./services/config-share');
+  const secretStore = require('./services/secret-store');
+  const os = require('os');
+
+  ipcMain.handle('logs:query', async (_, filters) => {
+    try { assertObject(filters || {}, 'filters'); } catch (e) { return { items: [], nextCursor: null, error: 'Invalid arguments' }; }
+    try { return await logSink.query(filters || {}); }
+    catch (err) { return { items: [], nextCursor: null, error: err.message }; }
+  });
+  ipcMain.handle('logs:recent', async (_, count) => {
+    try { return await logSink.getRecent(Number(count) || 10); }
+    catch (err) { return []; }
+  });
+  ipcMain.handle('logs:statsSummary', async (_, win) => {
+    try { return await logSink.statsSummary(typeof win === 'string' ? win : '24h'); }
+    catch (err) { return { error: err.message }; }
+  });
+  ipcMain.handle('logs:equipos', async (_, search) => {
+    try { return await logSink.equipos(typeof search === 'string' ? search : ''); }
+    catch (err) { return []; }
+  });
+  ipcMain.handle('logs:status', async () => {
+    try { return await logSink.status(); }
+    catch (err) { return { mode: 'local', online: true, queueSize: 0, error: err.message }; }
+  });
+  ipcMain.handle('logs:reload', async () => {
+    try { await logSink.reload(); return { success: true }; }
+    catch (err) { return { success: false, error: err.message }; }
+  });
+
+  // Peek the share for a logging-config.json (called on setup).
+  ipcMain.handle('share:detectLoggingConfig', async () => {
+    try {
+      const cfg = configService.getConfig();
+      if (!cfg.networkSharePath) return { present: false };
+      const peek = await configShare.peekSharedConfig(cfg.networkSharePath);
+      if (!peek) return { present: false };
+      return {
+        present: true,
+        apiBaseUrl: peek.apiBaseUrl,
+        tlsFingerprint: peek.tlsFingerprint || null,
+        shareId: peek.shareId,
+        issuedAt: peek.issuedAt,
+        readonly: true
+      };
+    } catch (err) {
+      return { present: false, error: err.message };
+    }
+  });
+
+  // Consume the share config and enroll this equipo.
+  ipcMain.handle('share:enrollFromConfig', async () => {
+    try {
+      const cfg = configService.getConfig();
+      if (!cfg.networkSharePath) return { success: false, error: 'no_share_path' };
+      const peek = await configShare.peekSharedConfig(cfg.networkSharePath);
+      if (!peek) return { success: false, error: 'no_shared_config' };
+
+      const enroll = await configShare.enrollWithShare(peek, os.hostname());
+      if (!enroll || !enroll.apiKey) {
+        return { success: false, error: 'enrollment_failed' };
+      }
+
+      if (!secretStore.available()) {
+        return { success: false, error: 'safe_storage_unavailable' };
+      }
+      secretStore.set('ingest_api_key', enroll.apiKey);
+
+      configService.setConfig({
+        logMode: 'dedicated',
+        shareId: peek.shareId,
+        remoteLogging: {
+          apiBaseUrl: peek.apiBaseUrl,
+          tlsFingerprint: peek.tlsFingerprint || null,
+          readonly: true,
+          enrolledAt: new Date().toISOString(),
+          equipoId: enroll.equipoId
+        }
+      });
+      await logSink.reload();
+      activityLog.add('log_backend_enrolled', {
+        apiBaseUrl: peek.apiBaseUrl, equipoId: enroll.equipoId
+      });
+      return { success: true, equipoId: enroll.equipoId };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Switch to local mode (reversible). Does not touch the share file.
+  ipcMain.handle('logs:useLocal', async () => {
+    configService.setConfig({ logMode: 'local' });
+    secretStore.delete('ingest_api_key');
+    await logSink.reload();
+    return { success: true };
+  });
+
+  // Prime the log sink so queued entries drain on boot. The
+  // sink reads its API key from the encrypted secret store, so
+  // nothing sensitive is handed to the renderer.
+  if (configService.getConfig().logMode === 'dedicated') {
+    logSink.reload().catch(err => console.warn('log-sink init:', err.message));
+  }
 
   // ─── IPC Handlers: Export/Import ──────────────────────────────────
   ipcMain.handle('apps:exportAll', () => appService.exportAll());

@@ -5,6 +5,7 @@ const configService = require('./config');
 const i18nService = require('./i18n');
 const templateService = require('./template-service');
 const { resolveNamedSubdirectory } = require('./path-utils');
+const { getCurrentAppVersion } = require('./app-version');
 
 function sanitizePSForEmbedding(str) {
   if (typeof str !== 'string') return '';
@@ -24,6 +25,44 @@ function sanitizeWingetSource(str) {
   if (typeof str !== 'string') return '';
   const normalized = str.trim().toLowerCase();
   return /^[a-z0-9._-]{1,64}$/.test(normalized) ? normalized : '';
+}
+
+function decorateGeneratedPowerShellScript(scriptBody, options = {}) {
+  const generatorVersion = sanitizePSForEmbedding(getCurrentAppVersion());
+  const scriptKind = sanitizePSForEmbedding(options.kind || 'install');
+  const appName = sanitizePSForEmbedding(options.appName || '');
+  const metadataHeader = [
+    '# =========================================================================',
+    '# AD DEPLOY MANAGER - GENERATED SCRIPT METADATA',
+    `# generator_app_version: ${generatorVersion}`,
+    `# script_kind: ${scriptKind}`,
+    appName ? `# app_name: ${appName}` : '',
+    '# =========================================================================',
+    `$ADDMGeneratorAppVersion = "${generatorVersion}"`,
+    `$ADDMGeneratedScriptKind = "${scriptKind}"`,
+    appName ? `$ADDMGeneratedAppName = "${appName}"` : '',
+    ''
+  ].filter(Boolean).join('\n');
+
+  return `${metadataHeader}\n${String(scriptBody || '').trimStart()}`;
+}
+
+function buildManifestScriptInfo(existingInfo = {}, details = {}) {
+  const pathValue = typeof details.path === 'string'
+    ? details.path
+    : (typeof existingInfo.path === 'string' ? existingInfo.path : '');
+  const generatedAt = details.written
+    ? (details.generatedAt || new Date().toISOString())
+    : (typeof existingInfo.generatedAt === 'string' ? existingInfo.generatedAt : '');
+  const generatedByAppVersion = details.written
+    ? (details.generatorAppVersion || '')
+    : (typeof existingInfo.generatedByAppVersion === 'string' ? existingInfo.generatedByAppVersion : '');
+
+  return {
+    path: pathValue,
+    generatedAt,
+    generatedByAppVersion
+  };
 }
 
 function isInstallerArtifactName(fileName) {
@@ -130,23 +169,45 @@ const scriptService = {
     const customTemplate = templateService.resolve(appConfig?.template, appConfig?.templateDefinition);
     setCurrentAppCtx(appConfig);
     try {
+      let scriptBody = '';
       if (customTemplate) {
-        return generateUserTemplate(appConfig, customTemplate);
+        scriptBody = generateUserTemplate(appConfig, customTemplate);
+      } else {
+        const generators = getGenerators();
+        const fn = generators[appConfig.template] ?? generators.generic;
+        scriptBody = fn(appConfig);
       }
-      const generators = getGenerators();
-      const fn = generators[appConfig.template] ?? generators.generic;
-      return fn(appConfig);
+      return decorateGeneratedPowerShellScript(scriptBody, {
+        kind: 'install',
+        appName: appConfig?.name || ''
+      });
     } finally {
       setCurrentAppCtx(null);
     }
   },
 
   generateUninstallScript(appConfig) {
-    return generateAppUninstallScript(appConfig);
+    return decorateGeneratedPowerShellScript(generateAppUninstallScript(appConfig), {
+      kind: 'uninstall',
+      appName: appConfig?.name || ''
+    });
   },
 
   async deployScript(appConfig) {
     return deployAppScripts(appConfig, { writeInstall: true, writeUninstall: true });
+  },
+
+  async regenerateScripts(appConfig) {
+    const uninstallConfig = resolveEffectiveUninstallConfig(appConfig || {});
+    const currentAction = String(appConfig?.publishedAction || '').trim().toLowerCase() === 'uninstall'
+      ? 'uninstall'
+      : 'install';
+    return deployAppScripts(appConfig, {
+      writeInstall: true,
+      writeUninstall: supportsUninstallScript(appConfig || {}, uninstallConfig),
+      currentAction,
+      preservePublicationTimestamps: true
+    });
   },
 
   async deployUninstallScript(appConfig) {
@@ -271,9 +332,12 @@ async function deployAppScripts(appConfig, options = {}) {
     if (writeUninstall) {
       const targetUninstallPath = path.join(appFolder, 'uninstall.ps1');
       if (supportsUninstallScript(resolvedAppConfig, uninstallConfig)) {
-        const uninstallScript = generateAppUninstallScript({
+        const uninstallScript = decorateGeneratedPowerShellScript(generateAppUninstallScript({
           ...resolvedAppConfig,
           uninstall: uninstallConfig
+        }), {
+          kind: 'uninstall',
+          appName: resolvedAppConfig?.name || ''
         });
         uninstallPath = targetUninstallPath;
         await fs.promises.writeFile(uninstallPath, '\uFEFF' + uninstallScript, 'utf-8');
@@ -291,11 +355,16 @@ async function deployAppScripts(appConfig, options = {}) {
     } catch (e) {}
 
     const deployedAt = new Date().toISOString();
-    const currentAction = writeInstall ? 'install' : 'uninstall';
+    const currentAction = options.currentAction === 'uninstall'
+      ? 'uninstall'
+      : (options.currentAction === 'install' ? 'install' : (writeInstall ? 'install' : 'uninstall'));
     const manifest = buildAppDeploymentManifest(resolvedAppConfig, {
       safeName,
       customTemplate,
       installerHash,
+      writeInstall,
+      writeUninstall,
+      preservePublicationTimestamps: options.preservePublicationTimestamps === true,
       installPath: writeInstall ? (installPath || path.join(appFolder, 'install.ps1')) : path.join(appFolder, 'install.ps1'),
       uninstallPath,
       uninstallConfig,
@@ -315,6 +384,7 @@ async function deployAppScripts(appConfig, options = {}) {
       path: installPath || uninstallPath,
       installPath,
       uninstallPath,
+      publishedAction: currentAction,
       hash: installerHash,
       uninstallMode: uninstallConfig.mode
     };
@@ -333,9 +403,56 @@ function buildAppDeploymentManifest(appConfig, details = {}) {
     uninstall: details.uninstallConfig || appConfig?.uninstall
   });
   const generatedAt = details.deployedAt || new Date().toISOString();
+  const generatorAppVersion = getCurrentAppVersion();
   const currentAction = details.currentAction === 'uninstall' ? 'uninstall' : 'install';
   const installScriptPath = details.installPath || existingManifest.installScriptPath || '';
   const uninstallScriptPath = details.uninstallPath || existingManifest?.uninstall?.scriptPath || '';
+  const preservePublicationTimestamps = details.preservePublicationTimestamps === true;
+  const existingScripts = existingManifest.scripts && typeof existingManifest.scripts === 'object'
+    ? existingManifest.scripts
+    : {};
+  const existingInstallScript = existingScripts.install && typeof existingScripts.install === 'object'
+    ? existingScripts.install
+    : {};
+  const existingUninstallScript = existingScripts.uninstall && typeof existingScripts.uninstall === 'object'
+    ? existingScripts.uninstall
+    : {};
+  const existingUpdater = existingScripts.updater && typeof existingScripts.updater === 'object'
+    ? existingScripts.updater
+    : {};
+  const publishedAt = preservePublicationTimestamps
+    ? (existingManifest.publishedAt || '')
+    : generatedAt;
+  const deployedAt = preservePublicationTimestamps
+    ? (existingManifest.deployedAt || '')
+    : (currentAction === 'install' ? generatedAt : (existingManifest.deployedAt || ''));
+  const lastInstallAt = preservePublicationTimestamps
+    ? (existingManifest.lastInstallAt || existingManifest.deployedAt || '')
+    : (currentAction === 'install' ? generatedAt : (existingManifest.lastInstallAt || existingManifest.deployedAt || ''));
+  const lastUninstallPreparedAt = preservePublicationTimestamps
+    ? (existingManifest.lastUninstallPreparedAt || existingManifest?.uninstall?.generatedAt || '')
+    : (currentAction === 'uninstall' ? generatedAt : (existingManifest.lastUninstallPreparedAt || existingManifest?.uninstall?.generatedAt || ''));
+  const scriptsMeta = {
+    install: buildManifestScriptInfo(existingInstallScript, {
+      path: installScriptPath,
+      written: details.writeInstall === true,
+      generatedAt,
+      generatorAppVersion
+    }),
+    uninstall: buildManifestScriptInfo(existingUninstallScript, {
+      path: uninstallScriptPath,
+      written: details.writeUninstall === true && supportsUninstallScript(appConfig, uninstallConfig) && !!uninstallScriptPath,
+      generatedAt,
+      generatorAppVersion
+    }),
+    updater: {
+      lastCheckedAt: typeof existingUpdater.lastCheckedAt === 'string' ? existingUpdater.lastCheckedAt : '',
+      lastUpdatedAt: generatedAt,
+      lastError: '',
+      needsUpdate: false,
+      status: 'current'
+    }
+  };
   return {
     ...existingManifest,
     app: appConfig.name,
@@ -348,18 +465,16 @@ function buildAppDeploymentManifest(appConfig, details = {}) {
     template: appConfig.template || 'generic',
     templateSource: details.customTemplate ? 'user' : 'builtin',
     notifyUser: appConfig.notifyUser || false,
-    deployedAt: currentAction === 'install' ? generatedAt : (existingManifest.deployedAt || ''),
-    lastInstallAt: currentAction === 'install'
-      ? generatedAt
-      : (existingManifest.lastInstallAt || existingManifest.deployedAt || ''),
-    lastUninstallPreparedAt: currentAction === 'uninstall'
-      ? generatedAt
-      : (existingManifest.lastUninstallPreparedAt || existingManifest?.uninstall?.generatedAt || ''),
+    appVersion: generatorAppVersion,
+    deployedAt,
+    lastInstallAt,
+    lastUninstallPreparedAt,
     publishedAction: currentAction,
     activeScriptPath: currentAction === 'uninstall' ? uninstallScriptPath : installScriptPath,
-    publishedAt: generatedAt,
+    publishedAt,
     shareId: cfgForManifest.shareId || '',
     installScriptPath,
+    scripts: scriptsMeta,
     uninstall: {
       mode: uninstallConfig.mode,
       available: supportsUninstallScript(appConfig, uninstallConfig) && !!uninstallScriptPath,
@@ -1219,6 +1334,11 @@ Invoke-PendingDeployCacheCleanups -MarkerDirectory $CleanupMarkerDir
 function getInstallerConflictLogic() {
   return `
 $InstallDisposition = 'pending'
+$ManagedInstallerMaxAttempts = 5
+$ManagedInstallerRetryDelaySeconds = 15
+$ManagedInstallerBusyPollSeconds = 15
+$ManagedInstallerBusyMaxWaitSeconds = 3600
+$TrackerRetryBase = 0
 
 function Convert-DetectedAppVersion {
     param([string]$Value)
@@ -1268,6 +1388,10 @@ function Get-InstalledApplicationEntries {
     )
 
     return $script:CachedInstalledApplicationEntries
+}
+
+function Reset-InstalledApplicationEntriesCache {
+    $script:CachedInstalledApplicationEntries = $null
 }
 
 function Get-MsiPackageProperty {
@@ -1474,6 +1598,118 @@ function Get-InstallerConflictLabel {
     return [string]$Conflict.Match.DisplayName
 }
 
+function Test-InstallerExecutionInProgress {
+    $mutexNames = @('_MSIExecute', 'Global\\_MSIExecute')
+    foreach ($mutexName in $mutexNames) {
+        $mutex = $null
+        try {
+            $mutex = [System.Threading.Mutex]::OpenExisting($mutexName)
+            if ($mutex) { return $true }
+        } catch [System.Threading.WaitHandleCannotBeOpenedException] {
+        } catch {
+        } finally {
+            if ($mutex) {
+                try { $mutex.Dispose() } catch {}
+            }
+        }
+    }
+
+    try {
+        if (Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Installer\\InProgress') {
+            $inProgress = Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Installer\\InProgress' -ErrorAction SilentlyContinue
+            if ($inProgress) { return $true }
+        }
+    } catch {}
+
+    return $false
+}
+
+function Wait-InstallerExecutionIdle {
+    param(
+        [int]$MaxWaitSeconds = $ManagedInstallerBusyMaxWaitSeconds,
+        [int]$PollSeconds = $ManagedInstallerBusyPollSeconds
+    )
+
+    $deadline = (Get-Date).AddSeconds([Math]::Max($MaxWaitSeconds, $PollSeconds))
+    $waitNotified = $false
+    while (Test-InstallerExecutionInProgress) {
+        if (-not $waitNotified) {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Se detecto otra instalacion en curso. Esperando a que termine..."
+            $waitNotified = $true
+        } else {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Otra instalacion sigue en curso. Nueva comprobacion en $PollSeconds s."
+        }
+
+        if ((Get-Date) -ge $deadline) {
+            throw "otra instalacion sigue en curso tras esperar $MaxWaitSeconds segundos"
+        }
+
+        Start-Sleep -Seconds $PollSeconds
+    }
+
+    if ($waitNotified) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] La otra instalacion ha terminado. Continuando..."
+        Start-Sleep -Seconds 5
+    }
+}
+
+function Test-ManagedInstallerInstalled {
+    param(
+        [pscustomobject]$InstallerMetadata,
+        [string]$TargetVersion
+    )
+
+    $hasDetectionRule = $false
+    try {
+        $appDetectionFn = Get-Command 'Test-AppInstalled' -CommandType Function -ErrorAction SilentlyContinue
+        if ($appDetectionFn) {
+            $hasDetectionRule = $true
+            if (Test-AppInstalled) { return $true }
+        }
+    } catch {}
+
+    $match = Get-InstalledApplicationMatch -InstallerMetadata $InstallerMetadata
+    if (-not $match) { return $false }
+    if ($InstallerMetadata.ProductCode -and $match.ProductCode -and $InstallerMetadata.ProductCode -eq $match.ProductCode) {
+        return $true
+    }
+
+    $targetVersionObject = Convert-DetectedAppVersion -Value $TargetVersion
+    if (-not $targetVersionObject -and $InstallerMetadata.InstallerVersionObject) {
+        $targetVersionObject = $InstallerMetadata.InstallerVersionObject
+    }
+
+    if ($match.VersionObject -and $targetVersionObject) {
+        return ($match.VersionObject -ge $targetVersionObject)
+    }
+
+    if ($hasDetectionRule) { return $false }
+    if ($match.MatchScore -ge 85) { return $true }
+    return ($match.PublisherMatched -and $match.MatchScore -ge 75)
+}
+
+function Wait-ManagedInstallerInstalled {
+    param(
+        [pscustomobject]$InstallerMetadata,
+        [string]$TargetVersion,
+        [int]$MaxAttempts = 6,
+        [int]$SleepSeconds = 10
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        Reset-InstalledApplicationEntriesCache
+        if (Test-ManagedInstallerInstalled -InstallerMetadata $InstallerMetadata -TargetVersion $TargetVersion) {
+            return $true
+        }
+
+        if ($attempt -lt $MaxAttempts) {
+            Start-Sleep -Seconds $SleepSeconds
+        }
+    }
+
+    return $false
+}
+
 function Invoke-ManagedInstaller {
     param(
         [ValidateSet('msi', 'exe', 'ps1')][string]$Kind,
@@ -1507,53 +1743,118 @@ function Invoke-ManagedInstaller {
         default { $InstallerPath }
     }
 
-    $process = Start-Process -FilePath $launchPath -ArgumentList $ArgumentList -Wait -NoNewWindow -PassThru
-    if ($SuccessCodes -contains $process.ExitCode) {
-        $InstallDisposition = 'installed'
-        return [pscustomobject]@{ Status = 'success'; ExitCode = $process.ExitCode }
-    }
+    $lastExitCode = $null
+    $lastFailureMessage = ''
+    for ($attempt = 1; $attempt -le $ManagedInstallerMaxAttempts; $attempt++) {
+        if ($attempt -gt 1) {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Reintentando instalacion ($attempt/$ManagedInstallerMaxAttempts)..."
+            Start-Sleep -Seconds $ManagedInstallerRetryDelaySeconds
+        }
 
-    if ($process.ExitCode -eq 1638) {
-        $conflictState = Resolve-InstallerConflictState -InstallerMetadata $installerMetadata -TargetVersion $CurrentVersion
+        Wait-InstallerExecutionIdle
+        $process = Start-Process -FilePath $launchPath -ArgumentList $ArgumentList -Wait -NoNewWindow -PassThru
+        $lastExitCode = $process.ExitCode
+        Reset-InstalledApplicationEntriesCache
 
-        if ($conflictState.SkipInstall) {
-            $InstallDisposition = 'skipped'
+        if ($SuccessCodes -contains $process.ExitCode) {
+            if (Wait-ManagedInstallerInstalled -InstallerMetadata $installerMetadata -TargetVersion $CurrentVersion) {
+                $InstallDisposition = 'installed'
+                return [pscustomobject]@{ Status = 'success'; ExitCode = $process.ExitCode; Attempts = $attempt; Retried = ($attempt -gt 1) }
+            }
+
+            $lastFailureMessage = "instalador finalizo con codigo $($process.ExitCode), pero no se pudo confirmar la instalacion real"
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: $lastFailureMessage."
+            continue
+        }
+
+        if ($process.ExitCode -eq 1618) {
+            $lastFailureMessage = 'instalador devolvio 1618: otra instalacion en curso'
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: $lastFailureMessage."
+            continue
+        }
+
+        if ($process.ExitCode -eq 1638) {
+            $conflictState = Resolve-InstallerConflictState -InstallerMetadata $installerMetadata -TargetVersion $CurrentVersion
+
+            if ($conflictState.SkipInstall) {
+                $InstallDisposition = 'skipped'
+                $conflictLabel = Get-InstallerConflictLabel -Conflict $conflictState
+                if ($conflictLabel) {
+                    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Conflicto 1638 resuelto. Ya existe una version valida de $conflictLabel."
+                } else {
+                    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Conflicto 1638 resuelto. Ya existe una version valida instalada."
+                }
+                return [pscustomobject]@{ Status = 'skipped'; ExitCode = 1638 }
+            }
+
+            if ($conflictState.CanAutoUninstall) {
+                $conflictLabel = Get-InstallerConflictLabel -Conflict $conflictState
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Se detecto una version anterior que bloquea la actualizacion ($conflictLabel). Desinstalando y reintentando..."
+                Wait-InstallerExecutionIdle
+                $uninstallArgs = "/x $($conflictState.Match.ProductCode) REBOOT=ReallySuppress /qn"
+                $uninstallProcess = Start-Process -FilePath 'msiexec.exe' -ArgumentList $uninstallArgs -Wait -NoNewWindow -PassThru
+                $lastExitCode = $uninstallProcess.ExitCode
+                Reset-InstalledApplicationEntriesCache
+                if ($uninstallProcess.ExitCode -eq 1618) {
+                    $lastFailureMessage = 'desinstalador devolvio 1618: otra instalacion en curso'
+                    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: $lastFailureMessage."
+                    continue
+                }
+                if ($uninstallProcess.ExitCode -notin @(0, 3010, 1641, 1605)) {
+                    throw "desinstalador salio con codigo $($uninstallProcess.ExitCode)"
+                }
+
+                Start-Sleep -Seconds 5
+                Wait-InstallerExecutionIdle
+                $retryProcess = Start-Process -FilePath $launchPath -ArgumentList $ArgumentList -Wait -NoNewWindow -PassThru
+                $lastExitCode = $retryProcess.ExitCode
+                Reset-InstalledApplicationEntriesCache
+                if ($SuccessCodes -contains $retryProcess.ExitCode) {
+                    if (Wait-ManagedInstallerInstalled -InstallerMetadata $installerMetadata -TargetVersion $CurrentVersion) {
+                        $InstallDisposition = 'installed'
+                        return [pscustomobject]@{ Status = 'success'; ExitCode = $retryProcess.ExitCode; Attempts = $attempt; Retried = $true }
+                    }
+
+                    $lastFailureMessage = "instalador finalizo con codigo $($retryProcess.ExitCode) tras resolver el conflicto 1638, pero no se pudo confirmar la instalacion real"
+                    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: $lastFailureMessage."
+                    continue
+                }
+
+                if (Wait-ManagedInstallerInstalled -InstallerMetadata $installerMetadata -TargetVersion $CurrentVersion -MaxAttempts 2 -SleepSeconds 5) {
+                    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: El instalador devolvio codigo $($retryProcess.ExitCode) tras resolver el conflicto 1638, pero la app quedo instalada. Se considera correcto."
+                    $InstallDisposition = 'installed'
+                    return [pscustomobject]@{ Status = 'success'; ExitCode = $retryProcess.ExitCode; Attempts = $attempt; Retried = $true }
+                }
+
+                $lastFailureMessage = "instalador salio con codigo $($retryProcess.ExitCode) tras reintento por conflicto 1638"
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: $lastFailureMessage."
+                continue
+            }
+
             $conflictLabel = Get-InstallerConflictLabel -Conflict $conflictState
             if ($conflictLabel) {
-                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Conflicto 1638 resuelto. Ya existe una version valida de $conflictLabel."
-            } else {
-                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Conflicto 1638 resuelto. Ya existe una version valida instalada."
+                throw "instalador salio con codigo 1638: ya existe otra version instalada ($conflictLabel)"
             }
-            return [pscustomobject]@{ Status = 'skipped'; ExitCode = 1638 }
+            throw 'instalador salio con codigo 1638: ya existe otra version instalada'
         }
 
-        if ($conflictState.CanAutoUninstall) {
-            $conflictLabel = Get-InstallerConflictLabel -Conflict $conflictState
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Se detecto una version anterior que bloquea la actualizacion ($conflictLabel). Desinstalando y reintentando..."
-            $uninstallArgs = "/x $($conflictState.Match.ProductCode) REBOOT=ReallySuppress /qn"
-            $uninstallProcess = Start-Process -FilePath 'msiexec.exe' -ArgumentList $uninstallArgs -Wait -NoNewWindow -PassThru
-            if ($uninstallProcess.ExitCode -notin @(0, 3010, 1641, 1605)) {
-                throw "desinstalador salio con codigo $($uninstallProcess.ExitCode)"
-            }
-
-            Start-Sleep -Seconds 5
-            $retryProcess = Start-Process -FilePath $launchPath -ArgumentList $ArgumentList -Wait -NoNewWindow -PassThru
-            if ($SuccessCodes -contains $retryProcess.ExitCode) {
-                $InstallDisposition = 'installed'
-                return [pscustomobject]@{ Status = 'success'; ExitCode = $retryProcess.ExitCode; Retried = $true }
-            }
-
-            throw "instalador salio con codigo $($retryProcess.ExitCode) tras reintento por conflicto 1638"
+        if (Wait-ManagedInstallerInstalled -InstallerMetadata $installerMetadata -TargetVersion $CurrentVersion -MaxAttempts 2 -SleepSeconds 5) {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: El instalador devolvio codigo $($process.ExitCode), pero la app quedo instalada. Se considera correcto."
+            $InstallDisposition = 'installed'
+            return [pscustomobject]@{ Status = 'success'; ExitCode = $process.ExitCode; Attempts = $attempt; Retried = ($attempt -gt 1) }
         }
 
-        $conflictLabel = Get-InstallerConflictLabel -Conflict $conflictState
-        if ($conflictLabel) {
-            throw "instalador salio con codigo 1638: ya existe otra version instalada ($conflictLabel)"
-        }
-        throw 'instalador salio con codigo 1638: ya existe otra version instalada'
+        $lastFailureMessage = "instalador salio con codigo $($process.ExitCode)"
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: $lastFailureMessage."
     }
 
-    throw "instalador salio con codigo $($process.ExitCode)"
+    if (-not $lastFailureMessage) {
+        $lastFailureMessage = 'instalador no pudo completarse'
+    }
+    if ($null -ne $lastExitCode) {
+        throw "$lastFailureMessage tras $ManagedInstallerMaxAttempts intentos (ultimo codigo: $lastExitCode)"
+    }
+    throw "$lastFailureMessage tras $ManagedInstallerMaxAttempts intentos"
 }
 `.trim();
 }
@@ -1903,9 +2204,17 @@ if (Test-AppInstalled) {
     '            exit 0',
     '        }',
     '        if ($t.hash -eq $CurrentHash -and $t.result -eq \'failed\') {',
-    '            Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] OMITIDO: Instalacion fallida previamente (mismo hash). Actualiza la app para reintentar."',
-    '            Stop-Transcript -ErrorAction SilentlyContinue',
-    '            exit 0',
+    '            $PreviousFailureCount = 1',
+    '            if ($null -ne $t.retryCount) {',
+    '                try { $PreviousFailureCount = [Math]::Max([int]$t.retryCount, 1) } catch { $PreviousFailureCount = 1 }',
+    '            }',
+    '            if ($PreviousFailureCount -ge $ManagedInstallerMaxAttempts) {',
+    '                Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] OMITIDO: La instalacion ya fallo $PreviousFailureCount veces con este mismo hash. Actualiza la app o revisa el instalador para reiniciar los intentos."',
+    '                Stop-Transcript -ErrorAction SilentlyContinue',
+    '                exit 0',
+    '            }',
+    '            $TrackerRetryBase = $PreviousFailureCount',
+    '            Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] AVISO: La instalacion fallo previamente con este hash (intento $($PreviousFailureCount + 1)/$ManagedInstallerMaxAttempts). Se volvera a intentar."',
     '        }',
     '        Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] Hash anterior: $($t.hash) - actualizando a $CurrentHash"',
     '    } catch {',
@@ -1930,7 +2239,7 @@ if (Test-AppInstalled) {
     'if (-not $InstaladorRed) {',
     '    Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] ERROR: No se encontro instalador (' + safeFilter + ') en $PSScriptRoot"',
     '    if (Test-Path $VersionFile) {',
-    '        @{ hash = $CurrentHash; version = $CurrentVersion; failedAt = (Get-Date).ToString(\'o\'); computer = $env:COMPUTERNAME; result = \'failed\'; error = \'Installer not found in share\' } |',
+    '        @{ hash = $CurrentHash; version = $CurrentVersion; failedAt = (Get-Date).ToString(\'o\'); computer = $env:COMPUTERNAME; result = \'failed\'; retryCount = ($TrackerRetryBase + 1); error = \'Installer not found in share\' } |',
     '            ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8',
     '    }',
     '    Stop-Transcript -ErrorAction SilentlyContinue',
@@ -2002,7 +2311,7 @@ ${notifyAfter}
 } catch {
     # ── Error ──────────────────────────────────────────────────────────
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Fallo instalando $NombreApp - $_"
-    @{ hash = $CurrentHash; version = $CurrentVersion; failedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'failed'; error = $_.ToString() } |
+    @{ hash = $CurrentHash; version = $CurrentVersion; failedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'failed'; retryCount = ($TrackerRetryBase + 1); error = $_.ToString() } |
         ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
     Invoke-DeployCacheCleanupWithFallback -CacheDir $CacheDir -MarkerPath $CleanupMarkerPath | Out-Null
 }

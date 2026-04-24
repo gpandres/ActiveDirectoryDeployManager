@@ -13,10 +13,21 @@ const AppsPage = {
   _groupBy: 'none',  // 'none' | 'template'
   _updateCheckResults: [],  // { appId, appName, wingetId, currentVersion, latestVersion }
   _checkingUpdates: false,
+  _regeneratingScriptIds: new Set(),
+  _scriptUpdatePollTimer: null,
+  _scriptUpdatePollToken: 0,
+  _scriptUpdateModalVisible: false,
 
   async render(container) {
-    const apps = await window.api.apps.getAll();
-    const templates = await window.api.scripts.getTemplates();
+    this.stopScriptUpdatePolling(false);
+
+    const [apps, templates, scriptUpdateStatus] = await Promise.all([
+      window.api.apps.getAll(),
+      window.api.scripts.getTemplates(),
+      (window.api.scriptUpdates && typeof window.api.scriptUpdates.getStatus === 'function'
+        ? window.api.scriptUpdates.getStatus().catch(() => null)
+        : Promise.resolve(null))
+    ]);
 
     const deployedCount = apps.filter(a => a.deployed !== false && a.deployedPath).length;
     const pendingCount = apps.length - deployedCount;
@@ -213,6 +224,118 @@ const AppsPage = {
       this._pendingFocusAppId = null;
       this.keepAppCardVisible(focusId);
     }
+
+    this.syncScriptUpdateState(scriptUpdateStatus);
+  },
+
+  stopScriptUpdatePolling(closeModal = true) {
+    if (this._scriptUpdatePollTimer) {
+      clearTimeout(this._scriptUpdatePollTimer);
+      this._scriptUpdatePollTimer = null;
+    }
+    this._scriptUpdatePollToken += 1;
+    if (closeModal) {
+      this.closeScriptUpdateModal();
+    }
+  },
+
+  closeScriptUpdateModal() {
+    if (!this._scriptUpdateModalVisible) return;
+    this._scriptUpdateModalVisible = false;
+    App.closeModal();
+  },
+
+  getScriptUpdateModalContent(status = {}) {
+    const title = this.tr('apps.scriptUpdateTitle', 'Actualizando scripts');
+    const isScanning = status.status === 'scanning';
+    const total = Number(status?.progress?.total) || 0;
+    const completed = Number(status?.progress?.completed) || 0;
+    const updated = Number(status?.progress?.updated) || 0;
+    const currentAppName = typeof status.currentAppName === 'string' ? status.currentAppName.trim() : '';
+    const headline = isScanning
+      ? this.tr('apps.scriptUpdateScanning', 'Comprobando scripts desplegados...')
+      : this.tr('apps.scriptUpdateInProgress', 'Los scripts se están actualizando...');
+    const detail = isScanning
+      ? this.tr('apps.scriptUpdateScanningHint', 'Estamos revisando si hay scripts generados con una versión anterior de la app.')
+      : this.tr('apps.scriptUpdateBusyHint', 'Esta vista se desbloqueará automáticamente cuando termine la regeneración.');
+    const progressText = total > 0
+      ? this.tr('apps.scriptUpdateProgress', '{done} de {total} apps procesadas')
+        .replace('{done}', String(completed))
+        .replace('{total}', String(total))
+      : '';
+    const updatedText = total > 0
+      ? this.tr('apps.scriptUpdateUpdatedCount', '{count} scripts regenerados')
+        .replace('{count}', String(updated))
+      : '';
+    const currentAppText = currentAppName
+      ? this.tr('apps.scriptUpdateCurrentApp', 'App actual: {app}')
+        .replace('{app}', currentAppName)
+      : '';
+
+    return {
+      title,
+      body: `
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;min-height:180px;text-align:center;">
+          <span class="spinner" style="width:28px;height:28px;border-width:3px;flex-shrink:0;"></span>
+          <div style="font-size:15px;font-weight:700;color:var(--text-primary);">${this.esc(headline)}</div>
+          <p style="margin:0;max-width:420px;color:var(--text-secondary);font-size:13px;line-height:1.5;">${this.esc(detail)}</p>
+          ${progressText ? `<div style="display:flex;flex-direction:column;gap:4px;padding:12px 14px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-secondary);min-width:280px;">
+            <span style="font-size:13px;font-weight:600;color:var(--text-primary);">${this.esc(progressText)}</span>
+            ${updatedText ? `<span style="font-size:12px;color:var(--text-muted);">${this.esc(updatedText)}</span>` : ''}
+            ${currentAppText ? `<span style="font-size:12px;color:var(--text-secondary);">${this.esc(currentAppText)}</span>` : ''}
+          </div>` : ''}
+        </div>
+      `
+    };
+  },
+
+  renderScriptUpdateModal(status = {}) {
+    const modal = this.getScriptUpdateModalContent(status);
+    if (!this._scriptUpdateModalVisible) {
+      App.openModalLocked(modal.title, modal.body, '');
+      this._scriptUpdateModalVisible = true;
+      return;
+    }
+
+    document.getElementById('modal-title').textContent = modal.title;
+    document.getElementById('modal-body').innerHTML = modal.body;
+    document.getElementById('modal-footer').innerHTML = '';
+  },
+
+  syncScriptUpdateState(status = null) {
+    if (!status?.running) {
+      this.stopScriptUpdatePolling(true);
+      return;
+    }
+
+    this.renderScriptUpdateModal(status);
+    const pollToken = ++this._scriptUpdatePollToken;
+    const poll = async () => {
+      if (pollToken !== this._scriptUpdatePollToken) return;
+      if (App.currentPage !== 'apps') {
+        this.stopScriptUpdatePolling(true);
+        return;
+      }
+
+      const nextStatus = window.api.scriptUpdates && typeof window.api.scriptUpdates.getStatus === 'function'
+        ? await window.api.scriptUpdates.getStatus().catch(() => null)
+        : null;
+      if (pollToken !== this._scriptUpdatePollToken) return;
+
+      if (nextStatus?.running) {
+        this.renderScriptUpdateModal(nextStatus);
+        this._scriptUpdatePollTimer = setTimeout(poll, 1000);
+        return;
+      }
+
+      this._scriptUpdatePollTimer = null;
+      this.closeScriptUpdateModal();
+      if (App.currentPage === 'apps') {
+        App.navigate('apps');
+      }
+    };
+
+    this._scriptUpdatePollTimer = setTimeout(poll, 1000);
   },
 
   renderAppCard(app, templates) {
@@ -276,6 +399,10 @@ const AppsPage = {
                   ${t('apps.quickUpdate')}
                 </button>
                 ` : '')}
+                <button class="dropdown-item" onclick="AppsPage.regenerateScripts('${app.id}')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+                  ${this.tr('apps.regenerateScripts', 'Regenerar scripts')}
+                </button>
                 ${canPublishUninstall && canUninstall ? `
                   <button class="dropdown-item dropdown-item--warning" onclick="AppsPage.uninstallApp('${app.id}')">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -3764,6 +3891,45 @@ const AppsPage = {
       }
     } catch (err) {
       App.toast(t('apps.deployError') + ' ' + err.message, 'error');
+    }
+  },
+
+  async regenerateScripts(id) {
+    if (this._regeneratingScriptIds.has(id)) return;
+
+    const app = await window.api.apps.get(id);
+    if (!app) return;
+
+    this._regeneratingScriptIds.add(id);
+    try {
+      const result = await window.api.scripts.regenerate(app);
+      if (!result?.success) {
+        if (App.isShareError(result?.error)) { App.handleShareError(); return; }
+        throw new Error(result?.error || this.tr('apps.regenerateScriptsError', 'No se pudieron regenerar los scripts.'));
+      }
+
+      const nextPublishedAction = String(result.publishedAction || app.publishedAction || '').trim().toLowerCase() === 'uninstall'
+        ? 'uninstall'
+        : 'install';
+      await window.api.apps.update(id, {
+        deployed: true,
+        deployedPath: result.installPath || app.deployedPath || '',
+        uninstallDeployedPath: result.uninstallPath || app.uninstallDeployedPath || '',
+        publishedAction: nextPublishedAction,
+        publishedAt: new Date().toISOString(),
+        lastDeployHash: result.hash || app.lastDeployHash || ''
+      });
+      await window.api.activity.add('app_scripts_regenerated', {
+        appName: app.name,
+        publishedAction: nextPublishedAction
+      });
+      App.toast(this.tr('apps.regenerateScriptsSuccess', 'Scripts regenerados correctamente para {app}.').replace('{app}', app.name), 'success');
+      this._pendingFocusAppId = id;
+      App.navigate('apps');
+    } catch (err) {
+      App.toast(`${this.tr('apps.regenerateScriptsError', 'No se pudieron regenerar los scripts.')}: ${err.message}`, 'error');
+    } finally {
+      this._regeneratingScriptIds.delete(id);
     }
   },
 

@@ -71,6 +71,16 @@ describe('generateScript — generic template', () => {
     expect(script).toContain('/SILENT /NORESTART');
   });
 
+  it('prepends generator metadata including the app version and script kind', () => {
+    const script = svc.generateScript(base({ template: 'generic' }));
+    expect(script).toContain('# AD DEPLOY MANAGER - GENERATED SCRIPT METADATA');
+    expect(script).toContain('# generator_app_version:');
+    expect(script).toContain('# script_kind: install');
+    expect(script).toContain('$ADDMGeneratorAppVersion =');
+    expect(script).toContain('$ADDMGeneratedScriptKind = "install"');
+    expect(script).toContain('$ADDMGeneratedAppName = "TestApp"');
+  });
+
   it('includes the 32→64 bit redirect guard', () => {
     const script = svc.generateScript(base({ template: 'generic' }));
     expect(script).toContain('PROCESSOR_ARCHITEW6432');
@@ -125,6 +135,26 @@ describe('generateScript — generic template', () => {
     expect(script).not.toContain("if ($Kind -eq 'msi' -and $conflictState.CanAutoUninstall)");
     expect(script).toContain("Start-Process -FilePath 'msiexec.exe' -ArgumentList $uninstallArgs");
     expect(script).toContain('$retryProcess = Start-Process -FilePath $launchPath -ArgumentList $ArgumentList -Wait -NoNewWindow -PassThru');
+  });
+
+  it('waits for other installations and retries up to five times before failing', () => {
+    const script = svc.generateScript(base({ template: 'generic' }));
+    expect(script).toContain('$ManagedInstallerMaxAttempts = 5');
+    expect(script).toContain('function Test-InstallerExecutionInProgress');
+    expect(script).toContain('function Wait-InstallerExecutionIdle');
+    expect(script).toContain("AVISO: Se detecto otra instalacion en curso. Esperando a que termine...");
+    expect(script).toContain('for ($attempt = 1; $attempt -le $ManagedInstallerMaxAttempts; $attempt++)');
+    expect(script).toContain("instalador devolvio 1618: otra instalacion en curso");
+    expect(script).toContain('throw "$lastFailureMessage tras $ManagedInstallerMaxAttempts intentos');
+  });
+
+  it('retries failed trackers with the same hash up to five times instead of requiring an app update immediately', () => {
+    const script = svc.generateScript(base({ template: 'generic' }));
+    expect(script).toContain('$PreviousFailureCount = 1');
+    expect(script).toContain('$TrackerRetryBase = $PreviousFailureCount');
+    expect(script).toContain('La instalacion fallo previamente con este hash');
+    expect(script).toContain("retryCount = ($TrackerRetryBase + 1)");
+    expect(script).not.toContain('Actualiza la app para reintentar.');
   });
 });
 
@@ -387,6 +417,21 @@ describe('getTemplateList', () => {
 });
 
 describe('generateUninstallScript', () => {
+  it('prepends uninstall generator metadata including the app version and script kind', () => {
+    const script = svc.generateUninstallScript(base({
+      template: 'generic',
+      installerType: 'msi',
+      installerPath: 'C:\\temp\\agent.msi',
+      uninstall: { mode: 'auto-msi' }
+    }));
+
+    expect(script).toContain('# AD DEPLOY MANAGER - GENERATED SCRIPT METADATA');
+    expect(script).toContain('# generator_app_version:');
+    expect(script).toContain('# script_kind: uninstall');
+    expect(script).toContain('$ADDMGeneratedScriptKind = "uninstall"');
+    expect(script).toContain('$ADDMGeneratedAppName = "TestApp"');
+  });
+
   it('builds MSI uninstall scripts that resolve ProductCode automatically', () => {
     const script = svc.generateUninstallScript(base({
       template: 'generic',
