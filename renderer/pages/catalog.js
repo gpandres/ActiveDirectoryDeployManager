@@ -530,6 +530,17 @@ const CatalogPage = {
 
   async _addToNewApp() {
     if (this._selectedItems.length === 0) return;
+    const config = await window.api.config.get().catch(() => ({}));
+    if (String(config?.uiMode || '').trim().toLowerCase() !== 'advanced') {
+      const message = t('catalog.simpleModeCreateHint');
+      App.toast(
+        message === 'catalog.simpleModeCreateHint'
+          ? 'Cambia al modo avanzado para crear apps desde el catalogo.'
+          : message,
+        'info'
+      );
+      return;
+    }
     const first = this._selectedItems[0];
     const prefilledApp = {
       template: 'winget',

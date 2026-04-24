@@ -41,6 +41,15 @@ const SettingsPage = {
         </div>
 
         <div class="form-group">
+          <label class="form-label">${this.tr('settings.uiModeLabel', 'Modo de interfaz')}</label>
+          <select class="form-select" id="cfg-ui-mode">
+            <option value="simple" ${(config.uiMode || 'simple') !== 'advanced' ? 'selected' : ''}>${this.tr('settings.uiModeSimple', 'Sencillo')}</option>
+            <option value="advanced" ${(config.uiMode || '') === 'advanced' ? 'selected' : ''}>${this.tr('settings.uiModeAdvanced', 'Avanzado')}</option>
+          </select>
+          <p class="form-hint">${this.tr('settings.uiModeHint', 'En modo sencillo se ocultan las opciones avanzadas del alta de apps y plantillas.')}</p>
+        </div>
+
+        <div class="form-group">
           <label class="form-label">${t('settings.netShare')}</label>
           <div class="input-with-btn">
             <input class="form-input" id="cfg-share-path" value="${this.esc(config.networkSharePath)}" placeholder="\\\\servidor\\share\\apps">
@@ -279,7 +288,8 @@ const SettingsPage = {
       defaultGPO: document.getElementById('cfg-default-gpo').value,
       preferredDC: document.getElementById('cfg-preferred-dc').value.trim(),
       baseOUs: this.getSelectedDNs(),
-      language: document.getElementById('cfg-language').value
+      language: document.getElementById('cfg-language').value,
+      uiMode: document.getElementById('cfg-ui-mode').value
     };
 
     if (!data.networkSharePath) {
@@ -434,6 +444,11 @@ const SettingsPage = {
     const div = document.createElement('div');
     div.textContent = str || '';
     return div.innerHTML;
+  },
+
+  tr(key, fallback) {
+    const value = t(key);
+    return value === key ? fallback : value;
   },
 
   getSelectedDNs() {

@@ -20,29 +20,40 @@ vi.mock('child_process', () => ({
   execFile: execFileMock
 }));
 
+vi.mock('../services/config', () => ({
+  default: {
+    getConfig: () => ({ preferredDC: '' })
+  },
+  getConfig: () => ({ preferredDC: '' })
+}));
+
 describe('ad-service unlink handling', () => {
   beforeEach(() => {
-    vi.resetModules();
     execFileMock.mockReset();
   });
 
   it('treats the Spanish missing-link AD error as a successful unlink', async () => {
     execFileMock.mockImplementation((file, args, options, callback) => {
-      callback(
-        null,
-        JSON.stringify({
-          ok: false,
-          code: 'ERROR',
-          error: 'No hay ningún GPO denominado Deploy_Notepad en el dominio superexport.local que esté vinculado al contenedor de Active Directory con la ruta de acceso LDAP "OU=Prueba,DC=superexport,DC=local".'
-        }),
-        ''
-      );
-      return {
+      const child = {
         kill: vi.fn(),
         on: (event, handler) => {
           if (event === 'exit') setImmediate(handler);
         }
       };
+
+      setImmediate(() => {
+        callback(
+          null,
+          JSON.stringify({
+            ok: false,
+            code: 'ERROR',
+            error: 'No hay ningún GPO denominado Deploy_Notepad en el dominio superexport.local que esté vinculado al contenedor de Active Directory con la ruta de acceso LDAP "OU=Prueba,DC=superexport,DC=local".'
+          }),
+          ''
+        );
+      });
+
+      return child;
     });
 
     const adService = require('../services/ad-service');

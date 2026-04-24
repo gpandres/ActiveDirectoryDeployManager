@@ -5,7 +5,9 @@ const config = require('../config');
 
 // IP allowlist gate — admin endpoints are explicitly scoped to
 // localhost/trusted hosts via docker network.
-function ipGate(req, reply) {
+// IMPORTANT: must be async. Sync Fastify hooks require calling
+// done() explicitly; returning undefined without done() hangs.
+async function ipGate(req, reply) {
   if (config.adminAllowedIps.length === 0) {
     return reply.code(403).send({ error: 'admin_disabled' });
   }

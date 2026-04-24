@@ -17,17 +17,22 @@ const AppsPage = {
   _scriptUpdatePollTimer: null,
   _scriptUpdatePollToken: 0,
   _scriptUpdateModalVisible: false,
+  _uiMode: 'simple',
 
   async render(container) {
     this.stopScriptUpdatePolling(false);
 
-    const [apps, templates, scriptUpdateStatus] = await Promise.all([
+    const [apps, templates, scriptUpdateStatus, config] = await Promise.all([
       window.api.apps.getAll(),
       window.api.scripts.getTemplates(),
       (window.api.scriptUpdates && typeof window.api.scriptUpdates.getStatus === 'function'
         ? window.api.scriptUpdates.getStatus().catch(() => null)
-        : Promise.resolve(null))
+        : Promise.resolve(null)),
+      window.api.config.get().catch(() => ({}))
     ]);
+    this._uiMode = String(config?.uiMode || '').trim().toLowerCase() === 'advanced'
+      ? 'advanced'
+      : 'simple';
 
     const deployedCount = apps.filter(a => a.deployed !== false && a.deployedPath).length;
     const pendingCount = apps.length - deployedCount;
@@ -44,10 +49,12 @@ const AppsPage = {
           <p class="page-subtitle">${t('apps.subtitle')}</p>
         </div>
         <div style="display:flex;gap:8px;">
-          <button class="btn btn-secondary" id="btn-manage-templates">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M12 12l8-4.5"/><path d="M12 12v9"/><path d="M12 12L4 7.5"/></svg>
-            ${this.tr('apps.manageTemplates', 'Plantillas')}
-          </button>
+          ${this.isAdvancedUIMode() ? `
+            <button class="btn btn-secondary" id="btn-manage-templates">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M12 12l8-4.5"/><path d="M12 12v9"/><path d="M12 12L4 7.5"/></svg>
+              ${this.tr('apps.manageTemplates', 'Plantillas')}
+            </button>
+          ` : ''}
           <button class="btn btn-secondary" id="btn-check-updates">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg>
             ${t('apps.checkUpdates')}
@@ -226,6 +233,14 @@ const AppsPage = {
     }
 
     this.syncScriptUpdateState(scriptUpdateStatus);
+  },
+
+  isAdvancedUIMode() {
+    return this._uiMode === 'advanced';
+  },
+
+  isSimpleUIMode() {
+    return !this.isAdvancedUIMode();
   },
 
   stopScriptUpdatePolling(closeModal = true) {
@@ -689,8 +704,10 @@ const AppsPage = {
       return null;
     }
 
-    const activeStepText = modalBody.querySelector('.wizard-step.active .wizard-step-number')?.textContent || '';
-    const activeStep = Number.parseInt(activeStepText, 10);
+    const activeStepValue = modalBody.querySelector('.wizard-step.active')?.dataset.actualStep
+      || modalBody.querySelector('.wizard-step.active .wizard-step-number')?.textContent
+      || '';
+    const activeStep = Number.parseInt(activeStepValue, 10);
 
     return {
       step: Number.isFinite(activeStep) ? activeStep : null,
@@ -1755,16 +1772,24 @@ const AppsPage = {
 
     // State
     const plantillaTemplateIds = templates.filter(tmpl => tmpl.category !== 'General' || tmpl.id === 'office').map(tmpl => tmpl.id);
+    const isSimpleWizardFlow = this.isSimpleUIMode() && !isEdit;
+    const initialTemplate = isSimpleWizardFlow ? 'generic' : (existingApp?.template || '');
+    const normalizedUninstall = this.normalizeUninstallState(existingApp || {}, {
+      ...(existingApp || {}),
+      template: initialTemplate,
+      installerPath: initialInstallerPath || existingApp?.installerPath || '',
+      installerType: existingApp?.installerType || ''
+    });
     const state = {
-      // Skip step 1 if opened from catalog with a pre-selected app (no id = not editing)
-      step: (existingApp && !existingApp.id) ? 2 : 1,
-      catalogTab: existingApp?.wingetId ? 'catalog' :
+      // Skip template selection in simple mode and when opened from catalog with a pre-selected app (no id = not editing)
+      step: isSimpleWizardFlow ? 2 : ((existingApp && !existingApp.id) ? 2 : 1),
+      catalogTab: isSimpleWizardFlow ? 'manual' : (existingApp?.wingetId ? 'catalog' :
                   existingApp?.template === 'odt' ? 'catalog' :
                   (existingApp && plantillaTemplateIds.includes(existingApp.template)) ? 'plantilla' :
-                  (existingApp ? 'manual' : 'catalog'),
+                  (existingApp ? 'manual' : 'catalog')),
       catalogSearch: '',
       catalogCat: 'Todo',
-      template: existingApp?.template || '',
+      template: initialTemplate,
       wingetId: existingApp?.wingetId || '',
       wingetSource: existingApp?.wingetSource || 'winget',
       odtConfig: existingApp?.odtConfig || {
@@ -1788,19 +1813,16 @@ const AppsPage = {
       ouDN: existingApp?.ouDN || (existingApp?.assignedOUs && existingApp.assignedOUs[0]) || '',
       gpoName: isEdit ? (existingApp?.gpoName || '') : (config.defaultGPO || ''),
       createGPO: false,
+      simpleModeFlow: isSimpleWizardFlow,
       version: existingApp?.version || '1.0.0',
       suggestedVersion: '',
       notifyUser: existingApp?.notifyUser || false,
-      uninstallMode: this.normalizeUninstallState(existingApp || {}, {
-        template: existingApp?.template || '',
-        installerPath: initialInstallerPath || existingApp?.installerPath || '',
-        installerType: existingApp?.installerType || ''
-      }).mode,
-      uninstallCommand: this.normalizeUninstallState(existingApp || {}, existingApp || {}).command,
-      uninstallArgs: this.normalizeUninstallState(existingApp || {}, existingApp || {}).args,
-      uninstallRegistryName: this.normalizeUninstallState(existingApp || {}, existingApp || {}).registryMatchName || (existingApp?.name || ''),
-      uninstallRegistryPublisher: this.normalizeUninstallState(existingApp || {}, existingApp || {}).registryMatchPublisher,
-      uninstallProductCode: this.normalizeUninstallState(existingApp || {}, existingApp || {}).productCode,
+      uninstallMode: normalizedUninstall.mode,
+      uninstallCommand: normalizedUninstall.command,
+      uninstallArgs: normalizedUninstall.args,
+      uninstallRegistryName: normalizedUninstall.registryMatchName || (existingApp?.name || ''),
+      uninstallRegistryPublisher: normalizedUninstall.registryMatchPublisher,
+      uninstallProductCode: normalizedUninstall.productCode,
       detection: {
         type: existingApp?.detection?.type || 'tracker',
         filePath: existingApp?.detection?.filePath || '',
@@ -1831,20 +1853,27 @@ const AppsPage = {
 
     const renderWizard = () => {
       const wizardScrollState = this.captureWizardScrollState();
+      const wizardMinStep = state.simpleModeFlow ? 2 : 1;
+      const wizardMaxStep = 4;
+      const wizardSteps = state.simpleModeFlow
+        ? [
+            { actualStep: 2, label: t('apps.step2') },
+            { actualStep: 3, label: t('apps.step3') },
+            { actualStep: 4, label: t('apps.step4') }
+          ]
+        : [
+            { actualStep: 1, label: t('apps.step1') },
+            { actualStep: 2, label: t('apps.step2') },
+            { actualStep: 3, label: t('apps.step3') },
+            { actualStep: 4, label: t('apps.step4') }
+          ];
       let body = `
         <div class="wizard-steps">
-          <div class="wizard-step ${state.step >= 1 ? (state.step > 1 ? 'done' : 'active') : ''}">
-            <span class="wizard-step-number">1</span><span>${t('apps.step1')}</span>
-          </div>
-          <div class="wizard-step ${state.step >= 2 ? (state.step > 2 ? 'done' : 'active') : ''}">
-            <span class="wizard-step-number">2</span><span>${t('apps.step2')}</span>
-          </div>
-          <div class="wizard-step ${state.step >= 3 ? (state.step > 3 ? 'done' : 'active') : ''}">
-            <span class="wizard-step-number">3</span><span>${t('apps.step3')}</span>
-          </div>
-          <div class="wizard-step ${state.step >= 4 ? 'active' : ''}">
-            <span class="wizard-step-number">4</span><span>${t('apps.step4')}</span>
-          </div>
+          ${wizardSteps.map((wizardStep, index) => `
+            <div class="wizard-step ${state.step > wizardStep.actualStep ? 'done' : (state.step === wizardStep.actualStep ? 'active' : '')}" data-actual-step="${wizardStep.actualStep}">
+              <span class="wizard-step-number">${index + 1}</span><span>${wizardStep.label}</span>
+            </div>
+          `).join('')}
         </div>
         <div class="wizard-content" style="min-height: 480px; display: flex; flex-direction: column;">`;
 
@@ -2075,13 +2104,19 @@ const AppsPage = {
         const isUserTemplate = !!tmpl?.isUserDefined;
         const showsConfigXmlPicker = ['sap-gui', 'office'].includes(state.template);
         const requiresConfigXml = ['sap-gui', 'office'].includes(state.template);
+        const showWizardAdvancedSections = !state.simpleModeFlow;
 
         body += `
           <div class="form-group">
             <label class="form-label">${t('apps.appName')}</label>
             <input class="form-input" id="wiz-name" value="${this.esc(state.name)}" placeholder="Ej: Google Chrome">
             <p class="form-hint">${t('apps.nameHint')}</p>
-          </div>`;
+          </div>
+          ${state.simpleModeFlow ? `
+            <div style="padding:12px 14px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.18);border-radius:8px;margin-bottom:14px;font-size:12px;color:var(--text-secondary);">
+              ${this.tr('apps.simpleModeHint', 'Modo sencillo: solo necesitas nombre, instalador y argumentos. Cambia a avanzado desde Configuracion para ver desinstalacion, deteccion y opciones adicionales.')}
+            </div>
+          ` : ''}`;
 
         if (isUserTemplate) {
           const fieldCount = Array.isArray(tmpl?.fields) ? tmpl.fields.length : 0;
@@ -2263,7 +2298,7 @@ const AppsPage = {
         }
 
         body += `
-          ${(() => {
+          ${showWizardAdvancedSections ? (() => {
             const installerType = this.getInstallerTypeFromPath(state.installerPath, state.template);
             const options = [];
             if (state.template === 'winget') {
@@ -2335,9 +2370,9 @@ const AppsPage = {
                 ` : ''}
               </div>
             `;
-          })()}
+          })() : ''}
 
-          ${(() => {
+          ${showWizardAdvancedSections ? (() => {
             const det = state.detection || {};
             const detType = det.type || 'tracker';
             const fileCheck = det.fileCheck || 'exists';
@@ -2420,9 +2455,9 @@ const AppsPage = {
                 ` : ''}
               </div>
             `;
-          })()}
+          })() : ''}
 
-          ${(() => {
+          ${showWizardAdvancedSections ? (() => {
             const dep = state.dependsOn || {};
             const apps = Array.isArray(state.availableApps) ? state.availableApps : [];
             return `
@@ -2453,29 +2488,31 @@ const AppsPage = {
                 ` : ''}
               </div>
             `;
-          })()}
+          })() : ''}
 
-          <div style="display:flex;gap:12px">
-            <div class="form-group" style="flex:0 0 220px">
-              <label class="form-label">${t('apps.version')}</label>
-              <input class="form-input" id="wiz-version" value="${state.version}" placeholder="1.0.0">
-              ${state.suggestedVersion && state.suggestedVersion !== state.version ? `
-                <div id="wiz-version-suggestion" style="margin-top:6px; display:inline-flex; align-items:center; gap:6px; padding:4px 10px; background:rgba(108,99,255,0.12); border:1px solid rgba(108,99,255,0.3); border-radius:20px; font-size:11px; cursor:pointer;" title="${t('apps.applySuggestedVersion')}">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" stroke-width="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-                  <span style="color:var(--text-secondary);">${t('apps.suggestedVersion')}:</span>
-                  <strong style="color:var(--primary-color); font-family:monospace;">${this.esc(state.suggestedVersion)}</strong>
-                </div>
-              ` : ''}
+          ${showWizardAdvancedSections ? `
+            <div style="display:flex;gap:12px">
+              <div class="form-group" style="flex:0 0 220px">
+                <label class="form-label">${t('apps.version')}</label>
+                <input class="form-input" id="wiz-version" value="${state.version}" placeholder="1.0.0">
+                ${state.suggestedVersion && state.suggestedVersion !== state.version ? `
+                  <div id="wiz-version-suggestion" style="margin-top:6px; display:inline-flex; align-items:center; gap:6px; padding:4px 10px; background:rgba(108,99,255,0.12); border:1px solid rgba(108,99,255,0.3); border-radius:20px; font-size:11px; cursor:pointer;" title="${t('apps.applySuggestedVersion')}">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" stroke-width="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                    <span style="color:var(--text-secondary);">${t('apps.suggestedVersion')}:</span>
+                    <strong style="color:var(--primary-color); font-family:monospace;">${this.esc(state.suggestedVersion)}</strong>
+                  </div>
+                ` : ''}
+              </div>
+              <div class="form-group" style="flex:1;display:flex;align-items:stretch;">
+                <label class="checkbox-wrapper checkbox-panel" style="align-items:center;">
+                  <input type="checkbox" class="checkbox-select" id="wiz-notify" ${state.notifyUser ? 'checked' : ''}>
+                  <span>&#128276; ${t('apps.notifyUser')}</span>
+                </label>
+              </div>
             </div>
-            <div class="form-group" style="flex:1;display:flex;align-items:stretch;">
-              <label class="checkbox-wrapper checkbox-panel" style="align-items:center;">
-                <input type="checkbox" class="checkbox-select" id="wiz-notify" ${state.notifyUser ? 'checked' : ''}>
-                <span>&#128276; ${t('apps.notifyUser')}</span>
-              </label>
-            </div>
-          </div>
+          ` : ''}
 
-          ${(!isWinget && !isODT) ? (tmpl?.fields || []).map(f => {
+          ${(showWizardAdvancedSections && !isWinget && !isODT) ? (tmpl?.fields || []).map(f => {
             let inputHtml = '';
             if (f.type === 'select') {
               inputHtml = '<select class="form-select" id="wiz-param-' + f.key + '">\n' +
@@ -2507,7 +2544,7 @@ const AppsPage = {
             `;
           }).join('') : ''}
 
-          ${(!isWinget && !isODT && isUserTemplate) ? (tmpl?.fileFields || []).map(fileField => `
+          ${(showWizardAdvancedSections && !isWinget && !isODT && isUserTemplate) ? (tmpl?.fileFields || []).map(fileField => `
             <div class="form-group">
               <label class="form-label">${this.esc(fileField.label)}${fileField.required ? ' *' : ''}</label>
               <div class="flex gap-sm">
@@ -2518,7 +2555,7 @@ const AppsPage = {
             </div>
           `).join('') : ''}
 
-          ${isUserTemplate && tmpl?.hasCustomScript ? `
+          ${showWizardAdvancedSections && isUserTemplate && tmpl?.hasCustomScript ? `
             <div style="padding:12px 14px;background:rgba(30,144,255,0.08);border:1px solid rgba(30,144,255,0.2);border-radius:8px;margin-top:8px;">
               <div style="font-weight:600;font-size:13px;color:var(--text-primary);margin-bottom:4px;">${this.tr('apps.customTemplatePostScriptTitle', 'Script adicional')}</div>
               <p style="margin:0;font-size:12px;color:var(--text-secondary);">${this.tr('apps.customTemplatePostScriptHint', 'La plantilla incluye un script opcional que se ejecutará después del instalador con acceso a los valores y archivos auxiliares definidos.')}</p>
@@ -2575,9 +2612,9 @@ const AppsPage = {
       body += `</div>`;
 
       const footer = `
-        ${state.step > 1 ? `<button class="btn btn-secondary" id="wiz-prev">${t('apps.back')}</button>` : ''}
+        ${state.step > wizardMinStep ? `<button class="btn btn-secondary" id="wiz-prev">${t('apps.back')}</button>` : ''}
         <div style="flex:1"></div>
-        ${state.step < 4 ?
+        ${state.step < wizardMaxStep ?
           `<button class="btn btn-primary" id="wiz-next" ${state.step === 1 && !state.template ? 'disabled' : ''}>${t('apps.next')}</button>` :
           `<button class="btn btn-success" id="wiz-deploy">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
@@ -2787,6 +2824,7 @@ const AppsPage = {
 
         // Validate step 2 before advancing
         if (state.step === 2) {
+          const requiresAdvancedValidation = !state.simpleModeFlow;
           if (!state.name.trim()) {
             App.toast(t('apps.nameRequired'), 'warning');
             document.getElementById('wiz-name')?.focus();
@@ -2813,18 +2851,18 @@ const AppsPage = {
             App.toast(this.tr('apps.customTemplateRequiredFile', 'Selecciona todos los archivos obligatorios de la plantilla.'), 'warning');
             return;
           }
-          if (state.uninstallMode === 'manual' && !String(state.uninstallCommand || '').trim()) {
+          if (requiresAdvancedValidation && state.uninstallMode === 'manual' && !String(state.uninstallCommand || '').trim()) {
             App.toast(this.tr('apps.uninstallCommandRequired', 'Define el comando de desinstalacion manual.'), 'warning');
             document.getElementById('wiz-uninstall-command')?.focus();
             return;
           }
-          if (state.uninstallMode === 'auto-registry' && !String(state.uninstallRegistryName || state.name || '').trim()) {
+          if (requiresAdvancedValidation && state.uninstallMode === 'auto-registry' && !String(state.uninstallRegistryName || state.name || '').trim()) {
             App.toast(this.tr('apps.uninstallRegistryRequired', 'Indica el nombre a buscar en el registro para desinstalar.'), 'warning');
             document.getElementById('wiz-uninstall-reg-name')?.focus();
             return;
           }
           const requiresConfigXml = ['office', 'sap-gui'].includes(state.template);
-          if (requiresConfigXml && !String(state.configXmlPath || '').trim()) {
+          if (requiresAdvancedValidation && requiresConfigXml && !String(state.configXmlPath || '').trim()) {
             App.toast(this.tr('apps.customTemplateRequiredXml', 'Selecciona el XML requerido para esta plantilla.'), 'warning');
             return;
           }
@@ -2837,7 +2875,8 @@ const AppsPage = {
 
     if (prevBtn) {
       prevBtn.addEventListener('click', () => {
-        state.step--;
+        const wizardMinStep = state.simpleModeFlow ? 2 : 1;
+        state.step = Math.max(wizardMinStep, state.step - 1);
         renderWizard();
       });
     }
@@ -3517,6 +3556,7 @@ const AppsPage = {
           .filter(([, v]) => (v?.sourcePath || v))
           .map(([k, v]) => row(this.esc(k), '<span style="font-family:monospace; font-size:12px;">' + this.esc(v?.sourcePath || v) + '</span>')).join('')
       : '';
+    const showAdvancedConfirmation = !state.simpleModeFlow;
 
     const body = `
       <div style="display:flex; flex-direction:column; gap:14px;">
@@ -3548,7 +3588,7 @@ const AppsPage = {
               : row(t('apps.detailInstallerType'), installerType)
           }
           ${(state.template !== 'winget' && state.template !== 'odt') ? row(t('apps.detailSilentArgs'), state.silentArgs ? '<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">' + this.esc(state.silentArgs) + '</code>' : '-') : ''}
-          ${row(this.tr('apps.uninstallMode', 'Modo de desinstalacion'), this.esc(this.getUninstallSummary({
+          ${showAdvancedConfirmation ? row(this.tr('apps.uninstallMode', 'Modo de desinstalacion'), this.esc(this.getUninstallSummary({
             ...state,
             installerType: this.getInstallerTypeFromPath(state.installerPath, state.template),
             uninstall: {
@@ -3559,9 +3599,9 @@ const AppsPage = {
               registryMatchPublisher: state.uninstallRegistryPublisher,
               productCode: state.uninstallProductCode
             }
-          })))}
-          ${row(t('apps.detailVersion'), this.esc(state.version || '1.0.0'))}
-          ${row(t('apps.detailNotifyUser'), state.notifyUser ? '&#10003;' : '&#10007;')}
+          }))) : ''}
+          ${showAdvancedConfirmation ? row(t('apps.detailVersion'), this.esc(state.version || '1.0.0')) : ''}
+          ${showAdvancedConfirmation ? row(t('apps.detailNotifyUser'), state.notifyUser ? '&#10003;' : '&#10007;') : ''}
         </div>
 
         <!-- Paths -->
@@ -5312,9 +5352,13 @@ const AppsPage = {
   },
 
   async openTemplateManager(onClose = null) {
-    const [templates, config, allTemplates] = await Promise.all([
+    const config = await window.api.config.get().catch(() => ({}));
+    if (String(config?.uiMode || '').trim().toLowerCase() !== 'advanced') {
+      App.toast(this.tr('apps.manageTemplatesAdvancedOnly', 'Cambia al modo avanzado para gestionar plantillas.'), 'info');
+      return;
+    }
+    const [templates, allTemplates] = await Promise.all([
       window.api.templates.getAll().catch(() => []),
-      window.api.config.get().catch(() => ({})),
       window.api.scripts.getTemplates().catch(() => [])
     ]);
     const builtInTemplates = allTemplates.filter(t => !t.isUserDefined && !t.noInstaller && t.id !== 'generic' && t.id !== 'custom' && t.id !== 'office');

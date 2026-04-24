@@ -18,6 +18,11 @@ const TRANSLATIONS_EN = {
     subtitle: "Welcome to AD Deploy Manager. Please configure the basic settings to continue.",
     language: "Language",
     languageHint: "Choose the language for the application UI.",
+    uiModeLabel: "Interface mode",
+    uiModeSimple: "Simple",
+    uiModeSimpleHint: "Hides advanced options and leaves only the basic installer upload flow.",
+    uiModeAdvanced: "Advanced",
+    uiModeAdvancedHint: "Shows templates, detection, uninstall settings and the rest of the technical options.",
     networkShare: "Network Share Path",
     networkShareHint: "UNC path where installers and scripts will be stored (e.g. \\\\server\\share).",
     browse: "Browse...",
@@ -136,6 +141,7 @@ const TRANSLATIONS_EN = {
     commonMsiDefault: "/qn /norestart",
     catalogTitle: "App Catalog",
     nameHint: "Used as folder name in the network share",
+    simpleModeHint: "Simple mode: you only need a name, installer and arguments. Switch to advanced mode from Settings to see uninstall, detection and extra options.",
     installerHint: "Will be copied to the server upon completion.",
     xmlConfig: "XML Configuration File",
     xmlHint: "Optional: C:\\path\\config.xml",
@@ -254,6 +260,7 @@ const TRANSLATIONS_EN = {
     regenerateScripts: "Regenerate Scripts",
     regenerateScriptsSuccess: "Scripts regenerated successfully for {app}.",
     regenerateScriptsError: "Unable to regenerate scripts",
+    manageTemplatesAdvancedOnly: "Switch to advanced mode to manage templates.",
     detailSectionHistory: "Version History",
     noGroup: "No group",
     groupByTemplate: "Group by template",
@@ -512,6 +519,10 @@ const TRANSLATIONS_EN = {
     preferredDCHint: "Leave empty to auto-use the PDC emulator. Set to a DC hostname for multi-DC environments.",
     language: "Interface Language",
     languageHint: "Choose the language for the application UI.",
+    uiModeLabel: "Interface mode",
+    uiModeSimple: "Simple",
+    uiModeAdvanced: "Advanced",
+    uiModeHint: "Simple mode hides advanced options during app and template creation.",
     exportImport: "Configuration Backup",
     exportBtn: "Export DB",
     importBtn: "Import DB",
@@ -588,7 +599,8 @@ const TRANSLATIONS_EN = {
     updateApp: "Update",
     updateAll: "Update All",
     updatingApp: "Updating...",
-    noAppsToUpdate: "None of your apps need this update"
+    noAppsToUpdate: "None of your apps need this update",
+    simpleModeCreateHint: "Switch to advanced mode to create apps from the catalog."
   },
   updates: {
     sectionTitle: "Actualizaciones de la aplicaciÃ³n",
@@ -658,6 +670,11 @@ const TRANSLATIONS_ES = {
     subtitle: "Bienvenido a AD Deploy Manager. Configura los ajustes básicos para continuar.",
     language: "Idioma",
     languageHint: "Elige el idioma de la interfaz de la aplicación.",
+    uiModeLabel: "Modo de interfaz",
+    uiModeSimple: "Sencillo",
+    uiModeSimpleHint: "Oculta opciones avanzadas y deja solo el flujo bÃ¡sico para subir instaladores.",
+    uiModeAdvanced: "Avanzado",
+    uiModeAdvancedHint: "Muestra plantillas, detecciÃ³n, desinstalaciÃ³n y el resto de opciones tÃ©cnicas.",
     networkShare: "Carpeta de Red (Network Share)",
     networkShareHint: "Ruta UNC donde se guardarán instaladores y scripts (ej. \\\\servidor\\share).",
     browse: "Examinar...",
@@ -905,7 +922,9 @@ const TRANSLATIONS_ES = {
     updateToVersion: "Actualizar a v{version}",
     updateAll: "Actualizar todas",
     updatingApp: "Actualizando...",
-    updateSuccess: "{name} actualizada a v{version}"
+    updateSuccess: "{name} actualizada a v{version}",
+    simpleModeHint: "Modo sencillo: solo necesitas nombre, instalador y argumentos. Cambia a avanzado desde ConfiguraciÃ³n para ver desinstalaciÃ³n, detecciÃ³n y opciones adicionales.",
+    manageTemplatesAdvancedOnly: "Cambia al modo avanzado para gestionar plantillas."
   },
   bundles: {
     title: "Bundles",
@@ -1166,7 +1185,11 @@ const TRANSLATIONS_ES = {
     saved: "Configuración guardada correctamente",
     dbExported: "Base de datos exportada en {path}",
     dbImported: "Base de datos importada. Reiniciando la app...",
-    restartRequired: "Es necesario reiniciar la aplicación para aplicar el cambio de idioma."
+    restartRequired: "Es necesario reiniciar la aplicación para aplicar el cambio de idioma.",
+    uiModeLabel: "Modo de interfaz",
+    uiModeSimple: "Sencillo",
+    uiModeAdvanced: "Avanzado",
+    uiModeHint: "En modo sencillo se ocultan las opciones avanzadas del alta de apps y plantillas."
   },
   common: {
     yes: "Sí",
@@ -1217,7 +1240,8 @@ const TRANSLATIONS_ES = {
     updateApp: "Actualizar",
     updateAll: "Actualizar todas",
     updatingApp: "Actualizando...",
-    noAppsToUpdate: "Ninguna de tus apps necesita esta actualización"
+    noAppsToUpdate: "Ninguna de tus apps necesita esta actualización",
+    simpleModeCreateHint: "Cambia al modo avanzado para crear apps desde el catálogo."
   },
   updates: {
     sectionTitle: "Actualizaciones de la aplicaciÃ³n",

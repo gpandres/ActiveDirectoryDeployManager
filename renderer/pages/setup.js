@@ -27,6 +27,22 @@ const SetupPage = {
         </div>
 
         <div class="form-group">
+          <label class="form-label">${this.tr('setup.uiModeLabel', 'Modo de interfaz')}</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <label style="flex:1;cursor:pointer;border:1px solid var(--border-color);border-radius:6px;padding:10px;min-width:220px;">
+              <input type="radio" name="setup-ui-mode" value="simple" ${(config.uiMode || 'simple') !== 'advanced' ? 'checked' : ''}>
+              <strong style="margin-left:6px;">${this.tr('setup.uiModeSimple', 'Sencillo')}</strong>
+              <p class="form-hint" style="margin:4px 0 0 22px;">${this.tr('setup.uiModeSimpleHint', 'Oculta opciones avanzadas y deja solo el flujo básico para subir instaladores.')}</p>
+            </label>
+            <label style="flex:1;cursor:pointer;border:1px solid var(--border-color);border-radius:6px;padding:10px;min-width:220px;">
+              <input type="radio" name="setup-ui-mode" value="advanced" ${(config.uiMode || '') === 'advanced' ? 'checked' : ''}>
+              <strong style="margin-left:6px;">${this.tr('setup.uiModeAdvanced', 'Avanzado')}</strong>
+              <p class="form-hint" style="margin:4px 0 0 22px;">${this.tr('setup.uiModeAdvancedHint', 'Muestra plantillas, detección, desinstalación y el resto de opciones técnicas.')}</p>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-group">
           <label class="form-label">${t('setup.networkShare')}</label>
           <div class="flex gap-sm">
             <input class="form-input" id="setup-network" value="${this.esc(config.networkSharePath)}" placeholder="\\\\server\\share" style="flex:1;">
@@ -137,8 +153,10 @@ const SetupPage = {
 
     document.getElementById('btn-save-setup').addEventListener('click', async () => {
       const selectedMode = document.querySelector('input[name="setup-logmode"]:checked')?.value || 'local';
+      const selectedUiMode = document.querySelector('input[name="setup-ui-mode"]:checked')?.value || 'simple';
       const newConfig = {
         language: document.getElementById('setup-lang').value,
+        uiMode: selectedUiMode,
         networkSharePath: document.getElementById('setup-network').value.trim(),
         logDirectory: document.getElementById('setup-logs').value.trim(),
         defaultGPO: document.getElementById('setup-gpo').value.trim(),
@@ -205,6 +223,11 @@ const SetupPage = {
     const div = document.createElement('div');
     div.textContent = str || '';
     return div.innerHTML;
+  },
+
+  tr(key, fallback) {
+    const value = t(key);
+    return value === key ? fallback : value;
   },
 
   getSelectedDNs() {

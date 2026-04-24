@@ -1,9 +1,11 @@
 # Reverse proxy + automatic TLS for the API.
 #
-# Replace "logs.empresa.local" with your real hostname. If you use
-# an internal CA, drop `tls internal` and mount your cert/key.
+# `tls internal` makes Caddy issue a certificate from its own
+# internal CA; the CA root lives in the caddy_data volume. Clients
+# must trust that root OR use certificate pinning (the app does
+# that via the `tlsFingerprint` field in the share config).
 
-logs.empresa.local {
+reposrv.superexport.local {
     encode zstd gzip
 
     # Strict security headers

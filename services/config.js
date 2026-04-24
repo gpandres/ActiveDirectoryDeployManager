@@ -20,6 +20,7 @@ const DEFAULT_CONFIG = {
   baseOUs: [],
   preferredDC: '',   // leave empty to auto-use PDC emulator; set to a DC hostname for multi-DC environments
   language: 'es',
+  uiMode: 'simple',
   firstRun: true,
   shareId: '',
   dismissedAppUpdateVersion: '',
@@ -73,8 +74,12 @@ function normalizeDNArray(value) {
 
 function normalizeConfigShape(config) {
   const baseOUs = normalizeDNArray(config.baseOUs ?? config.baseOU);
+  const uiMode = String(config.uiMode || '').trim().toLowerCase() === 'advanced'
+    ? 'advanced'
+    : 'simple';
   return {
     ...config,
+    uiMode,
     baseOUs,
     baseOU: baseOUs[0] || ''
   };
