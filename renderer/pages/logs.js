@@ -61,13 +61,13 @@ const LogsPage = {
           </h1>
           <p class="page-subtitle">${t('logs.subtitle') || 'Actividad del sistema y despliegues'}</p>
         </div>
-        <div id="logs-backend-badge" class="${isDedicated && !st.online ? 'logs-badge logs-badge-warn' : 'logs-badge'}">
-          <span class="logs-badge-dot ${isDedicated && !st.online ? 'off' : 'on'}"></span>
-          <span id="logs-backend-label">${this.esc(statusLabel)}</span>
+        <div id="logs-backend-badge" class="${isDedicated && (!st.online || !st.canWrite) ? 'logs-badge logs-badge-warn' : 'logs-badge'}">
+          <span class="logs-badge-dot ${isDedicated && (!st.online || !st.canWrite) ? 'off' : 'on'}"></span>
+          <span id="logs-backend-label">${this.esc(this._backendStatusLabel(st) || statusLabel)}</span>
         </div>
       </div>
 
-      <div class="stats-grid" id="logs-stats">
+      <div class="stats-grid" id="logs-stats" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));">
         ${this._statsSkeleton()}
       </div>
 
@@ -83,22 +83,22 @@ const LogsPage = {
               <input class="form-input" id="logs-equipo" list="logs-equipos-datalist" placeholder="${t('logs.equipoPh') || 'hostname'}">
               <datalist id="logs-equipos-datalist"></datalist>
             </div>
-            <div class="form-group" style="min-width:150px;">
+            <div class="form-group" style="min-width:300px;">
               <label class="form-label">${t('logs.levelLabel') || 'Nivel'}</label>
-              <select class="form-select" id="logs-level" multiple size="5" style="min-height:auto;height:38px;">
-                <option value="debug">Debug</option>
-                <option value="info" selected>Info</option>
-                <option value="warn" selected>Warn</option>
-                <option value="error" selected>Error</option>
-                <option value="fatal" selected>Fatal</option>
-              </select>
+              <div style="display:flex;gap:12px;align-items:center;height:38px;padding:0 12px;background:var(--bg-input);border:1px solid var(--border-color);border-radius:var(--radius-sm);overflow-x:auto;">
+                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;color:var(--text-secondary);"><input type="checkbox" value="debug" class="logs-lvl-chk" style="accent-color:var(--accent-primary)"> Debug</label>
+                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;color:var(--text-secondary);"><input type="checkbox" value="info" class="logs-lvl-chk" style="accent-color:var(--accent-info)" checked> Info</label>
+                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;color:var(--text-secondary);"><input type="checkbox" value="warn" class="logs-lvl-chk" style="accent-color:var(--accent-warning)" checked> Warn</label>
+                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;color:var(--text-secondary);"><input type="checkbox" value="error" class="logs-lvl-chk" style="accent-color:var(--accent-danger)" checked> Error</label>
+                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;color:var(--text-secondary);"><input type="checkbox" value="fatal" class="logs-lvl-chk" style="accent-color:#991b1b" checked> Fatal</label>
+              </div>
             </div>
             <div class="form-group" style="align-self:flex-end;">
               <button class="btn btn-secondary" id="logs-clear">${t('logs.clear') || 'Limpiar'}</button>
             </div>
           </div>
 
-          <div class="logs-table-wrap">
+          <div class="logs-table-wrap" style="max-height: 75vh;">
             <table class="logs-table">
               <thead>
                 <tr>
@@ -129,6 +129,18 @@ const LogsPage = {
         </aside>
       </div>
     `;
+  },
+
+  _backendStatusLabel(st = {}) {
+    const isDedicated = st.mode === 'dedicated';
+    if (!isDedicated) return t('logs.backendLocal') || 'Almacenamiento local';
+    if (!st.online) {
+      return `${t('logs.backendOffline') || 'Servidor no alcanzable'} - cola: ${st.queueSize || 0}`;
+    }
+    if (!st.canWrite) {
+      return `${t('logs.backendDedicated') || 'Servidor dedicado'} - ingesta sin clave`;
+    }
+    return `${t('logs.backendDedicated') || 'Servidor dedicado'} - ${st.host || ''}`;
   },
 
   _statsSkeleton() {
@@ -205,8 +217,11 @@ const LogsPage = {
             : `${t('logs.backendOffline') || 'Servidor no alcanzable'} — cola: ${st.queueSize}`)
         : (t('logs.backendLocal') || 'Almacenamiento local');
       badge.className = (isD && !st.online) ? 'logs-badge logs-badge-warn' : 'logs-badge';
+      const warn = isD && (!st.online || !st.canWrite);
+      label.textContent = this._backendStatusLabel(st);
+      badge.className = warn ? 'logs-badge logs-badge-warn' : 'logs-badge';
       const dot = badge.querySelector('.logs-badge-dot');
-      if (dot) dot.className = 'logs-badge-dot ' + ((isD && !st.online) ? 'off' : 'on');
+      if (dot) dot.className = 'logs-badge-dot ' + (warn ? 'off' : 'on');
     } catch { /* ignore */ }
   },
 
@@ -222,8 +237,8 @@ const LogsPage = {
   _collectFilters() {
     const q = document.getElementById('logs-q')?.value.trim() || '';
     const equipo = document.getElementById('logs-equipo')?.value.trim() || '';
-    const sel = document.getElementById('logs-level');
-    const levels = sel ? Array.from(sel.selectedOptions).map(o => o.value) : [];
+    const chks = document.querySelectorAll('.logs-lvl-chk:checked');
+    const levels = Array.from(chks).map(c => c.value);
     return {
       q: q || undefined,
       equipo: equipo || undefined,
@@ -253,6 +268,12 @@ const LogsPage = {
       result = await window.api.logs.query(filters);
     } catch (e) {
       if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--danger);padding:24px;">${this.esc(e.message || 'error')}</td></tr>`;
+      return;
+    }
+    if (result?.error) {
+      if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--danger);padding:24px;">${this.esc(result.error)}</td></tr>`;
+      this._items = [];
+      this._cursor = null;
       return;
     }
 
@@ -309,7 +330,10 @@ const LogsPage = {
 
     const onFilterChange = debounce(() => this._reloadTable({ reset: true }), 300);
     document.getElementById('logs-q')?.addEventListener('input', onFilterChange);
-    document.getElementById('logs-level')?.addEventListener('change', () => this._reloadTable({ reset: true }));
+    
+    document.querySelectorAll('.logs-lvl-chk').forEach(chk => {
+      chk.addEventListener('change', () => this._reloadTable({ reset: true }));
+    });
 
     const equipoInput = document.getElementById('logs-equipo');
     if (equipoInput) {
@@ -325,8 +349,9 @@ const LogsPage = {
     document.getElementById('logs-clear')?.addEventListener('click', () => {
       const q = document.getElementById('logs-q'); if (q) q.value = '';
       const eq = document.getElementById('logs-equipo'); if (eq) eq.value = '';
-      const sel = document.getElementById('logs-level');
-      if (sel) Array.from(sel.options).forEach(o => o.selected = ['info','warn','error','fatal'].includes(o.value));
+      document.querySelectorAll('.logs-lvl-chk').forEach(chk => {
+        chk.checked = ['info','warn','error','fatal'].includes(chk.value);
+      });
       this._reloadTable({ reset: true });
     });
   },

@@ -1,5 +1,7 @@
 const { execFile } = require('child_process');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 
 // ─── Input sanitization helpers ──────────────────────────────────────────────
 
@@ -110,31 +112,38 @@ function validateScriptPath(scriptPath, config) {
 
 const DEFAULT_PS_TIMEOUT_MS = 120000; // 2 min per command
 
-// Encode a PS script as -EncodedCommand (UTF-16 LE base64). This sidesteps
-// console codepage issues with non-ASCII OU/GPO names and avoids stdin
-// encoding quirks.
-function encodePSCommand(command) {
-  const prelude =
-    "$ErrorActionPreference='Stop';" +
-    "$OutputEncoding=[System.Text.Encoding]::UTF8;" +
-    "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;";
-  return Buffer.from(prelude + command, 'utf16le').toString('base64');
-}
-
+// Run a PowerShell command via a temporary .ps1 file. Script is written
+// as UTF-8 with BOM so PowerShell parses non-ASCII characters correctly,
+// and the file is deleted as soon as the process exits.
 function runPowerShell(command, { timeoutMs = DEFAULT_PS_TIMEOUT_MS } = {}) {
   return new Promise((resolve, reject) => {
-    const encoded = encodePSCommand(command);
+    const prelude =
+      "$ErrorActionPreference='Stop'\r\n" +
+      "$OutputEncoding=[System.Text.Encoding]::UTF8\r\n" +
+      "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8\r\n";
+    const scriptPath = path.join(
+      os.tmpdir(),
+      `addeploy-ps-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.ps1`
+    );
+    // UTF-8 BOM ensures PowerShell 5.1 reads accents/Unicode correctly.
+    const buf = Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), Buffer.from(prelude + command, 'utf8')]);
+    try { fs.writeFileSync(scriptPath, buf, { mode: 0o600 }); }
+    catch (e) { return reject(e); }
+
+    let killed = false;
+    const cleanup = () => { try { fs.unlinkSync(scriptPath); } catch { /* ignore */ } };
+
     const child = execFile(
       'powershell',
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
       { maxBuffer: 1024 * 1024 * 50, windowsHide: true },
       (error, stdout, stderr) => {
+        cleanup();
         if (killed) return reject(new Error(`PowerShell timeout tras ${timeoutMs}ms`));
         if (error) return reject(new Error(stderr || error.message));
         resolve(stdout.trim());
       }
     );
-    let killed = false;
     const timer = setTimeout(() => {
       killed = true;
       try { child.kill('SIGKILL'); } catch (_) { /* ignore */ }
@@ -244,6 +253,14 @@ ${body}
 function isMissingGPOLinkError(message) {
   if (typeof message !== 'string') return false;
   return /is not linked|not linked|no est.*vinculad|no hay ning[uú]n gpo.*vinculad|there is no gpo.*linked/i.test(message);
+}
+
+function normalizeUnlinkResult(result) {
+  if (result?.ok) return { success: true };
+  if (result?.code === 'NOT_LINKED' || result?.code === 'NOT_FOUND' || isMissingGPOLinkError(result?.error)) {
+    return { success: true, message: 'GPO no estaba vinculada a esa OU' };
+  }
+  return { success: false, error: result?.error || 'Error desconocido' };
 }
 
 async function runPSJson(command) {
@@ -579,11 +596,7 @@ const adService = {
     const result = await runPSJson(
       `Import-Module ActiveDirectory; Import-Module GroupPolicy; ${dcSnippet(config.preferredDC)}; Remove-GPLink -Name '${safeGpo}' -Target '${safeOU}' -Server $adServer -ErrorAction Stop | Out-Null; @{ ok = $true } | ConvertTo-Json -Compress`
     );
-    if (result.ok) return { success: true };
-    if (result.code === 'NOT_LINKED' || result.code === 'NOT_FOUND' || isMissingGPOLinkError(result.error)) {
-      return { success: true, message: 'GPO no estaba vinculada a esa OU' };
-    }
-    return { success: false, error: result.error || 'Error desconocido' };
+    return normalizeUnlinkResult(result);
   },
 
   async removeGPOStartupScript(gpoName) {
@@ -805,4 +818,12 @@ function buildOUTree(ous) {
   return roots;
 }
 
-module.exports = { ...adService, buildGPOName, stripGPOPrefix };
+module.exports = {
+  ...adService,
+  buildGPOName,
+  stripGPOPrefix,
+  __test__: {
+    isMissingGPOLinkError,
+    normalizeUnlinkResult
+  }
+};

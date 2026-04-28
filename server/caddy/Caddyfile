@@ -1,11 +1,12 @@
 # Reverse proxy + automatic TLS for the API.
 #
-# `tls internal` makes Caddy issue a certificate from its own
-# internal CA; the CA root lives in the caddy_data volume. Clients
-# must trust that root OR use certificate pinning (the app does
-# that via the `tlsFingerprint` field in the share config).
+# Hostname is provided via the LOG_HOSTNAME environment variable
+# (set in docker-compose.yml or .env). `tls internal` makes Caddy
+# issue a certificate from its own internal CA; the CA root lives
+# in the caddy_data volume. Clients must trust that root OR use
+# certificate pinning via the `tlsFingerprint` field.
 
-reposrv.superexport.local {
+{$LOG_HOSTNAME} {
     encode zstd gzip
 
     # Strict security headers
@@ -17,8 +18,11 @@ reposrv.superexport.local {
         -Server
     }
 
-    # Only proxy API paths; everything else gets a 404.
+    # Proxy API and the small admin console; everything else gets a 404.
     handle /api/* {
+        reverse_proxy api:8080
+    }
+    handle /admin* {
         reverse_proxy api:8080
     }
     handle /health {

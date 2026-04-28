@@ -81,6 +81,14 @@ describe('generateScript — generic template', () => {
     expect(script).toContain('$ADDMGeneratedAppName = "TestApp"');
   });
 
+  it('includes best-effort dedicated-server logging hooks', () => {
+    const script = svc.generateScript(base({ template: 'generic' }));
+    expect(script).toContain('Initialize-AppDeployRemoteLog');
+    expect(script).toContain('Send-AppDeployLog -Level "info" -Source "install" -Message "install_start"');
+    expect(script).toContain('Send-AppDeployLog -Level "info" -Source "install" -Message "install_success"');
+    expect(script).toContain('PendingRemoteLogs.ndjson');
+  });
+
   it('includes the 32→64 bit redirect guard', () => {
     const script = svc.generateScript(base({ template: 'generic' }));
     expect(script).toContain('PROCESSOR_ARCHITEW6432');
@@ -430,6 +438,20 @@ describe('generateUninstallScript', () => {
     expect(script).toContain('# script_kind: uninstall');
     expect(script).toContain('$ADDMGeneratedScriptKind = "uninstall"');
     expect(script).toContain('$ADDMGeneratedAppName = "TestApp"');
+  });
+
+  it('includes best-effort dedicated-server logging hooks in uninstall scripts', () => {
+    const script = svc.generateUninstallScript(base({
+      template: 'generic',
+      installerType: 'msi',
+      installerPath: 'C:\\temp\\agent.msi',
+      uninstall: { mode: 'auto-msi' }
+    }));
+
+    expect(script).toContain('Initialize-AppDeployRemoteLog');
+    expect(script).toContain('Send-AppDeployLog -Level "info" -Source "uninstall" -Message "uninstall_start"');
+    expect(script).toContain('uninstall_success');
+    expect(script).toContain('PendingRemoteLogs.ndjson');
   });
 
   it('builds MSI uninstall scripts that resolve ProductCode automatically', () => {

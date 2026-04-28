@@ -618,6 +618,8 @@ Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Usuario : $env:USERNAME"
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Fuente  : $PSScriptRoot"
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ====================================================="
 
+${getRemoteScriptLoggingLogic()}
+
 if (Test-Path -LiteralPath $VersionFile) {
     try {
         $Manifest = Get-Content -LiteralPath $VersionFile -Raw | ConvertFrom-Json
@@ -661,9 +663,13 @@ function Save-UninstallTracker {
     }
 
     $payload | ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+    $eventName = if ($Result -eq 'failed') { 'uninstall_failed' } elseif ($Result -eq 'removed') { 'uninstall_success' } else { 'uninstall_checked' }
+    $eventLevel = if ($Result -eq 'failed') { 'error' } else { 'info' }
+    Send-AppDeployLog -Level $eventLevel -Source "uninstall" -Message $eventName -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; method = $Method; result = $Result; error = $ErrorMessage }
 }
 
 ${detectionHelpers}${extraFunctions}try {
+Send-AppDeployLog -Level "info" -Source "uninstall" -Message "uninstall_start" -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; method = $UninstallMode }
 ${body}
 } catch {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: $_"
@@ -2118,6 +2124,97 @@ Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Dependencia '$DepName' lista."
 `.trim();
 }
 
+function getRemoteScriptLoggingLogic() {
+  return [
+    '# Remote logging to dedicated server (best effort, non-blocking for deployment)',
+    '$RemoteLogState = @{ Enabled = $false; ApiBaseUrl = ""; ApiKey = ""; ShareId = ""; TlsFingerprint = ""; QueueFile = (Join-Path $LogDir "PendingRemoteLogs.ndjson") }',
+    'function Initialize-AppDeployRemoteLog {',
+    '    try {',
+    '        $shareRoot = Split-Path -Parent $PSScriptRoot',
+    '        if (-not $shareRoot) { return }',
+    '        $cfgPath = Join-Path $shareRoot "ADDeploy\\logging-config.json"',
+    '        if (-not (Test-Path -LiteralPath $cfgPath)) { return }',
+    '        $cfg = Get-Content -LiteralPath $cfgPath -Raw -ErrorAction Stop | ConvertFrom-Json',
+    '        if ($cfg.mode -ne "dedicated" -or -not $cfg.apiBaseUrl) { return }',
+    '        $RemoteLogState.ApiBaseUrl = ([string]$cfg.apiBaseUrl).TrimEnd("/")',
+    '        $RemoteLogState.ShareId = [string]$cfg.shareId',
+    '        $RemoteLogState.TlsFingerprint = [string]$cfg.tlsFingerprint',
+    '        if ($RemoteLogState.TlsFingerprint) {',
+    '            [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {',
+    '                param($sender, $cert, $chain, $errors)',
+    '                try {',
+    '                    $sha = [System.Security.Cryptography.SHA256]::Create()',
+    '                    $fp = "sha256//" + [Convert]::ToBase64String($sha.ComputeHash($cert.GetRawCertData()))',
+    '                    return $fp -eq $RemoteLogState.TlsFingerprint',
+    '                } catch { return $false }',
+    '            }',
+    '        }',
+    '        $keySuffix = if ($RemoteLogState.ShareId) { $RemoteLogState.ShareId } else { "default" }',
+    '        $keyFile = Join-Path $LogDir ("RemoteLogKey_" + $keySuffix + ".json")',
+    '        if (Test-Path -LiteralPath $keyFile) {',
+    '            try {',
+    '                $saved = Get-Content -LiteralPath $keyFile -Raw | ConvertFrom-Json',
+    '                if ($saved.apiKey) { $RemoteLogState.ApiKey = [string]$saved.apiKey }',
+    '            } catch { }',
+    '        }',
+    '        if (-not $RemoteLogState.ApiKey -and $cfg.enrollmentToken) {',
+    '            $body = @{ hostname = $env:COMPUTERNAME; shareId = $RemoteLogState.ShareId; enrollmentToken = [string]$cfg.enrollmentToken } | ConvertTo-Json -Compress',
+    '            $enroll = Invoke-RestMethod -Method Post -Uri ($RemoteLogState.ApiBaseUrl + "/api/enroll") -ContentType "application/json" -Body $body -TimeoutSec 10 -ErrorAction Stop',
+    '            if ($enroll.apiKey) {',
+    '                $RemoteLogState.ApiKey = [string]$enroll.apiKey',
+    '                @{ apiKey = $RemoteLogState.ApiKey; shareId = $RemoteLogState.ShareId; enrolledAt = (Get-Date).ToString("o") } | ConvertTo-Json -Compress | Set-Content -LiteralPath $keyFile -Encoding UTF8 -Force',
+    '            }',
+    '        }',
+    '        if ($RemoteLogState.ApiBaseUrl -and $RemoteLogState.ApiKey) { $RemoteLogState.Enabled = $true }',
+    '    } catch {',
+    '        Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] AVISO: logging remoto no inicializado - $_"',
+    '    }',
+    '}',
+    'function Add-AppDeployRemoteQueue {',
+    '    param([object[]]$Entries)',
+    '    try {',
+    '        foreach ($entry in $Entries) { ($entry | ConvertTo-Json -Compress -Depth 8) | Add-Content -LiteralPath $RemoteLogState.QueueFile -Encoding UTF8 }',
+    '    } catch { }',
+    '}',
+    'function Send-AppDeployLogBatch {',
+    '    param([object[]]$Entries, [switch]$NoQueue)',
+    '    if (-not $RemoteLogState.Enabled -or -not $Entries -or $Entries.Count -eq 0) { return $false }',
+    '    try {',
+    '        $headers = @{ "X-API-Key" = $RemoteLogState.ApiKey }',
+    '        $body = @{ hostname = $env:COMPUTERNAME; shareId = $RemoteLogState.ShareId; entries = @($Entries) } | ConvertTo-Json -Compress -Depth 10',
+    '        Invoke-RestMethod -Method Post -Uri ($RemoteLogState.ApiBaseUrl + "/api/logs/batch") -Headers $headers -ContentType "application/json" -Body $body -TimeoutSec 10 -ErrorAction Stop | Out-Null',
+    '        return $true',
+    '    } catch {',
+    '        if (-not $NoQueue) { Add-AppDeployRemoteQueue -Entries $Entries }',
+    '        return $false',
+    '    }',
+    '}',
+    'function Flush-AppDeployLogQueue {',
+    '    if (-not $RemoteLogState.Enabled -or -not (Test-Path -LiteralPath $RemoteLogState.QueueFile)) { return }',
+    '    try {',
+    '        $lines = Get-Content -LiteralPath $RemoteLogState.QueueFile -ErrorAction Stop | Where-Object { $_ }',
+    '        if (-not $lines -or $lines.Count -eq 0) { Remove-Item -LiteralPath $RemoteLogState.QueueFile -Force -ErrorAction SilentlyContinue; return }',
+    '        $entries = @()',
+    '        foreach ($line in $lines | Select-Object -First 200) { try { $entries += ($line | ConvertFrom-Json) } catch { } }',
+    '        if ($entries.Count -gt 0 -and (Send-AppDeployLogBatch -Entries $entries -NoQueue)) {',
+    '            $remaining = $lines | Select-Object -Skip $entries.Count',
+    '            if ($remaining -and $remaining.Count -gt 0) { $remaining | Set-Content -LiteralPath $RemoteLogState.QueueFile -Encoding UTF8 -Force }',
+    '            else { Remove-Item -LiteralPath $RemoteLogState.QueueFile -Force -ErrorAction SilentlyContinue }',
+    '        }',
+    '    } catch { }',
+    '}',
+    'function Send-AppDeployLog {',
+    '    param([string]$Level = "info", [string]$Source = "install", [string]$Message, [hashtable]$Context = @{})',
+    '    try {',
+    '        $entry = @{ ts = (Get-Date).ToUniversalTime().ToString("o"); level = $Level; source = $Source; message = $Message; context = $Context }',
+    '        [void](Send-AppDeployLogBatch -Entries @($entry))',
+    '    } catch { }',
+    '}',
+    'Initialize-AppDeployRemoteLog',
+    'Flush-AppDeployLogQueue'
+  ].join('\n');
+}
+
 function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appDisplayName = '') {
   const config = configService.getConfig();
   const dict = i18nService.getTranslations(config.language || 'en');
@@ -2138,6 +2235,7 @@ if (Test-AppInstalled) {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Regla de deteccion confirma app ya instalada."
     @{ version = $CurrentVersion; hash = $CurrentHash; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success'; method = 'detection-rule' } |
         ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+    Send-AppDeployLog -Level "info" -Source "install" -Message "install_skipped" -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; reason = "detection-rule" }
     Stop-Transcript -ErrorAction SilentlyContinue
     exit 0
 }` : '';
@@ -2168,6 +2266,7 @@ if (Test-AppInstalled) {
     '$CleanupMarkerDir = Join-Path $LogDir "PendingCacheCleanup"',
     'if (-not (Test-Path -LiteralPath $CleanupMarkerDir)) { New-Item -ItemType Directory -Path $CleanupMarkerDir -Force | Out-Null }',
     '$CleanupMarkerPath = Join-Path $CleanupMarkerDir "$NombreApp.json"',
+    getRemoteScriptLoggingLogic(),
     depWait,
     getDeployCacheCleanupLogic(),
     '',
@@ -2189,6 +2288,7 @@ if (Test-AppInstalled) {
     '    exit 1',
     '}',
     'Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] Version : $CurrentVersion | Hash: $CurrentHash"',
+    'Send-AppDeployLog -Level "info" -Source "install" -Message "install_start" -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; scriptRoot = $PSScriptRoot }',
     '',
     getInstallerConflictLogic(),
     '',
@@ -2200,6 +2300,7 @@ if (Test-AppInstalled) {
     '        $t = Get-Content $TrackerFile -Raw | ConvertFrom-Json',
     '        if ($t.hash -eq $CurrentHash -and $t.result -eq \'success\') {',
     '            Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] OMITIDO: Ya instalado (v$($t.version), hash coincide)"',
+    '            Send-AppDeployLog -Level "info" -Source "install" -Message "install_skipped" -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; reason = "tracker-success" }',
     '            Stop-Transcript -ErrorAction SilentlyContinue',
     '            exit 0',
     '        }',
@@ -2210,6 +2311,7 @@ if (Test-AppInstalled) {
     '            }',
     '            if ($PreviousFailureCount -ge $ManagedInstallerMaxAttempts) {',
     '                Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] OMITIDO: La instalacion ya fallo $PreviousFailureCount veces con este mismo hash. Actualiza la app o revisa el instalador para reiniciar los intentos."',
+    '                Send-AppDeployLog -Level "warn" -Source "install" -Message "install_skipped" -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; reason = "max-retries"; retryCount = $PreviousFailureCount }',
     '                Stop-Transcript -ErrorAction SilentlyContinue',
     '                exit 0',
     '            }',
@@ -2242,6 +2344,7 @@ if (Test-AppInstalled) {
     '        @{ hash = $CurrentHash; version = $CurrentVersion; failedAt = (Get-Date).ToString(\'o\'); computer = $env:COMPUTERNAME; result = \'failed\'; retryCount = ($TrackerRetryBase + 1); error = \'Installer not found in share\' } |',
     '            ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8',
     '    }',
+    '    Send-AppDeployLog -Level "error" -Source "install" -Message "install_failed" -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; error = "Installer not found in share" }',
     '    Stop-Transcript -ErrorAction SilentlyContinue',
     '    exit 1',
     '}',
@@ -2256,6 +2359,7 @@ if (Test-AppInstalled) {
     '    Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] Copia completada."',
     '} catch {',
     '    Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] ERROR copiando desde share: $_"',
+    '    Send-AppDeployLog -Level "error" -Source "install" -Message "install_failed" -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; error = $_.ToString(); stage = "copy-from-share" }',
     '    Stop-Transcript -ErrorAction SilentlyContinue',
     '    exit 1',
     '}',
@@ -2275,6 +2379,7 @@ if (Test-AppInstalled) {
     '}',
     'if (-not $Instalador) {',
     '    Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] ERROR: Instalador no encontrado en cache tras la copia"',
+    '    Send-AppDeployLog -Level "error" -Source "install" -Message "install_failed" -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; error = "Installer not found in cache"; stage = "cache" }',
     '    Stop-Transcript -ErrorAction SilentlyContinue',
     '    exit 1',
     '}',
@@ -2306,6 +2411,7 @@ function getTrackerSaveLogic(notifyUser = false) {
 ${notifyAfter}
     @{ hash = $CurrentHash; version = $CurrentVersion; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success' } |
         ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+    Send-AppDeployLog -Level "info" -Source "install" -Message "install_success" -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; disposition = $InstallDisposition }
     Invoke-DeployCacheCleanupWithFallback -CacheDir $CacheDir -MarkerPath $CleanupMarkerPath | Out-Null
 
 } catch {
@@ -2313,6 +2419,7 @@ ${notifyAfter}
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Fallo instalando $NombreApp - $_"
     @{ hash = $CurrentHash; version = $CurrentVersion; failedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'failed'; retryCount = ($TrackerRetryBase + 1); error = $_.ToString() } |
         ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+    Send-AppDeployLog -Level "error" -Source "install" -Message "install_failed" -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; retryCount = ($TrackerRetryBase + 1); error = $_.ToString() }
     Invoke-DeployCacheCleanupWithFallback -CacheDir $CacheDir -MarkerPath $CleanupMarkerPath | Out-Null
 }
 Stop-Transcript -ErrorAction SilentlyContinue`;
@@ -2503,7 +2610,7 @@ ${getTrackerSaveLogic(notify)}
 function generateCustom(cfg) {
   const safeName = sanitizeAppName(cfg.name);
   const code = cfg.customParams?.customScript || '';
-  const safeCode = code.replace(/[`$]/g, '`$&');
+  const safeCode = String(code).replace(/\r\n/g, '\n');
   return `# =========================================================================
 # SCRIPT CUSTOM RAW
 # App: ${safeName}

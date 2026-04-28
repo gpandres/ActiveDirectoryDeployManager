@@ -1,21 +1,47 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
-let logFilePath = null;
+function getUserDataDir() {
+  try {
+    const { app } = require('electron');
+    return app?.getPath ? app.getPath('userData') : os.tmpdir();
+  } catch {
+    return os.tmpdir();
+  }
+}
+
+function getConfiguredLogDir() {
+  try {
+    const configService = require('./config');
+    const cfg = configService.getConfig();
+    return typeof cfg.logDirectory === 'string' && cfg.logDirectory.trim()
+      ? cfg.logDirectory.trim()
+      : '';
+  } catch {
+    return '';
+  }
+}
 
 function getLogPath() {
-  if (!logFilePath) {
-    const { app } = require('electron');
-    logFilePath = path.join(app.getPath('userData'), 'activity-log.json');
-  }
-  return logFilePath;
+  const configuredDir = getConfiguredLogDir();
+  return path.join(configuredDir || getUserDataDir(), 'activity-log.json');
+}
+
+function ensureLogDir(filePath) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+}
+
+function parseEntries(raw) {
+  const parsed = JSON.parse(raw);
+  return Array.isArray(parsed) ? parsed : [];
 }
 
 function loadLog() {
   try {
     const p = getLogPath();
     if (fs.existsSync(p)) {
-      return JSON.parse(fs.readFileSync(p, 'utf-8'));
+      return parseEntries(fs.readFileSync(p, 'utf-8'));
     }
   } catch (err) {
     console.error('Error loading activity log:', err);
@@ -26,7 +52,17 @@ function loadLog() {
 function saveLog(entries) {
   // Keep max 500 entries to avoid file bloat
   const trimmed = entries.slice(-500);
-  fs.writeFileSync(getLogPath(), JSON.stringify(trimmed, null, 2), 'utf-8');
+  const target = getLogPath();
+  try {
+    ensureLogDir(target);
+    fs.writeFileSync(target, JSON.stringify(trimmed, null, 2), 'utf-8');
+  } catch (err) {
+    const fallback = path.join(getUserDataDir(), 'activity-log.json');
+    if (fallback === target) throw err;
+    console.warn('Error writing configured activity log path, falling back:', err.message);
+    ensureLogDir(fallback);
+    fs.writeFileSync(fallback, JSON.stringify(trimmed, null, 2), 'utf-8');
+  }
 }
 
 const activityLog = {
@@ -55,6 +91,10 @@ const activityLog = {
   clear() {
     saveLog([]);
     return { success: true };
+  },
+
+  getPath() {
+    return getLogPath();
   }
 };
 

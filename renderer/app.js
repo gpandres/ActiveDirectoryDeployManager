@@ -177,7 +177,7 @@ const App = {
   // ─── Marquee Hover Effect ──────────────────────────
   bindMarqueeHover() {
     document.addEventListener('mouseenter', (e) => {
-      const target = e.target.closest('.marquee-text');
+      const target = e.target.closest && e.target.closest('.marquee-text');
       if (target && target.scrollWidth > target.clientWidth) {
         const overflow = target.scrollWidth - target.clientWidth;
         target.style.transition = `transform \${overflow * 18}ms linear`;
@@ -185,7 +185,7 @@ const App = {
       }
     }, true);
     document.addEventListener('mouseleave', (e) => {
-      const target = e.target.closest('.marquee-text');
+      const target = e.target.closest && e.target.closest('.marquee-text');
       if (target) {
         target.style.transition = 'transform 0.2s ease-out';
         target.style.transform = 'translateX(0)';

@@ -59,6 +59,21 @@ function generateId() {
   return crypto.randomUUID();
 }
 
+const SAFE_RECORD_ID = /^[a-zA-Z0-9_-]{1,128}$/;
+
+function normalizeRecordId(value, prefix = 'item') {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (SAFE_RECORD_ID.test(raw)) return raw;
+  if (!raw) return generateId();
+  const cleaned = raw
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 96);
+  const hash = crypto.createHash('sha1').update(raw).digest('hex').slice(0, 8);
+  return `${cleaned || prefix}_${hash}`.slice(0, 128);
+}
+
 function normalizeDNArray(value) {
   const raw = Array.isArray(value)
     ? value
@@ -207,7 +222,7 @@ function normalizeDependency(value) {
     ? Math.floor(timeout) : 30;
   const behavior = ['skip', 'fail'].includes(String(raw.behavior || '').toLowerCase())
     ? String(raw.behavior).toLowerCase() : 'skip';
-  return { appId, appName, timeoutMinutes, behavior };
+  return { appId: normalizeRecordId(appId, 'app'), appName, timeoutMinutes, behavior };
 }
 
 function normalizeUninstallConfig(value, context = {}) {
@@ -249,6 +264,7 @@ function normalizeAppRecord(app) {
   const assignedOUs = normalizeDNArray(app?.assignedOUs || app?.ouDN);
   const normalized = {
     ...app,
+    id: normalizeRecordId(app?.id, 'app'),
     installerType: inferInstallerType(app?.installerType, app?.installerPath, app?.template),
     ouDN: assignedOUs[0] || '',
     assignedOUs

@@ -25,7 +25,13 @@ function _loadConfigForSink() {
   try {
     if (secretStore.available()) {
       apiKey     = secretStore.get('ingest_api_key') || '';
-      readApiKey = secretStore.get('read_api_key')   || apiKey;
+      // Reads accept admin scope too, so fall back to admin key when
+      // a read-only key isn't configured. This lets the dashboard show
+      // data the moment the user logs in as admin.
+      readApiKey = secretStore.get('read_api_key')
+        || apiKey
+        || secretStore.get('admin_api_key')
+        || '';
     }
   } catch { /* no electron context (e.g. tests) */ }
   return {
@@ -50,7 +56,12 @@ async function _ensure() {
     try { await current.close(); } catch { /* ignore */ }
   }
 
-  if (cfg.logMode === 'dedicated' && cfg.apiBaseUrl && cfg.apiKey) {
+  // Use remote sink whenever the user has chosen dedicated mode and
+  // configured a base URL — even if the per-equipo ingest key has
+  // not been provisioned yet. Reads can still work with an admin/
+  // read key, and the queue persists writes for when ingest is
+  // enrolled later.
+  if (cfg.logMode === 'dedicated' && cfg.apiBaseUrl) {
     current = require('./remote-sink');
     await current.init(cfg);
   } else {

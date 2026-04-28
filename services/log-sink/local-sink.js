@@ -47,7 +47,20 @@ const localSink = {
     const { equipo, level, q, limit = 50 } = filters;
     let items = all;
     if (equipo)  items = items.filter(e => e.hostname === equipo);
-    if (q)       items = items.filter(e => (e.message || e.action || '').includes(q));
+    if (q) {
+      const needle = String(q).toLowerCase();
+      items = items.filter(e => {
+        const haystack = [
+          e.message || e.action || '',
+          e.source || '',
+          e.hostname || '',
+          e.appName || '',
+          e.bundleName || '',
+          e.gpoName || ''
+        ].join(' ').toLowerCase();
+        return haystack.includes(needle);
+      });
+    }
     if (level) {
       const allowed = new Set(String(level).split(',')
         .map(s => LEVEL_NUM[s.trim().toLowerCase()])
@@ -78,7 +91,8 @@ const localSink = {
     let total = 0;
     for (const e of all) {
       if (new Date(e.timestamp).getTime() < cutoff) continue;
-      counts[LEVEL_NAME[e.level ?? 1]]++;
+      const level = normalizeLevel(e.level ?? 1);
+      counts[LEVEL_NAME[level]]++;
       total++;
     }
     return {
@@ -96,7 +110,12 @@ const localSink = {
   async flush() { /* no-op */ },
 
   status() {
-    return { mode: 'local', queueSize: 0, online: true };
+    return {
+      mode: 'local',
+      queueSize: 0,
+      online: true,
+      path: activityLog.getPath?.() || null
+    };
   }
 };
 

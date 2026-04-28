@@ -52,12 +52,6 @@ const SetupPage = {
         </div>
 
         <div class="form-group">
-          <label class="form-label">${t('setup.logsDir')}</label>
-          <input class="form-input" id="setup-logs" value="${this.esc(config.logDirectory)}" placeholder="C:\\ProgramData\\Logs">
-          <p class="form-hint">${t('setup.logsDirHint')}</p>
-        </div>
-
-        <div class="form-group">
           <label class="form-label">${t('setup.defaultGpo')}</label>
           <input class="form-input" id="setup-gpo" value="${this.esc(config.defaultGPO || '')}" placeholder="SoftwareDeployment">
           <p class="form-hint">${t('setup.defaultGpoHint')}</p>
@@ -101,6 +95,42 @@ const SetupPage = {
           <p class="form-hint" id="setup-logmode-readonly" style="display:none;margin-top:6px;color:var(--text-muted);">
             ${t('setup.logModeReadonly') || 'Configuración detectada en el share. Los campos están bloqueados para evitar sobrescribir la configuración del servidor.'}
           </p>
+
+          <div id="setup-local-block" style="display:${config.logMode !== 'dedicated' ? 'block' : 'none'};margin-top:12px;padding:12px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-secondary);">
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">${t('setup.logsDir') || 'Carpeta de logs locales'}</label>
+              <div class="flex gap-sm">
+                <input class="form-input" id="setup-logs" value="${this.esc(config.logDirectory || '')}" placeholder="C:\\ProgramData\\AppDeploy_Logs" style="flex:1;">
+                <button class="btn btn-secondary" id="btn-browse-logs" type="button">${t('setup.browse') || 'Examinar'}</button>
+              </div>
+              <p class="form-hint">${t('setup.logsDirHint') || 'Vacío = carpeta de usuario por defecto.'}</p>
+            </div>
+          </div>
+
+          <div id="setup-dedicated-block" style="display:${config.logMode === 'dedicated' ? 'block' : 'none'};margin-top:12px;padding:12px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-secondary);">
+            <div class="form-group" style="margin-bottom:10px;">
+              <label class="form-label">${t('setup.dedBaseUrl') || 'URL del servidor'}</label>
+              <input class="form-input" id="setup-ded-baseurl" placeholder="https://logs.example.local" value="${this.esc((config.remoteLogging && config.remoteLogging.apiBaseUrl) || '')}">
+            </div>
+            <div class="form-group" style="margin-bottom:10px;">
+              <label class="form-label">${t('setup.dedAdminKey') || 'Admin API Key'}</label>
+              <input class="form-input" id="setup-ded-adminkey" type="password" autocomplete="off" placeholder="••••••••">
+              <p class="form-hint">${t('setup.dedAdminKeyHint') || 'Sólo necesaria si quieres administrar claves desde esta máquina.'}</p>
+            </div>
+            <div class="form-group" style="margin-bottom:10px;">
+              <label class="form-label">${t('setup.dedTlsFp') || 'TLS Fingerprint (opcional)'}</label>
+              <input class="form-input" id="setup-ded-tlsfp" placeholder="sha256//..." value="${this.esc((config.remoteLogging && config.remoteLogging.tlsFingerprint) || '')}">
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn btn-secondary btn-sm" id="btn-trust-cert" type="button">
+                ${t('setup.trustCert') || 'Confiar en el certificado'}
+              </button>
+              <button class="btn btn-secondary btn-sm" id="btn-inspect-cert" type="button">
+                ${t('setup.inspectCert') || 'Ver certificado'}
+              </button>
+            </div>
+            <div id="setup-cert-status" style="display:none;margin-top:8px;font-size:12px;"></div>
+          </div>
         </div>
 
         <div style="margin-top: var(--space-xl); display: flex; justify-content: flex-end;">
@@ -111,6 +141,50 @@ const SetupPage = {
         </div>
       </div>
     `;
+
+    // Toggle local/dedicated blocks on radio change
+    document.querySelectorAll('input[name="setup-logmode"]').forEach(r => {
+      r.addEventListener('change', (e) => {
+        const isDed = e.target.value === 'dedicated';
+        const ded = document.getElementById('setup-dedicated-block');
+        const loc = document.getElementById('setup-local-block');
+        if (ded) ded.style.display = isDed  ? 'block' : 'none';
+        if (loc) loc.style.display = !isDed ? 'block' : 'none';
+      });
+    });
+
+    document.getElementById('btn-browse-logs')?.addEventListener('click', async () => {
+      const path = await window.api.config.selectFolder();
+      if (path) document.getElementById('setup-logs').value = path;
+    });
+
+    // Cert trust + inspect buttons
+    const setStatus = (msg, color) => {
+      const el = document.getElementById('setup-cert-status');
+      if (!el) return;
+      el.style.display = 'block';
+      el.style.color = color;
+      el.textContent = msg;
+    };
+    document.getElementById('btn-inspect-cert')?.addEventListener('click', async () => {
+      const url = document.getElementById('setup-ded-baseurl').value.trim();
+      if (!url) return setStatus(t('setup.urlRequired') || 'URL requerida', 'var(--accent-warning)');
+      setStatus(t('setup.inspecting') || 'Consultando...', 'var(--text-muted)');
+      const res = await window.api.cert.inspect(url);
+      if (!res.success) return setStatus(res.error, 'var(--accent-danger)');
+      const fp = res.data.fingerprint;
+      document.getElementById('setup-ded-tlsfp').value = fp;
+      setStatus(`${res.data.subject} — ${fp}`, 'var(--text-secondary)');
+    });
+    document.getElementById('btn-trust-cert')?.addEventListener('click', async () => {
+      const url = document.getElementById('setup-ded-baseurl').value.trim();
+      if (!url) return setStatus(t('setup.urlRequired') || 'URL requerida', 'var(--accent-warning)');
+      setStatus(t('setup.trusting') || 'Instalando certificado...', 'var(--text-muted)');
+      const res = await window.api.cert.trust(url);
+      if (!res.success) return setStatus(res.error, 'var(--accent-danger)');
+      document.getElementById('setup-ded-tlsfp').value = res.data.fingerprint;
+      setStatus((t('setup.trustOk') || 'Certificado instalado') + ` — ${res.data.subject}`, 'var(--accent-secondary)');
+    });
 
     // Debounced share-config detection: when the user enters a
     // share path, peek for logging-config.json and lock the form
@@ -154,11 +228,15 @@ const SetupPage = {
     document.getElementById('btn-save-setup').addEventListener('click', async () => {
       const selectedMode = document.querySelector('input[name="setup-logmode"]:checked')?.value || 'local';
       const selectedUiMode = document.querySelector('input[name="setup-ui-mode"]:checked')?.value || 'simple';
+      const dedBaseUrl = document.getElementById('setup-ded-baseurl')?.value.trim() || '';
+      const dedTlsFp   = document.getElementById('setup-ded-tlsfp')?.value.trim() || '';
+      const dedAdminKey = document.getElementById('setup-ded-adminkey')?.value.trim() || '';
+
       const newConfig = {
         language: document.getElementById('setup-lang').value,
         uiMode: selectedUiMode,
         networkSharePath: document.getElementById('setup-network').value.trim(),
-        logDirectory: document.getElementById('setup-logs').value.trim(),
+        logDirectory: document.getElementById('setup-logs')?.value.trim() || '',
         defaultGPO: document.getElementById('setup-gpo').value.trim(),
         preferredDC: document.getElementById('setup-dc').value.trim(),
         baseOUs: this.getSelectedDNs(),
@@ -171,9 +249,21 @@ const SetupPage = {
         return;
       }
 
+      if (selectedMode === 'dedicated' && !this._logModeState?.present) {
+        if (!dedBaseUrl) {
+          App.toast(t('setup.urlRequired') || 'URL del servidor requerida', 'warning');
+          return;
+        }
+        newConfig.remoteLogging = {
+          apiBaseUrl: dedBaseUrl,
+          tlsFingerprint: dedTlsFp || null,
+          readonly: false
+        };
+      }
+
       await window.api.config.set(newConfig);
 
-      // When dedicated mode comes from the share, run the enrollment
+      // When dedicated mode comes from the share, run enrollment
       // flow to obtain a per-equipo ingest API key.
       if (selectedMode === 'dedicated' && this._logModeState?.present) {
         const res = await window.api.share.enrollFromConfig();
@@ -185,6 +275,27 @@ const SetupPage = {
           return;
         }
         App.toast(t('setup.enrollOk') || 'Equipo enrolado correctamente', 'success');
+      } else if (selectedMode === 'dedicated' && dedAdminKey) {
+        // Manual dedicated setup: try logging in admin so user can manage keys later
+        const r = await window.api.admin.login({
+          baseUrl: dedBaseUrl,
+          apiKey: dedAdminKey,
+          tlsFingerprint: dedTlsFp || null
+        });
+        if (!r.success) {
+          App.toast(`${t('setup.adminLoginFailed') || 'Login admin fallido'}: ${r.error}`, 'warning');
+        } else {
+          const provision = await window.api.admin.provisionIngestKey();
+          if (!provision.success) {
+            App.toast(
+              `${t('settings.ingestProvisionFailed') || 'No se pudo provisionar la clave de ingesta'}: ${provision.error}`,
+              'warning'
+            );
+          } else {
+            await window.api.logs.reload();
+            App.toast(t('settings.ingestProvisioned') || 'Clave de ingesta creada', 'success');
+          }
+        }
       } else if (selectedMode === 'local') {
         await window.api.logs.useLocal();
       }

@@ -56,6 +56,80 @@ function verify(obj, secretHex) {
   return crypto.timingSafeEqual(a, b);
 }
 
+const TLS_FINGERPRINT_RE = /^sha256\/\/[A-Za-z0-9+/=:_-]{32,256}$/;
+
+function assertUrl(value, errorCode) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(errorCode);
+  }
+  let url;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new Error(errorCode);
+  }
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error(errorCode);
+  }
+  return url;
+}
+
+function normalizeSharedConfig(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('shared_config_invalid');
+  }
+  if (raw.version !== 1) {
+    throw new Error('shared_config_bad_version');
+  }
+
+  const apiBaseUrl = assertUrl(raw.apiBaseUrl, 'shared_config_bad_api_url');
+  const enrollmentUrl = assertUrl(raw.enrollmentUrl, 'shared_config_bad_enrollment_url');
+  if (apiBaseUrl.origin !== enrollmentUrl.origin || !enrollmentUrl.pathname.startsWith('/api/enroll')) {
+    throw new Error('shared_config_bad_enrollment_url');
+  }
+
+  const enrollmentToken = typeof raw.enrollmentToken === 'string'
+    ? raw.enrollmentToken.trim()
+    : '';
+  if (enrollmentToken.length < 16 || enrollmentToken.length > 256) {
+    throw new Error('shared_config_bad_token');
+  }
+
+  const shareId = typeof raw.shareId === 'string' ? raw.shareId.trim() : '';
+  if (!shareId || shareId.length > 32 || !/^[a-zA-Z0-9_-]+$/.test(shareId)) {
+    throw new Error('shared_config_bad_share_id');
+  }
+
+  const tlsFingerprint = typeof raw.tlsFingerprint === 'string' && raw.tlsFingerprint.trim()
+    ? raw.tlsFingerprint.trim()
+    : null;
+  if (tlsFingerprint && !TLS_FINGERPRINT_RE.test(tlsFingerprint)) {
+    throw new Error('shared_config_bad_tls_fingerprint');
+  }
+
+  const normalized = {
+    version: 1,
+    mode: 'dedicated',
+    apiBaseUrl: apiBaseUrl.origin,
+    tlsFingerprint,
+    enrollmentUrl: enrollmentUrl.toString(),
+    enrollmentToken,
+    shareId,
+    readonly: true,
+    issuedAt: typeof raw.issuedAt === 'string' ? raw.issuedAt : ''
+  };
+
+  if (typeof raw.signature === 'string' && raw.signature) {
+    normalized.signature = raw.signature;
+  }
+  return normalized;
+}
+
+function fingerprint(obj) {
+  const normalized = normalizeSharedConfig(obj);
+  return crypto.createHash('sha256').update(canonicalize(normalized)).digest('hex');
+}
+
 // ─────────────────────────────────────────────────────────────
 // Read + verify the file sitting on the share. Returns null
 // when missing. Throws on tampering / bad signature.
@@ -67,11 +141,11 @@ async function readSharedConfig(networkSharePath, shareSecretHex) {
   let parsed;
   try { parsed = JSON.parse(raw); }
   catch { throw new Error('shared_config_invalid_json'); }
-  if (parsed.version !== 1) throw new Error('shared_config_bad_version');
-  if (!verify(parsed, shareSecretHex)) {
+  const normalized = normalizeSharedConfig(parsed);
+  if (!verify(normalized, shareSecretHex)) {
     throw new Error('shared_config_bad_signature');
   }
-  return parsed;
+  return normalized;
 }
 
 // Variant used when the client doesn't yet have the share
@@ -81,7 +155,7 @@ async function peekSharedConfig(networkSharePath) {
   const file = sharedConfigPath(networkSharePath);
   if (!file || !fs.existsSync(file)) return null;
   const raw = await fs.promises.readFile(file, 'utf-8');
-  try { return JSON.parse(raw); }
+  try { return normalizeSharedConfig(JSON.parse(raw)); }
   catch { return null; }
 }
 
@@ -105,10 +179,11 @@ async function writeSharedConfig(networkSharePath, payload, shareSecretHex) {
     readonly: true,
     issuedAt: new Date().toISOString()
   };
-  base.signature = sign(base, shareSecretHex);
+  const signed = normalizeSharedConfig(base);
+  signed.signature = sign(signed, shareSecretHex);
 
   const tmp = file + '.__writing__';
-  await fs.promises.writeFile(tmp, JSON.stringify(base, null, 2), 'utf-8');
+  await fs.promises.writeFile(tmp, JSON.stringify(signed, null, 2), 'utf-8');
   await fs.promises.rename(tmp, file);
   return { success: true, path: file };
 }
@@ -119,10 +194,8 @@ async function writeSharedConfig(networkSharePath, payload, shareSecretHex) {
 // safeStorage (see main.js wiring).
 // ─────────────────────────────────────────────────────────────
 async function enrollWithShare(sharedCfg, hostname) {
-  if (!sharedCfg || !sharedCfg.enrollmentUrl || !sharedCfg.enrollmentToken) {
-    throw new Error('shared_config_incomplete');
-  }
-  const url = new URL(sharedCfg.enrollmentUrl);
+  const cfg = normalizeSharedConfig(sharedCfg);
+  const url = new URL(cfg.enrollmentUrl);
   const baseUrl = `${url.protocol}//${url.host}`;
   const path    = url.pathname;
 
@@ -130,11 +203,11 @@ async function enrollWithShare(sharedCfg, hostname) {
     baseUrl,
     method: 'POST',
     path,
-    pinnedFingerprint: sharedCfg.tlsFingerprint || null,
+    pinnedFingerprint: cfg.tlsFingerprint || null,
     body: {
       hostname,
-      shareId: sharedCfg.shareId,
-      enrollmentToken: sharedCfg.enrollmentToken
+      shareId: cfg.shareId,
+      enrollmentToken: cfg.enrollmentToken
     },
     timeoutMs: 15_000
   });
@@ -147,5 +220,7 @@ module.exports = {
   peekSharedConfig,
   writeSharedConfig,
   enrollWithShare,
+  normalizeSharedConfig,
+  fingerprint,
   sign, verify
 };

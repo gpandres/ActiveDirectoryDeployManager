@@ -46,6 +46,10 @@ class RemoteSink {
     this.cfg = null;
     this.hostname = getHostname();
     this.flushing = false;
+    this.lastError = null;
+    this.lastFlushAt = null;
+    this.lastSuccessAt = null;
+    this.lastQueuedAt = null;
   }
 
   async init(cfg) {
@@ -72,6 +76,7 @@ class RemoteSink {
       context: this._stripContext(details)
     };
     this.queue.push(entry);
+    this.lastQueuedAt = new Date().toISOString();
     // Mirror into the local activity-log so the user's own
     // recent-activity widget still works when offline.
     activityLog.add(action, { ...details, level, mirrored: true });
@@ -193,12 +198,17 @@ class RemoteSink {
       this.backoff = BACKOFF_MIN_MS;
       this.consecutiveFailures = 0;
       this.online = true;
+      this.lastError = null;
+      this.lastFlushAt = new Date().toISOString();
+      this.lastSuccessAt = this.lastFlushAt;
       // Drain aggressively if more queued.
       if (this.queue.size() > 0) this._scheduleFlush(0);
     } catch (err) {
       this.queue.nack(batch);
       this.consecutiveFailures++;
       if (this.consecutiveFailures >= FAILURE_THRESHOLD) this.online = false;
+      this.lastError = err?.message || String(err);
+      this.lastFlushAt = new Date().toISOString();
       const delay = this.backoff;
       this.backoff = Math.min(this.backoff * 2, BACKOFF_MAX_MS);
       this._scheduleRetry(delay);
@@ -216,12 +226,20 @@ class RemoteSink {
   }
 
   status() {
+    const canRead = this._canRead();
+    const canWrite = !!(this.cfg && this.cfg.apiBaseUrl && this.cfg.apiKey);
     return {
       mode: 'dedicated',
-      online: this.online,
+      online: this.online && (canRead || canWrite),
       queueSize: this.queue ? this.queue.size() : 0,
       failures: this.consecutiveFailures,
-      host: this.cfg?.apiBaseUrl || null
+      host: this.cfg?.apiBaseUrl || null,
+      canRead,
+      canWrite,
+      lastError: this.lastError,
+      lastFlushAt: this.lastFlushAt,
+      lastSuccessAt: this.lastSuccessAt,
+      lastQueuedAt: this.lastQueuedAt
     };
   }
 

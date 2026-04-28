@@ -13,7 +13,8 @@ contextBridge.exposeInMainWorld('api', {
     checkHealth: () => ipcRenderer.invoke('share:checkHealth'),
     getStatus: () => ipcRenderer.invoke('share:getStatus'),
     detectLoggingConfig: () => ipcRenderer.invoke('share:detectLoggingConfig'),
-    enrollFromConfig: () => ipcRenderer.invoke('share:enrollFromConfig')
+    enrollFromConfig: () => ipcRenderer.invoke('share:enrollFromConfig'),
+    publishLoggingConfig: (options) => ipcRenderer.invoke('share:publishLoggingConfig', options)
   },
 
   // Logging backend (local vs dedicated)
@@ -25,6 +26,27 @@ contextBridge.exposeInMainWorld('api', {
     status: () => ipcRenderer.invoke('logs:status'),
     reload: () => ipcRenderer.invoke('logs:reload'),
     useLocal: () => ipcRenderer.invoke('logs:useLocal')
+  },
+
+  // TLS cert inspection / install into Windows user trust store
+  cert: {
+    inspect: (baseUrl) => ipcRenderer.invoke('cert:inspect', baseUrl),
+    trust:   (baseUrl) => ipcRenderer.invoke('cert:trust',   baseUrl)
+  },
+
+  // Admin API (key/token/share-secret management)
+  admin: {
+    status: () => ipcRenderer.invoke('admin:status'),
+    login:  (payload) => ipcRenderer.invoke('admin:login', payload),
+    logout: () => ipcRenderer.invoke('admin:logout'),
+    listKeys:           () => ipcRenderer.invoke('admin:listKeys'),
+    createKey:          (p) => ipcRenderer.invoke('admin:createKey', p),
+    revokeKey:          (id) => ipcRenderer.invoke('admin:revokeKey', id),
+    listShareSecrets:   () => ipcRenderer.invoke('admin:listShareSecrets'),
+    createShareSecret:  (id) => ipcRenderer.invoke('admin:createShareSecret', id),
+    listEnrollTokens:   () => ipcRenderer.invoke('admin:listEnrollTokens'),
+    createEnrollToken:  (p) => ipcRenderer.invoke('admin:createEnrollToken', p),
+    provisionIngestKey: (name) => ipcRenderer.invoke('admin:provisionIngestKey', name)
   },
 
   // Config

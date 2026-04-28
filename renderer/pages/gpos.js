@@ -137,6 +137,14 @@ const GposPage = {
     let list = this.gposCache;
     const q = this.searchQuery.trim().toLowerCase();
     if (q) list = list.filter(g => g.DisplayName.toLowerCase().includes(q));
+    
+    if (this.localLinkCounts) {
+      list = list.filter(g => {
+        const nameKey = (g.DisplayName || '').trim().toLowerCase();
+        return Object.prototype.hasOwnProperty.call(this.localLinkCounts, nameKey);
+      });
+    }
+    
     return list;
   },
 

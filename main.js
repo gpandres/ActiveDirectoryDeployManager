@@ -59,6 +59,7 @@ app.whenReady().then(() => {
   const configService = require('./services/config');
   const bundleService = require('./services/bundle-service');
   const activityLog = require('./services/activity-log');
+  const logSink = require('./services/log-sink');
   const i18nService = require('./services/i18n');
   const catalogService = require('./services/catalog-service');
   const templateService = require('./services/template-service');
@@ -486,7 +487,12 @@ app.whenReady().then(() => {
           publishedAction: 'install',
           publishedAt: new Date().toISOString()
         });
-        activityLog.add('bundle_deploy', { bundleName: bundle.name, version: bundle.version });
+        logSink.addSync('bundle_deploy', {
+          bundleName: bundle.name,
+          version: bundle.version,
+          source: 'bundle',
+          message: `Bundle desplegado: ${bundle.name}`
+        });
       }
       return result;
     } finally {
@@ -513,7 +519,12 @@ app.whenReady().then(() => {
           publishedAction: 'uninstall',
           publishedAt: new Date().toISOString()
         });
-        activityLog.add('bundle_uninstall_prepare', { bundleName: bundle.name, version: bundle.version });
+        logSink.addSync('bundle_uninstall_prepare', {
+          bundleName: bundle.name,
+          version: bundle.version,
+          source: 'bundle',
+          message: `Desinstalacion de bundle preparada: ${bundle.name}`
+        });
       }
       return result;
     } finally {
@@ -541,10 +552,13 @@ app.whenReady().then(() => {
 
   // ─── IPC Handlers: Activity Log ───────────────────────────────────
   ipcMain.handle('activity:getRecent', (_, count) => activityLog.getRecent(count));
-  ipcMain.handle('activity:add', (_, action, details) => activityLog.add(action, details));
+  ipcMain.handle('activity:add', async (_, action, details) => {
+    try { assertString(action, 'action', 128); assertObject(details || {}, 'details'); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    return logSink.add(action, details || {});
+  });
 
   // ─── IPC Handlers: Logging backend (local vs dedicated) ──────────
-  const logSink = require('./services/log-sink');
   const configShare = require('./services/config-share');
   const secretStore = require('./services/secret-store');
   const os = require('os');
@@ -582,12 +596,17 @@ app.whenReady().then(() => {
       if (!cfg.networkSharePath) return { present: false };
       const peek = await configShare.peekSharedConfig(cfg.networkSharePath);
       if (!peek) return { present: false };
+      const configFingerprint = configShare.fingerprint(peek);
+      const remote = cfg.remoteLogging || {};
       return {
         present: true,
         apiBaseUrl: peek.apiBaseUrl,
         tlsFingerprint: peek.tlsFingerprint || null,
         shareId: peek.shareId,
         issuedAt: peek.issuedAt,
+        signaturePresent: !!peek.signature,
+        configFingerprint,
+        changed: !!(remote.configFingerprint && remote.configFingerprint !== configFingerprint),
         readonly: true
       };
     } catch (err) {
@@ -602,6 +621,13 @@ app.whenReady().then(() => {
       if (!cfg.networkSharePath) return { success: false, error: 'no_share_path' };
       const peek = await configShare.peekSharedConfig(cfg.networkSharePath);
       if (!peek) return { success: false, error: 'no_shared_config' };
+      if (!peek.signature) return { success: false, error: 'shared_config_unsigned' };
+
+      const configFingerprint = configShare.fingerprint(peek);
+      const remote = cfg.remoteLogging || {};
+      if (remote.configFingerprint && remote.configFingerprint !== configFingerprint) {
+        return { success: false, error: 'shared_config_changed' };
+      }
 
       const enroll = await configShare.enrollWithShare(peek, os.hostname());
       if (!enroll || !enroll.apiKey) {
@@ -621,16 +647,76 @@ app.whenReady().then(() => {
           tlsFingerprint: peek.tlsFingerprint || null,
           readonly: true,
           enrolledAt: new Date().toISOString(),
-          equipoId: enroll.equipoId
+          equipoId: enroll.equipoId,
+          configFingerprint,
+          configSignature: peek.signature
         }
       });
       await logSink.reload();
-      activityLog.add('log_backend_enrolled', {
-        apiBaseUrl: peek.apiBaseUrl, equipoId: enroll.equipoId
+      await logSink.add('log_backend_enrolled', {
+        apiBaseUrl: peek.apiBaseUrl,
+        equipoId: enroll.equipoId,
+        source: 'logging',
+        message: `Equipo enrolado en servidor dedicado: ${peek.apiBaseUrl}`
       });
       return { success: true, equipoId: enroll.equipoId };
     } catch (err) {
       return { success: false, error: err.message };
+    }
+  });
+
+  // Admin helper: publish a signed logging-config.json to the share.
+  ipcMain.handle('share:publishLoggingConfig', async (_, options = {}) => {
+    try {
+      try { assertObject(options || {}, 'options'); }
+      catch { return { success: false, error: 'Invalid arguments' }; }
+
+      let cfg = configService.getConfig();
+      if (!cfg.networkSharePath) return { success: false, error: 'no_share_path' };
+
+      if (!cfg.shareId) {
+        const saved = configService.setConfig({});
+        if (!saved.success) return { success: false, error: saved.error || 'share_id_failed' };
+        cfg = saved.data || configService.getConfig();
+      }
+
+      const remote = cfg.remoteLogging || {};
+      const apiBaseUrl = String(options.apiBaseUrl || remote.apiBaseUrl || '').trim();
+      if (!apiBaseUrl) return { success: false, error: 'no_api_base_url' };
+
+      const admin = require('./services/admin-service');
+      const ttlHours = Number(options.ttlHours) || 720;
+      const usesLeft = Number(options.usesLeft) || 1000;
+      const shareSecret = await admin.createShareSecret(cfg.shareId);
+      const token = await admin.createEnrollmentToken({
+        shareId: cfg.shareId,
+        ttlHours,
+        usesLeft
+      });
+
+      const written = await configShare.writeSharedConfig(cfg.networkSharePath, {
+        apiBaseUrl,
+        enrollmentToken: token.enrollmentToken,
+        shareId: cfg.shareId,
+        tlsFingerprint: options.tlsFingerprint ?? remote.tlsFingerprint ?? null
+      }, shareSecret.secret);
+
+      await logSink.add('log_share_config_published', {
+        source: 'logging',
+        message: `Configuracion de logs publicada en share: ${cfg.shareId}`,
+        shareId: cfg.shareId,
+        apiBaseUrl
+      });
+
+      return {
+        success: true,
+        path: written.path,
+        shareId: cfg.shareId,
+        expiresInHours: token.expiresInHours,
+        usesLeft: token.usesLeft
+      };
+    } catch (err) {
+      return { success: false, error: err.message || String(err) };
     }
   });
 
@@ -640,6 +726,52 @@ app.whenReady().then(() => {
     secretStore.delete('ingest_api_key');
     await logSink.reload();
     return { success: true };
+  });
+
+  // ─── IPC Handlers: Admin (API key management) ─────────────────────
+  const adminService = require('./services/admin-service');
+
+  function wrapAdmin(fn) {
+    return async (...args) => {
+      try { return { success: true, data: await fn(...args) }; }
+      catch (err) { return { success: false, error: err.message || String(err) }; }
+    };
+  }
+
+  ipcMain.handle('admin:status', () => adminService.status());
+  ipcMain.handle('admin:login', (_, payload) => {
+    try { assertObject(payload, 'payload'); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    return adminService.login(payload);
+  });
+  ipcMain.handle('admin:logout', () => adminService.logout());
+
+  ipcMain.handle('admin:listKeys',           wrapAdmin(() => adminService.listKeys()));
+  ipcMain.handle('admin:createKey',          wrapAdmin((_, p) => adminService.createKey(p)));
+  ipcMain.handle('admin:revokeKey',          wrapAdmin((_, id) => adminService.revokeKey(id)));
+  ipcMain.handle('admin:listShareSecrets',   wrapAdmin(() => adminService.listShareSecrets()));
+  ipcMain.handle('admin:createShareSecret',  wrapAdmin((_, id) => adminService.createShareSecret(id)));
+  ipcMain.handle('admin:listEnrollTokens',   wrapAdmin(() => adminService.listEnrollmentTokens()));
+  ipcMain.handle('admin:createEnrollToken',  wrapAdmin((_, p) => adminService.createEnrollmentToken(p)));
+  ipcMain.handle('admin:provisionIngestKey', wrapAdmin(async (_, name) => {
+    const r = await adminService.provisionIngestKey(name);
+    await logSink.reload();
+    return r;
+  }));
+
+  // ─── IPC Handlers: TLS cert inspection / trust ────────────────────
+  const certTrust = require('./services/cert-trust');
+  ipcMain.handle('cert:inspect', async (_, baseUrl) => {
+    try { assertString(baseUrl, 'baseUrl', 512); }
+    catch { return { success: false, error: 'invalid_arguments' }; }
+    try { return { success: true, data: await certTrust.inspect(baseUrl) }; }
+    catch (err) { return { success: false, error: err.message }; }
+  });
+  ipcMain.handle('cert:trust', async (_, baseUrl) => {
+    try { assertString(baseUrl, 'baseUrl', 512); }
+    catch { return { success: false, error: 'invalid_arguments' }; }
+    try { return { success: true, data: await certTrust.trust(baseUrl) }; }
+    catch (err) { return { success: false, error: err.message }; }
   });
 
   // Prime the log sink so queued entries drain on boot. The

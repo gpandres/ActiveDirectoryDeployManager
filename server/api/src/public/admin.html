@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AD Deploy — Admin</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root { color-scheme: dark; }
+  *,*::before,*::after { box-sizing: border-box; }
+  html,body {
+    margin:0; padding:0; min-height:100vh; font-family: ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica Neue,Arial,sans-serif;
+    background:#0a0e1a; color:#e7eaf2;
+  }
+  body { padding: 32px 16px; }
+  main { max-width: 980px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 24px; }
+  p.sub { margin: 0 0 24px; color: #94a3b8; font-size: 13px; }
+  .card {
+    background: #121726; border: 1px solid #1f2740; border-radius: 10px;
+    padding: 18px; margin-bottom: 16px;
+  }
+  .card h2 {
+    margin: 0 0 12px; font-size: 14px; text-transform: uppercase;
+    letter-spacing: .5px; color: #94a3b8; font-weight: 600;
+  }
+  label { display:block; margin-bottom: 10px; font-size: 13px; }
+  label > span { display:block; color:#94a3b8; margin-bottom: 4px; }
+  input,select,button {
+    font-family: inherit; font-size: 14px;
+    background: #0a0e1a; color: #e7eaf2; border: 1px solid #1f2740;
+    border-radius: 6px; padding: 8px 10px; width: 100%;
+  }
+  button {
+    cursor: pointer; width: auto; background: #6366f1; border-color: #6366f1;
+    color: #fff; font-weight: 600;
+  }
+  button:hover:not(:disabled) { background: #4f46e5; }
+  button.secondary { background: #1f2740; border-color: #1f2740; }
+  button.secondary:hover:not(:disabled) { background: #2a3354; }
+  button.danger { background: #b91c1c; border-color: #b91c1c; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .row { display:flex; gap:8px; align-items:flex-end; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 160px; }
+  .row > button { flex: 0 0 auto; }
+  table { width:100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align:left; padding: 8px; color: #94a3b8; border-bottom: 1px solid #1f2740; font-weight: 600; }
+  td { padding: 8px; border-bottom: 1px solid #1f2740; vertical-align: top; }
+  td.mono, .mono { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 12px; }
+  .pill {
+    display:inline-block; padding: 2px 8px; border-radius: 999px;
+    font-size: 10px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase;
+  }
+  .pill.admin  { background: rgba(239,68,68,.2);  color: #ef4444; }
+  .pill.read   { background: rgba(59,130,246,.2); color: #60a5fa; }
+  .pill.ingest { background: rgba(245,158,11,.2); color: #fbbf24; }
+  .err {
+    background: rgba(239,68,68,.1); color:#ef4444; padding: 8px 12px;
+    border-radius: 6px; font-size: 13px; margin: 8px 0;
+  }
+  .ok {
+    background: rgba(16,185,129,.1); color:#10b981; padding: 8px 12px;
+    border-radius: 6px; font-size: 13px; margin: 8px 0;
+  }
+  code {
+    display:block; padding: 8px; background: rgba(0,0,0,.3); border-radius: 4px;
+    word-break: break-all; font-family: ui-monospace,monospace; font-size: 12px;
+    margin-top: 8px;
+  }
+  .muted { color: #64748b; font-size: 12px; }
+  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>AD Deploy — Admin</h1>
+  <p class="sub" id="subtitle">Logging server administration</p>
+
+  <div id="login" class="card">
+    <h2>Sign in</h2>
+    <label>
+      <span>Admin API Key</span>
+      <input id="api-key" type="password" autocomplete="off" placeholder="••••••••">
+    </label>
+    <div id="login-err" class="err" style="display:none"></div>
+    <button id="login-btn">Connect</button>
+    <p class="muted" style="margin-top:12px">
+      Only requests with <code style="display:inline;background:transparent;padding:0;color:#94a3b8">scope=admin</code> are accepted.
+    </p>
+  </div>
+
+  <div id="dashboard" style="display:none">
+    <div class="card" style="display:flex;align-items:center;justify-content:space-between">
+      <span id="who" class="muted">—</span>
+      <button id="logout-btn" class="secondary">Sign out</button>
+    </div>
+
+    <div class="card">
+      <h2>API Keys</h2>
+      <div class="row" style="margin-bottom:12px">
+        <label>
+          <span>Name</span>
+          <input id="new-name" placeholder="dashboard-read">
+        </label>
+        <label>
+          <span>Scope</span>
+          <select id="new-scope">
+            <option value="read">read</option>
+            <option value="ingest">ingest</option>
+            <option value="admin">admin</option>
+          </select>
+        </label>
+        <button id="new-key-btn">Create</button>
+      </div>
+      <div id="new-key-result" class="ok" style="display:none"></div>
+      <div id="keys-table"></div>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <h2>Share secrets</h2>
+        <div class="row" style="margin-bottom:12px">
+          <label><span>shareId</span><input id="new-secret-id" placeholder="ABC12345"></label>
+          <button id="new-secret-btn">Create</button>
+        </div>
+        <div id="new-secret-result" class="ok" style="display:none"></div>
+        <div id="secrets-table"></div>
+      </div>
+
+      <div class="card">
+        <h2>Enrollment tokens</h2>
+        <div class="row" style="margin-bottom:12px">
+          <label><span>shareId</span><input id="new-tok-id" placeholder="ABC12345"></label>
+          <label><span>TTL (h)</span><input id="new-tok-ttl" type="number" value="720" min="1" max="720"></label>
+          <label><span>Uses</span><input id="new-tok-uses" type="number" value="1000" min="1" max="10000"></label>
+          <button id="new-tok-btn">Create</button>
+        </div>
+        <div id="new-tok-result" class="ok" style="display:none"></div>
+        <div id="tokens-table"></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+const STORAGE_KEY = 'addeploy_admin_key';
+let apiKey = sessionStorage.getItem(STORAGE_KEY) || '';
+
+const $ = id => document.getElementById(id);
+const esc = s => { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; };
+const fmtTs = ts => {
+  if (!ts) return '—';
+  try {
+    const d = new Date(ts);
+    const pad = x => String(x).padStart(2,'0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  } catch { return String(ts); }
+};
+
+async function api(method, path, body) {
+  const headers = { 'X-API-Key': apiKey };
+  if (body) headers['Content-Type'] = 'application/json';
+  const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  const text = await res.text();
+  let parsed;
+  try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
+  if (!res.ok) throw new Error((parsed && parsed.error) || res.statusText);
+  return parsed;
+}
+
+async function tryLogin(key) {
+  apiKey = key;
+  const r = await api('GET', '/api/admin/whoami');
+  if (r.auth !== 'apiKey' || r.scope !== 'admin') throw new Error('not_admin');
+  sessionStorage.setItem(STORAGE_KEY, apiKey);
+  $('who').textContent = `Connected as keyId=${r.keyId} (admin)`;
+  $('login').style.display = 'none';
+  $('dashboard').style.display = 'block';
+  await loadAll();
+}
+
+function logout() {
+  sessionStorage.removeItem(STORAGE_KEY);
+  apiKey = '';
+  location.reload();
+}
+
+async function loadAll() {
+  await Promise.all([loadKeys(), loadSecrets(), loadTokens()]);
+}
+
+async function loadKeys() {
+  const rows = await api('GET', '/api/admin/api-keys');
+  $('keys-table').innerHTML = !rows.length
+    ? '<p class="muted">No entries</p>'
+    : `<table><thead><tr>
+        <th>Name</th><th style="width:80px">Scope</th>
+        <th style="width:140px">Created</th><th style="width:140px">Last used</th>
+        <th style="width:80px">State</th><th style="width:90px"></th>
+      </tr></thead><tbody>${rows.map(k => `
+        <tr>
+          <td>${esc(k.name)}</td>
+          <td><span class="pill ${k.scope}">${k.scope}</span></td>
+          <td class="mono">${fmtTs(k.createdAt)}</td>
+          <td class="mono">${fmtTs(k.lastUsed)}</td>
+          <td>${k.revokedAt ? '<span class="muted">revoked</span>' : '<span style="color:#10b981">●</span>'}</td>
+          <td>${!k.revokedAt ? `<button class="danger" data-revoke="${k.id}" style="padding:4px 10px;font-size:12px">Revoke</button>` : ''}</td>
+        </tr>`).join('')}</tbody></table>`;
+  $('keys-table').querySelectorAll('[data-revoke]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Revoke this key?')) return;
+      try { await api('POST', `/api/admin/api-keys/${btn.dataset.revoke}/revoke`); await loadKeys(); }
+      catch (e) { alert(e.message); }
+    });
+  });
+}
+
+async function loadSecrets() {
+  const rows = await api('GET', '/api/admin/share-secrets');
+  $('secrets-table').innerHTML = !rows.length
+    ? '<p class="muted">No entries</p>'
+    : `<table><thead><tr><th>shareId</th><th style="width:140px">Created</th></tr></thead>
+       <tbody>${rows.map(s => `<tr><td class="mono">${esc(s.shareId)}</td><td class="mono">${fmtTs(s.createdAt)}</td></tr>`).join('')}</tbody></table>`;
+}
+
+async function loadTokens() {
+  const rows = await api('GET', '/api/admin/enrollment-tokens');
+  $('tokens-table').innerHTML = !rows.length
+    ? '<p class="muted">No entries</p>'
+    : `<table><thead><tr><th>shareId</th><th style="width:60px">Uses</th><th style="width:140px">Expires</th></tr></thead>
+       <tbody>${rows.map(o => `<tr><td class="mono">${esc(o.shareId)}</td><td class="mono">${o.usesLeft}</td><td class="mono">${fmtTs(o.expiresAt)}</td></tr>`).join('')}</tbody></table>`;
+}
+
+$('login-btn').addEventListener('click', async () => {
+  const key = $('api-key').value.trim();
+  $('login-err').style.display = 'none';
+  if (!key) return;
+  try { await tryLogin(key); }
+  catch (e) {
+    $('login-err').textContent = e.message;
+    $('login-err').style.display = 'block';
+    apiKey = '';
+  }
+});
+
+$('logout-btn').addEventListener('click', logout);
+
+$('new-key-btn').addEventListener('click', async () => {
+  const name = $('new-name').value.trim();
+  const scope = $('new-scope').value;
+  if (!name) return alert('Name required');
+  try {
+    const r = await api('POST', '/api/admin/api-keys', { name, scope });
+    $('new-key-result').style.display = 'block';
+    $('new-key-result').innerHTML = `Created <strong>${esc(name)}</strong> — copy now (won't show again):<code>${esc(r.apiKey)}</code>`;
+    $('new-name').value = '';
+    await loadKeys();
+  } catch (e) { alert(e.message); }
+});
+
+$('new-secret-btn').addEventListener('click', async () => {
+  const id = $('new-secret-id').value.trim();
+  if (!id) return;
+  try {
+    const r = await api('POST', '/api/admin/share-secrets', { shareId: id });
+    $('new-secret-result').style.display = 'block';
+    $('new-secret-result').innerHTML = `Secret for <strong>${esc(id)}</strong>:<code>${esc(r.secret)}</code>`;
+    $('new-secret-id').value = '';
+    await loadSecrets();
+  } catch (e) { alert(e.message); }
+});
+
+$('new-tok-btn').addEventListener('click', async () => {
+  const id = $('new-tok-id').value.trim();
+  const ttl = Number($('new-tok-ttl').value) || 24;
+  const uses = Number($('new-tok-uses').value) || 1000;
+  if (!id) return;
+  try {
+    const r = await api('POST', '/api/admin/enrollment-tokens', { shareId: id, ttlHours: ttl, usesLeft: uses });
+    $('new-tok-result').style.display = 'block';
+    $('new-tok-result').innerHTML = `Token for <strong>${esc(id)}</strong>:<code>${esc(r.enrollmentToken)}</code>`;
+    $('new-tok-id').value = '';
+    await loadTokens();
+  } catch (e) { alert(e.message); }
+});
+
+if (apiKey) {
+  tryLogin(apiKey).catch(() => { sessionStorage.removeItem(STORAGE_KEY); apiKey = ''; });
+}
+</script>
+</body>
+</html>

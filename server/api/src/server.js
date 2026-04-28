@@ -1,6 +1,14 @@
 const Fastify = require('fastify');
+const fs = require('fs');
+const path = require('path');
 const config = require('./config');
 const { getPool, closePool } = require('./lib/db');
+
+async function sendPublicHtml(reply, filename) {
+  const filePath = path.join(__dirname, 'public', filename);
+  const html = await fs.promises.readFile(filePath, 'utf8');
+  reply.type('text/html; charset=utf-8').send(html);
+}
 
 async function build() {
   const app = Fastify({
@@ -30,6 +38,14 @@ async function build() {
     } catch (err) {
       return { status: 'degraded', error: err.code || 'db_error' };
     }
+  });
+
+  app.get('/admin', async (_req, reply) => {
+    await sendPublicHtml(reply, 'admin.html');
+  });
+
+  app.get('/admin.html', async (_req, reply) => {
+    await sendPublicHtml(reply, 'admin.html');
   });
 
   await app.register(require('./routes/ingest'));

@@ -14,10 +14,12 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 
 function makeAgent({ pinnedFingerprint }) {
   // When pinning, do the certificate comparison ourselves on the
-  // tls socket. We keep the default certificate verification on
-  // so self-signed / expired certs still fail unless explicitly
-  // trusted via NODE_EXTRA_CA_CERTS.
-  const agent = new https.Agent({ keepAlive: true });
+  // tls socket. We disable default validation if a fingerprint is pinned,
+  // allowing self-signed certs to work without OS installation.
+  const agent = new https.Agent({ 
+    keepAlive: true,
+    rejectUnauthorized: !pinnedFingerprint
+  });
   if (pinnedFingerprint) {
     agent.createConnection = ((orig) => function (opts, cb) {
       const socket = orig.call(this, opts, cb);
@@ -62,6 +64,7 @@ function request({ baseUrl, method = 'GET', path, headers = {}, body, apiKey, pi
       path: url.pathname + url.search,
       headers: hdrs,
       agent,
+      rejectUnauthorized: pinnedFingerprint ? false : undefined,
       timeout: timeoutMs
     }, (res) => {
       const chunks = [];

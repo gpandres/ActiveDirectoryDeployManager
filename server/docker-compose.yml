@@ -46,11 +46,11 @@ services:
       DB_NAME: addeploy_logs
       DB_USER: addeploy
       DB_PASS_FILE: /run/secrets/db_user
-      # Comma-separated list of client IPs allowed to reach /api/admin/*.
-      # Empty = admin endpoints disabled.
+      # Raw TCP peer IPs allowed to bootstrap /api/admin/* without an
+      # admin API key. Do not rely on X-Forwarded-For for this path.
       ADMIN_ALLOWED_IPS: "127.0.0.1,::1"
       LOG_LEVEL: info
-      TRUST_PROXY: "true"
+      TRUST_PROXY: "false"
       BATCH_MAX_SIZE: "500"
       BATCH_MAX_BYTES: "1048576"
     # The API container starts as root (entrypoint.sh reads the
@@ -58,7 +58,8 @@ services:
     secrets:
       - db_user
     ports:
-      - "8080:8080"
+      # Host-local only: public traffic must go through Caddy on 80/443.
+      - "127.0.0.1:8080:8080"
     networks:
       - backend
     healthcheck:
@@ -79,6 +80,9 @@ services:
     restart: unless-stopped
     depends_on:
       - api
+    environment:
+      # Hostname Caddy serves. Override via .env or shell env.
+      LOG_HOSTNAME: ${LOG_HOSTNAME:?LOG_HOSTNAME must be set (e.g. logs.example.local)}
     ports:
       - "443:443"
       - "80:80"
