@@ -1,27 +1,52 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
 
 let configFilePath = null;
 
 function getConfigPath() {
   if (!configFilePath) {
-    const { app } = require('electron');
-    configFilePath = path.join(app.getPath('userData'), 'config.json');
+    try {
+      const { app } = require('electron');
+      const userData = app?.getPath ? app.getPath('userData') : os.tmpdir();
+      configFilePath = path.join(userData, 'config.json');
+    } catch {
+      configFilePath = path.join(os.tmpdir(), 'ad-deploy-manager-config.json');
+    }
   }
   return configFilePath;
 }
 
 const DEFAULT_CONFIG = {
   networkSharePath: '',
-  logDirectory: 'C:\\ProgramData\\AppDeploy_Logs',
+  logDirectory: '',         // local logs target (only used when logMode='local'; empty = use app userData)
   defaultGPO: '',
   baseOU: '',
   baseOUs: [],
   preferredDC: '',   // leave empty to auto-use PDC emulator; set to a DC hostname for multi-DC environments
   language: 'es',
+  uiMode: 'simple',
   firstRun: true,
-  shareId: ''
+  shareId: '',
+  dismissedAppUpdateVersion: '',
+
+  // ── Logging backend selection ──
+  // 'local'     → writes to the per-user activity-log file (default)
+  // 'dedicated' → ships logs to the API defined in remoteLogging
+  logMode: 'local',
+
+  // Populated when a signed logging-config.json is detected on
+  // the share or set manually from Settings. The apiKey and
+  // readApiKey are NOT stored here — they live in the encrypted
+  // secret store. This object keeps non-sensitive metadata.
+  remoteLogging: {
+    apiBaseUrl: '',
+    tlsFingerprint: null,  // sha256//... for certificate pinning
+    readonly: false,       // true when the setup came from the share
+    enrolledAt: null,
+    equipoId: null
+  }
 };
 
 const DANGEROUS_KEYS = /^(__proto__|constructor|prototype)$/;
@@ -55,8 +80,12 @@ function normalizeDNArray(value) {
 
 function normalizeConfigShape(config) {
   const baseOUs = normalizeDNArray(config.baseOUs ?? config.baseOU);
+  const uiMode = String(config.uiMode || '').trim().toLowerCase() === 'advanced'
+    ? 'advanced'
+    : 'simple';
   return {
     ...config,
+    uiMode,
     baseOUs,
     baseOU: baseOUs[0] || ''
   };

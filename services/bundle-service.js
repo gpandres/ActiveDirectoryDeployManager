@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { resolveNamedSubdirectory, resolveWithinBase, sanitizeDeploymentName } = require('./path-utils');
 
 let bundlesFilePath = null;
@@ -50,6 +51,21 @@ function generateId() {
   return 'b_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 }
 
+const SAFE_RECORD_ID = /^[a-zA-Z0-9_-]{1,128}$/;
+
+function normalizeRecordId(value, prefix = 'item') {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (SAFE_RECORD_ID.test(raw)) return raw;
+  if (!raw) return generateId();
+  const cleaned = raw
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 96);
+  const hash = crypto.createHash('sha1').update(raw).digest('hex').slice(0, 8);
+  return `${cleaned || prefix}_${hash}`.slice(0, 128);
+}
+
 function normalizeDNArray(value) {
   const raw = Array.isArray(value)
     ? value
@@ -72,10 +88,24 @@ function normalizePublishedAction(value, fallback = 'pending') {
   return fallback;
 }
 
+function normalizeBundleApps(value) {
+  return (Array.isArray(value) ? value : [])
+    .filter(item => item && typeof item === 'object')
+    .filter(item => typeof item.appId === 'string' && item.appId.trim())
+    .map((item, index) => ({
+      ...item,
+      appId: normalizeRecordId(item.appId, 'app'),
+      name: typeof item.name === 'string' ? item.name : '',
+      order: Number.isFinite(Number(item.order)) ? Number(item.order) : index
+    }));
+}
+
 function normalizeBundleRecord(bundle) {
   const ouDNs = normalizeDNArray(bundle?.ouDNs || bundle?.ouDN);
   return {
     ...bundle,
+    id: normalizeRecordId(bundle?.id, 'bundle'),
+    apps: normalizeBundleApps(bundle?.apps),
     ouDN: ouDNs[0] || '',
     ouDNs,
     uninstallDeployedPath: typeof bundle?.uninstallDeployedPath === 'string' ? bundle.uninstallDeployedPath : '',

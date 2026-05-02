@@ -1,0 +1,110 @@
+services:
+  mariadb:
+    # Custom image that bakes init SQL + my.cnf in. See db/Dockerfile.
+    # Avoids bind-mount permission problems on Docker Desktop for Windows.
+    build:
+      context: ./db
+    image: addeploy-mariadb:local
+    container_name: addeploy-mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/db_root
+      MARIADB_DATABASE: addeploy_logs
+      MARIADB_USER: addeploy
+      MARIADB_PASSWORD_FILE: /run/secrets/db_user
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    # MariaDB's entrypoint runs as root and reads these before
+    # switching to the mysql user, so default perms are fine.
+    secrets:
+      - db_root
+      - db_user
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks:
+      - backend
+    # Port 3306 intentionally NOT published — only reachable over
+    # the docker network. Use `docker exec` for maintenance.
+
+  api:
+    build:
+      context: ./api
+    container_name: addeploy-api
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "8080"
+      DB_HOST: mariadb
+      DB_PORT: "3306"
+      DB_NAME: addeploy_logs
+      DB_USER: addeploy
+      DB_PASS_FILE: /run/secrets/db_user
+      # Raw TCP peer IPs allowed to bootstrap /api/admin/* without an
+      # admin API key. Do not rely on X-Forwarded-For for this path.
+      ADMIN_ALLOWED_IPS: "127.0.0.1,::1"
+      LOG_LEVEL: info
+      TRUST_PROXY: "false"
+      BATCH_MAX_SIZE: "500"
+      BATCH_MAX_BYTES: "1048576"
+      LOG_HOSTNAME: ${LOG_HOSTNAME:?LOG_HOSTNAME must be set (e.g. logs.example.local)}
+    # The API container starts as root (entrypoint.sh reads the
+    # secret), then exec's node as the unprivileged "app" user.
+    secrets:
+      - db_user
+    ports:
+      # Host-local only: public traffic must go through Caddy on 80/443.
+      - "127.0.0.1:8080:8080"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8080/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 512M
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: addeploy-caddy
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      # Hostname Caddy serves. Override via .env or shell env.
+      LOG_HOSTNAME: ${LOG_HOSTNAME:?LOG_HOSTNAME must be set (e.g. logs.example.local)}
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - backend
+
+volumes:
+  mariadb_data:
+  caddy_data:
+  caddy_config:
+
+secrets:
+  db_root:
+    file: ./secrets/db_root.txt
+  db_user:
+    file: ./secrets/db_user.txt
+
+networks:
+  backend:
+    driver: bridge

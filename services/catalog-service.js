@@ -222,7 +222,13 @@ function checkVersionGitHub(repo) {
     };
     const req = https.get(options, (res) => {
       let data = '';
-      res.on('data', chunk => data += chunk);
+      const MAX_LENGTH = 1024 * 512; // 512KB limit
+      res.on('data', chunk => {
+        data += chunk;
+        if (data.length > MAX_LENGTH) {
+          req.destroy(new Error('Payload from GitHub exceeded 512KB bounds'));
+        }
+      });
       res.on('end', () => {
         try {
           const json = JSON.parse(data);
@@ -387,40 +393,7 @@ function parseWingetSearchResultLine(line) {
   };
 }
 
-function parseWingetSearchResults(stdout) {
-  if (!stdout || !stdout.trim()) return [];
-  const clean = stdout.replace(/\x1B\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
-  const lines = clean.split('\n').filter(line => line.trim());
-  const sepIdx = lines.findIndex(line => /^[\-─]{3,}/.test(line.trim()));
-  if (sepIdx < 1) return [];
 
-  return lines.slice(sepIdx + 1)
-    .map(line => {
-      const cols = line.split(/\s{2,}/).map(part => part.trim()).filter(Boolean);
-      if (cols.length < 2) return null;
-
-      const wingetId = cols[1];
-      if (!isValidWingetId(wingetId)) return null;
-
-      const wingetSource = sanitizeWingetSource(cols[cols.length - 1]) || DEFAULT_WINGET_SOURCE;
-      const version = cols[2] && !/^unknown$/i.test(cols[2]) ? cols[2] : '';
-      const match = wingetSource ? cols.slice(3, -1).join(' ') : cols.slice(3).join(' ');
-
-      return {
-        id: wingetId.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-        name: cols[0] || wingetId,
-        wingetId,
-        wingetSource,
-        version,
-        match,
-        category: 'Winget',
-        icon: '📦',
-        source: 'winget-cli'
-      };
-    })
-    .filter(Boolean)
-    .slice(0, 30);
-}
 
 function pickPreferredPackageCandidate(results, reference) {
   if (!Array.isArray(results) || results.length === 0) return null;
@@ -530,64 +503,6 @@ async function resolveCuratedCatalog() {
 // ─── CLI Winget Search ───────────────────────────────────────
 // Uses the local winget binary — stable, no external API dependency.
 
-function searchWingetCLI(query) {
-  return new Promise((resolve) => {
-    const safeQuery = normalizeWingetQuery(query);
-    if (!safeQuery || safeQuery.length < 2) { resolve([]); return; }
-
-    runWinget(['search', '--query', safeQuery, '--accept-source-agreements'], 25000)
-      .then(stdout => {
-        resolve(parseWingetSearchResults(stdout));
-        return;
-    // Note: --disable-interactivity was added in winget 1.5 — omit for compatibility
-
-        if (!stdout || !stdout.trim()) { resolve([]); return; }
-
-      // Strip ANSI/VT escape sequences winget may emit
-      const clean = stdout.replace(/\x1B\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
-      const lines = clean.split('\n').filter(l => l.trim());
-
-      // Find the separator line (dashes or box-drawing chars)
-      const sepIdx = lines.findIndex(l => /^[\-─]{3,}/.test(l.trim()));
-      if (sepIdx < 1) { resolve([]); return; }
-
-      // Parse data rows — use 2+ consecutive spaces as column separator (locale-independent)
-      const results = lines.slice(sepIdx + 1)
-        .map(line => {
-          // Split by 2+ spaces; this splits "Name    Publisher.Id    1.0.0" correctly
-          const cols = line.split(/\s{2,}/).map(s => s.trim()).filter(Boolean);
-          if (cols.length < 2) return null;
-
-          // Winget IDs always look like Publisher.AppName — find that column
-          const idColIdx = cols.findIndex(c => /^[A-Za-z0-9][A-Za-z0-9.\-_]*\.[A-Za-z0-9][A-Za-z0-9.\-_]*$/.test(c));
-          if (idColIdx < 0) return null;
-
-          const wingetId = cols[idColIdx];
-          const name     = cols.slice(0, idColIdx).join(' ').trim() || wingetId;
-          const version  = cols[idColIdx + 1] || '';
-
-          return {
-            id: wingetId.toLowerCase().replace(/\./g, '-'),
-            name,
-            wingetId,
-            version,
-            category: 'Winget',
-            icon: '📦',
-            source: 'winget-cli'
-          };
-        })
-        .filter(Boolean)
-        .slice(0, 30);
-
-      resolve(results);
-    });
-  });
-}
-
-// ─── Main Service ───────────────────────────────────────────
-
-// Clean parser overrides kept in ASCII so the catalog remains stable even if
-// this file has legacy mojibake in comments or older helper implementations.
 function parseWingetShowOutput(stdout) {
   if (!stdout || !stdout.trim()) return null;
 
@@ -612,29 +527,7 @@ function parseWingetSearchResults(stdout) {
   if (sepIdx < 1) return [];
 
   return lines.slice(sepIdx + 1)
-    .map(line => {
-      const cols = line.split(/\s{2,}/).map(part => part.trim()).filter(Boolean);
-      if (cols.length < 2) return null;
-
-      const wingetId = cols[1];
-      if (!isValidWingetId(wingetId)) return null;
-
-      const wingetSource = sanitizeWingetSource(cols[cols.length - 1]) || DEFAULT_WINGET_SOURCE;
-      const version = cols[2] && !/^unknown$/i.test(cols[2]) ? cols[2] : '';
-      const match = wingetSource ? cols.slice(3, -1).join(' ') : cols.slice(3).join(' ');
-
-      return {
-        id: wingetId.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-        name: cols[0] || wingetId,
-        wingetId,
-        wingetSource,
-        version,
-        match,
-        category: 'Winget',
-        icon: '📦',
-        source: 'winget-cli'
-      };
-    })
+    .map(line => parseWingetSearchResultLine(line))
     .filter(Boolean)
     .slice(0, 30);
 }
@@ -645,23 +538,6 @@ function searchWingetCLI(query) {
 
   return runWinget(['search', '--query', safeQuery, '--accept-source-agreements'], 25000)
     .then(stdout => parseWingetSearchResults(stdout));
-}
-
-// Final parser override: newer winget builds can collapse the spaces between
-// "Name", "Id", "Version" and "Source", so splitting on 2+ spaces drops valid
-// results like PDF24 or WhatsApp. Parse from the right-most source/id instead.
-function parseWingetSearchResults(stdout) {
-  if (!stdout || !stdout.trim()) return [];
-
-  const clean = stdout.replace(/\x1B\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
-  const lines = clean.split('\n').filter(line => line.trim());
-  const sepIdx = lines.findIndex(line => /^[-\u2500-\u257f]{3,}/.test(line.trim()));
-  if (sepIdx < 1) return [];
-
-  return lines.slice(sepIdx + 1)
-    .map(line => parseWingetSearchResultLine(line))
-    .filter(Boolean)
-    .slice(0, 30);
 }
 
 const catalogService = {

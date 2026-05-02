@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AD Deploy — Admin</title>
+<style>
+*,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:      #0a0e1a;
+  --surface: #121726;
+  --border:  #1f2740;
+  --text:    #e7eaf2;
+  --muted:   #64748b;
+  --accent:  #6366f1;
+  --accent2: #4f46e5;
+  --ok:      #10b981;
+  --err:     #ef4444;
+  --warn:    #f59e0b;
+  --sidebar: 220px;
+}
+html,body { height: 100%; }
+body {
+  font-family: ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;
+  font-size: 14px; background: var(--bg); color: var(--text); line-height: 1.5;
+}
+/* ── Utilities ── */
+.muted    { color: var(--muted); font-size: 12px; }
+.mono     { font-family: ui-monospace,'Cascadia Code',Menlo,Consolas,monospace; font-size: 12px; }
+/* ── Messages ── */
+.msg-ok,.msg-err,.msg-warn {
+  padding: 10px 14px; border-radius: 8px; font-size: 13px; margin: 8px 0;
+}
+.msg-ok   { background: rgba(16,185,129,.12); color: #34d399; border: 1px solid rgba(16,185,129,.2); }
+.msg-err  { background: rgba(239,68,68,.12);  color: #f87171; border: 1px solid rgba(239,68,68,.2); }
+.msg-warn { background: rgba(245,158,11,.12); color: #fbbf24; border: 1px solid rgba(245,158,11,.2); }
+/* ── Auth pages ── */
+.auth-page {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; min-height: 100vh; padding: 24px;
+}
+.auth-box {
+  width: 100%; max-width: 380px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 32px 28px;
+}
+.auth-box .brand { text-align: center; margin-bottom: 28px; }
+.auth-box .brand .badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 52px; height: 52px; border-radius: 14px;
+  background: rgba(99,102,241,.15); margin: 0 auto 14px;
+}
+.auth-box .brand h1 { font-size: 20px; font-weight: 700; }
+.auth-box .brand p  { color: var(--muted); font-size: 13px; margin-top: 5px; }
+.auth-box label     { display: block; margin-bottom: 14px; }
+.auth-box label > span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; font-weight: 500; }
+/* ── Inputs ── */
+input,select {
+  width: 100%; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 7px;
+  padding: 9px 12px; font-family: inherit; font-size: 14px;
+  transition: border-color .15s;
+}
+input:focus,select:focus { outline: none; border-color: var(--accent); }
+/* ── Buttons ── */
+button {
+  font-family: inherit; font-size: 13px; font-weight: 600;
+  border: none; border-radius: 7px; padding: 8px 16px; cursor: pointer;
+  transition: background .12s, opacity .12s;
+}
+button:disabled { opacity: .45; cursor: not-allowed; }
+.btn-primary   { background: var(--accent); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--accent2); }
+.btn-secondary { background: var(--border); color: var(--text); border: 1px solid #2d3755; }
+.btn-secondary:hover:not(:disabled) { background: #263050; }
+.btn-danger    { background: rgba(239,68,68,.18); color: #f87171; border: 1px solid rgba(239,68,68,.28); }
+.btn-danger:hover:not(:disabled) { background: rgba(239,68,68,.28); }
+.btn-full { width: 100%; padding: 11px; }
+.btn-sm   { padding: 5px 11px; font-size: 12px; }
+/* ── App layout ── */
+.app-layout { display: flex; height: 100vh; overflow: hidden; }
+/* ── Sidebar ── */
+#sidebar {
+  width: var(--sidebar); flex-shrink: 0; display: flex;
+  flex-direction: column; background: var(--surface);
+  border-right: 1px solid var(--border); overflow: hidden;
+}
+.sb-brand {
+  display: flex; align-items: center; gap: 10px;
+  padding: 18px 18px 14px; border-bottom: 1px solid var(--border);
+  font-size: 15px; font-weight: 700;
+}
+.sb-brand .icon {
+  width: 32px; height: 32px; background: rgba(99,102,241,.18);
+  border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.sb-brand .icon svg { width: 17px; height: 17px; }
+.sb-nav { flex: 1; overflow-y: auto; padding: 10px 10px; }
+.nav-item {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  border-radius: 8px; cursor: pointer; color: var(--muted); font-size: 13px;
+  font-weight: 500; text-decoration: none; transition: background .1s, color .1s;
+  margin-bottom: 2px;
+}
+.nav-item svg { width: 15px; height: 15px; flex-shrink: 0; }
+.nav-item:hover { background: rgba(255,255,255,.05); color: var(--text); }
+.nav-item.active { background: rgba(99,102,241,.15); color: var(--accent); }
+.sb-footer {
+  padding: 12px 16px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+}
+#sb-user {
+  flex: 1; font-size: 12px; color: var(--muted);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+/* ── Content area ── */
+#content { flex: 1; overflow-y: auto; padding: 28px 32px; }
+.content-section > h2 { font-size: 19px; font-weight: 700; margin-bottom: 20px; }
+/* ── Cards ── */
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 20px; margin-bottom: 16px;
+}
+.card h3 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .6px;
+  color: var(--muted); font-weight: 700; margin-bottom: 14px;
+}
+/* ── Stats grid ── */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 12px; margin-bottom: 16px;
+}
+.stat-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 18px 20px;
+}
+.stat-num {
+  font-size: 30px; font-weight: 800; letter-spacing: -1px;
+  color: var(--text); line-height: 1;
+}
+.stat-num.danger { color: var(--err); }
+.stat-label { font-size: 12px; color: var(--muted); margin-top: 4px; }
+/* ── Tables ── */
+.tbl-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th {
+  text-align: left; padding: 8px 10px; color: var(--muted); font-size: 11px;
+  text-transform: uppercase; letter-spacing: .5px;
+  border-bottom: 1px solid var(--border); font-weight: 700;
+}
+tbody td { padding: 10px 10px; border-bottom: 1px solid rgba(31,39,64,.7); vertical-align: middle; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: rgba(255,255,255,.02); }
+/* ── Scope pills ── */
+.pill {
+  display: inline-block; padding: 2px 9px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase;
+}
+.pill-admin  { background: rgba(239,68,68,.18);  color: #f87171; }
+.pill-read   { background: rgba(59,130,246,.18); color: #60a5fa; }
+.pill-ingest { background: rgba(245,158,11,.18); color: #fbbf24; }
+/* ── Form row ── */
+.form-row {
+  display: flex; gap: 10px; align-items: flex-end;
+  flex-wrap: wrap; margin-bottom: 14px;
+}
+.form-row label           { flex: 1; min-width: 130px; }
+.form-row label > span    { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; font-weight: 500; }
+.form-row > button        { flex-shrink: 0; }
+/* ── TLS block ── */
+.fp-block {
+  position: relative; background: rgba(0,0,0,.3); border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px 70px 14px 14px; margin: 10px 0;
+  font-family: ui-monospace,Menlo,Consolas,monospace; font-size: 12px;
+  word-break: break-all; line-height: 1.6;
+}
+.fp-copy { position: absolute; top: 8px; right: 8px; }
+/* ── Grid 2 ── */
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+/* ── PW form ── */
+.pw-form label            { display: block; margin-bottom: 14px; }
+.pw-form label > span     { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; font-weight: 500; }
+/* ── Empty ── */
+.empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
+</style>
+</head>
+<body>
+
+<!-- ══ LOGIN ══════════════════════════════════════════════════════════ -->
+<div id="pg-login" class="auth-page">
+  <div class="auth-box">
+    <div class="brand">
+      <div class="badge">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 2 7 12 12 22 7"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>
+        </svg>
+      </div>
+      <h1>AD Deploy</h1>
+      <p>Log server administration</p>
+    </div>
+    <label>
+      <span>Username</span>
+      <input id="l-user" type="text" autocomplete="username" placeholder="admin" spellcheck="false">
+    </label>
+    <label>
+      <span>Password</span>
+      <input id="l-pass" type="password" autocomplete="current-password" placeholder="••••••••">
+    </label>
+    <div id="l-msg" style="display:none"></div>
+    <button id="l-btn" class="btn-primary btn-full" style="margin-top:4px">Sign in</button>
+  </div>
+</div>
+
+<!-- ══ FORCE CHANGE PASSWORD ══════════════════════════════════════════ -->
+<div id="pg-change" class="auth-page" style="display:none">
+  <div class="auth-box">
+    <div class="brand">
+      <div class="badge">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2"/>
+          <path d="M7 11V7a5 5 0 0110 0v4"/>
+        </svg>
+      </div>
+      <h1>Set Your Password</h1>
+      <p>Default credentials detected — set a new password to continue.</p>
+    </div>
+    <label>
+      <span>Current Password</span>
+      <input id="fc-cur" type="password" autocomplete="current-password">
+    </label>
+    <label>
+      <span>New Password <span class="muted">(min. 8 characters)</span></span>
+      <input id="fc-new" type="password" autocomplete="new-password">
+    </label>
+    <label>
+      <span>Confirm New Password</span>
+      <input id="fc-cfm" type="password" autocomplete="new-password">
+    </label>
+    <div id="fc-msg" style="display:none"></div>
+    <button id="fc-btn" class="btn-primary btn-full" style="margin-top:4px">Set Password &amp; Sign in</button>
+  </div>
+</div>
+
+<!-- ══ MAIN APP ════════════════════════════════════════════════════════ -->
+<div id="pg-app" class="app-layout" style="display:none">
+
+  <aside id="sidebar">
+    <div class="sb-brand">
+      <div class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 2 7 12 12 22 7"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>
+        </svg>
+      </div>
+      AD Deploy
+    </div>
+
+    <nav class="sb-nav">
+      <a class="nav-item active" data-sec="dashboard" href="#">
+        <svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Dashboard
+      </a>
+      <a class="nav-item" data-sec="keys" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="7" cy="17" r="4"/><line x1="10.83" y1="13.17" x2="20" y2="4"/>
+          <line x1="18" y1="6" x2="20" y2="4"/><line x1="15" y1="9" x2="17" y2="11"/>
+        </svg>
+        API Keys
+      </a>
+      <a class="nav-item" data-sec="tls" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <polyline points="9 12 11 14 15 10"/>
+        </svg>
+        TLS Certificate
+      </a>
+      <a class="nav-item" data-sec="password" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="5" y="11" width="14" height="11" rx="2"/>
+          <path d="M7 11V7a5 5 0 0110 0v4"/>
+        </svg>
+        Change Password
+      </a>
+    </nav>
+
+    <div class="sb-footer">
+      <span id="sb-user">—</span>
+      <button id="logout-btn" class="btn-secondary btn-sm">Sign out</button>
+    </div>
+  </aside>
+
+  <main id="content">
+
+    <!-- ── Dashboard ── -->
+    <section id="sec-dashboard" class="content-section">
+      <h2>Dashboard</h2>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-num" id="st-ev">—</div><div class="stat-label">Events (24 h)</div></div>
+        <div class="stat-card"><div class="stat-num" id="st-eq">—</div><div class="stat-label">Active machines (24 h)</div></div>
+        <div class="stat-card"><div class="stat-num danger" id="st-er">—</div><div class="stat-label">Errors (24 h)</div></div>
+        <div class="stat-card"><div class="stat-num" id="st-teq">—</div><div class="stat-label">Total machines</div></div>
+        <div class="stat-card"><div class="stat-num" id="st-tk">—</div><div class="stat-label">Active API keys</div></div>
+      </div>
+      <div id="dash-err" style="display:none"></div>
+      <button id="dash-refresh" class="btn-secondary btn-sm">Refresh</button>
+    </section>
+
+    <!-- ── API Keys ── -->
+    <section id="sec-keys" class="content-section" style="display:none">
+      <h2>API Keys</h2>
+      <div class="card">
+        <h3>Create Key</h3>
+        <p class="muted" style="margin-bottom:14px;line-height:1.6">
+          <strong style="color:var(--text)">admin</strong> — use in the Electron app (read + write everything).<br>
+          <strong style="color:var(--text)">ingest</strong> — paste into PowerShell scripts on machines (write logs only).<br>
+          <strong style="color:var(--text)">read</strong> — read-only access to logs and stats.
+        </p>
+        <div class="form-row">
+          <label><span>Name</span><input id="kn-name" placeholder="electron-app"></label>
+          <label style="flex:0 0 130px;min-width:0"><span>Scope</span>
+            <select id="kn-scope">
+              <option value="admin">admin</option>
+              <option value="ingest">ingest</option>
+              <option value="read">read</option>
+            </select>
+          </label>
+          <button id="kn-btn" class="btn-primary">Create</button>
+        </div>
+        <div id="kn-ok"  style="display:none"></div>
+        <div id="kn-err" style="display:none"></div>
+      </div>
+      <div class="card">
+        <h3>All Keys</h3>
+        <div class="tbl-wrap" id="keys-tbl"><p class="empty">Loading…</p></div>
+      </div>
+    </section>
+
+    <!-- ── TLS Certificate ── -->
+    <section id="sec-tls" class="content-section" style="display:none">
+      <h2>TLS Certificate</h2>
+      <div class="card">
+        <h3>Server Fingerprint</h3>
+        <p class="muted" style="margin-bottom:16px;line-height:1.7">
+          The fingerprint is fetched server-side from the Caddy reverse proxy.
+          Copy it and paste it in the Electron app under
+          <strong style="color:var(--text)">Settings &rarr; Log Server &rarr; TLS fingerprint</strong>.
+        </p>
+        <button id="tls-btn" class="btn-primary">Fetch fingerprint</button>
+        <div id="tls-err" style="display:none"></div>
+        <div id="tls-result" style="display:none;margin-top:14px">
+          <p class="muted" style="margin-bottom:6px">
+            Hostname: <strong style="color:var(--text)" id="tls-host">—</strong>
+          </p>
+          <div class="fp-block">
+            <span id="tls-fp">—</span>
+            <button id="tls-copy" class="btn-secondary btn-sm fp-copy">Copy</button>
+          </div>
+          <span id="tls-copied" style="display:none;font-size:11px;color:var(--ok);margin-left:4px">Copied!</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Change Password ── -->
+    <section id="sec-password" class="content-section" style="display:none">
+      <h2>Change Password</h2>
+      <div class="card" style="max-width:420px">
+        <h3>Update credentials</h3>
+        <div class="pw-form">
+          <label><span>Current Password</span><input id="pw-cur" type="password" autocomplete="current-password"></label>
+          <label>
+            <span>New Password <span class="muted">(min. 8 characters)</span></span>
+            <input id="pw-new" type="password" autocomplete="new-password">
+          </label>
+          <label><span>Confirm New Password</span><input id="pw-cfm" type="password" autocomplete="new-password"></label>
+          <div id="pw-err" style="display:none"></div>
+          <div id="pw-ok"  style="display:none"></div>
+          <button id="pw-btn" class="btn-primary">Update password</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+/* ── Helpers ───────────────────────────────────────────────────── */
+const $  = id => document.getElementById(id);
+const esc = s => { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; };
+const fmt = ts => {
+  if (!ts) return '—';
+  try {
+    const d = new Date(ts), p = x => String(x).padStart(2,'0');
+    return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  } catch { return String(ts); }
+};
+const num = n => n == null ? '—' : Number(n).toLocaleString();
+
+function msg(el, type, text) {
+  el.className = type ? `msg-${type}` : '';
+  el.textContent = text;
+  el.style.display = text ? '' : 'none';
+}
+
+/* ── API ───────────────────────────────────────────────────────── */
+async function api(method, path, body) {
+  const opts = { method, credentials: 'same-origin', headers: {} };
+  if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  const res  = await fetch(path, opts);
+  const text = await res.text();
+  let parsed;
+  try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
+  if (!res.ok) throw new Error((parsed && parsed.error) || res.statusText || `HTTP ${res.status}`);
+  return parsed;
+}
+
+/* ── Routing ───────────────────────────────────────────────────── */
+let me = null; // { username, mustChange }
+
+function showPage(p) {
+  $('pg-login').style.display  = p === 'login'  ? '' : 'none';
+  $('pg-change').style.display = p === 'change' ? '' : 'none';
+  $('pg-app').style.display    = p === 'app'    ? 'flex' : 'none';
+}
+
+function showSec(name) {
+  document.querySelectorAll('.content-section').forEach(s => s.style.display = 'none');
+  ($(`sec-${name}`) || $('sec-dashboard')).style.display = 'block';
+  document.querySelectorAll('.nav-item').forEach(a =>
+    a.classList.toggle('active', a.dataset.sec === name)
+  );
+  // Lazy-load section data
+  if (name === 'dashboard') loadStats();
+  if (name === 'keys')      loadKeys();
+}
+
+/* ── Init ──────────────────────────────────────────────────────── */
+async function init() {
+  try {
+    me = await api('GET', '/admin-api/me');
+    if (me.mustChange) { showPage('change'); return; }
+    enterApp();
+  } catch { showPage('login'); }
+}
+
+function enterApp() {
+  showPage('app');
+  $('sb-user').textContent = me ? me.username : '—';
+  showSec('dashboard');
+}
+
+/* ── Login ─────────────────────────────────────────────────────── */
+async function doLogin() {
+  const username = $('l-user').value.trim();
+  const password = $('l-pass').value;
+  msg($('l-msg'), null, '');
+  if (!username || !password) { msg($('l-msg'), 'err', 'Username and password required'); return; }
+  $('l-btn').disabled = true; $('l-btn').textContent = 'Signing in…';
+  try {
+    const r = await api('POST', '/admin/auth/login', { username, password });
+    me = { username, mustChange: r.mustChange };
+    if (r.mustChange) { showPage('change'); return; }
+    enterApp();
+  } catch (e) {
+    msg($('l-msg'), 'err', e.message === 'invalid_credentials' ? 'Invalid username or password' : e.message);
+  } finally {
+    $('l-btn').disabled = false; $('l-btn').textContent = 'Sign in';
+    $('l-pass').value = '';
+  }
+}
+$('l-btn').addEventListener('click', doLogin);
+$('l-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+$('l-user').addEventListener('keydown', e => { if (e.key === 'Enter') $('l-pass').focus(); });
+
+/* ── Force change password ─────────────────────────────────────── */
+$('fc-btn').addEventListener('click', async () => {
+  const cur = $('fc-cur').value, nw = $('fc-new').value, cfm = $('fc-cfm').value;
+  msg($('fc-msg'), null, '');
+  if (!cur || !nw || !cfm) { msg($('fc-msg'), 'err', 'All fields required'); return; }
+  if (nw.length < 8)       { msg($('fc-msg'), 'err', 'New password must be at least 8 characters'); return; }
+  if (nw !== cfm)          { msg($('fc-msg'), 'err', 'Passwords do not match'); return; }
+  $('fc-btn').disabled = true; $('fc-btn').textContent = 'Saving…';
+  try {
+    await api('POST', '/admin-api/change-password', { currentPassword: cur, newPassword: nw });
+    // All sessions revoked — go back to login
+    showPage('login');
+    $('l-user').value = me ? me.username : '';
+    msg($('l-msg'), 'ok', 'Password changed. Sign in with your new password.');
+  } catch (e) {
+    msg($('fc-msg'), 'err', e.message === 'wrong_password' ? 'Current password is incorrect' : e.message);
+  } finally {
+    $('fc-btn').disabled = false; $('fc-btn').textContent = 'Set Password & Sign in';
+    $('fc-cur').value = $('fc-new').value = $('fc-cfm').value = '';
+  }
+});
+
+/* ── Sidebar nav ───────────────────────────────────────────────── */
+document.querySelectorAll('.nav-item').forEach(a => {
+  a.addEventListener('click', e => { e.preventDefault(); if (a.dataset.sec) showSec(a.dataset.sec); });
+});
+
+/* ── Logout ────────────────────────────────────────────────────── */
+$('logout-btn').addEventListener('click', async () => {
+  try { await api('POST', '/admin/auth/logout'); } catch { /* swallow — cookie still cleared */ }
+  me = null;
+  showPage('login');
+  msg($('l-msg'), null, '');
+});
+
+/* ── Dashboard ─────────────────────────────────────────────────── */
+async function loadStats() {
+  msg($('dash-err'), null, '');
+  try {
+    const s = await api('GET', '/admin-api/stats');
+    $('st-ev').textContent  = num(s.events24h);
+    $('st-eq').textContent  = num(s.activeEquipos);
+    $('st-er').textContent  = num(s.errors24h);
+    $('st-teq').textContent = num(s.totalEquipos);
+    $('st-tk').textContent  = num(s.totalKeys);
+  } catch (e) { msg($('dash-err'), 'err', `Stats unavailable: ${e.message}`); }
+}
+$('dash-refresh').addEventListener('click', loadStats);
+
+/* ── API Keys ──────────────────────────────────────────────────── */
+async function loadKeys() {
+  $('keys-tbl').innerHTML = '<p class="empty">Loading…</p>';
+  try {
+    const rows = await api('GET', '/admin-api/api-keys');
+    if (!rows.length) { $('keys-tbl').innerHTML = '<p class="empty">No API keys yet.</p>'; return; }
+    $('keys-tbl').innerHTML = `<table>
+      <thead><tr>
+        <th>Name</th><th>Scope</th><th>Created</th><th>Last used</th><th>State</th><th></th>
+      </tr></thead>
+      <tbody>${rows.map(k => `<tr>
+        <td>${esc(k.name)}</td>
+        <td><span class="pill pill-${esc(k.scope)}">${esc(k.scope)}</span></td>
+        <td class="mono">${fmt(k.createdAt)}</td>
+        <td class="mono">${fmt(k.lastUsed)}</td>
+        <td>${k.revokedAt ? '<span class="muted">revoked</span>' : `<span style="color:var(--ok)">&#x25cf; active</span>`}</td>
+        <td>${!k.revokedAt ? `<button class="btn-danger btn-sm" data-rev="${esc(k.id)}">Revoke</button>` : ''}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+    $('keys-tbl').querySelectorAll('[data-rev]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Revoke this API key? This cannot be undone.')) return;
+        btn.disabled = true;
+        try { await api('POST', `/admin-api/api-keys/${btn.dataset.rev}/revoke`); await loadKeys(); }
+        catch (e) { alert(e.message); btn.disabled = false; }
+      });
+    });
+  } catch (e) { $('keys-tbl').innerHTML = `<p class="empty">Failed to load: ${esc(e.message)}</p>`; }
+}
+
+$('kn-btn').addEventListener('click', async () => {
+  const name = $('kn-name').value.trim(), scope = $('kn-scope').value;
+  msg($('kn-ok'), null, ''); msg($('kn-err'), null, '');
+  if (!name) { msg($('kn-err'), 'err', 'Name is required'); return; }
+  $('kn-btn').disabled = true;
+  try {
+    const r = await api('POST', '/admin-api/api-keys', { name, scope });
+    const box = $('kn-ok');
+    box.className = 'msg-ok';
+    box.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+      <div>Key <strong>${esc(r.name)}</strong> created — copy now, it won't show again:<br>
+      <code style="display:block;padding:6px;margin-top:6px;background:rgba(0,0,0,.3);border-radius:4px;word-break:break-all">${esc(r.apiKey)}</code></div>
+      <button onclick="this.closest('.msg-ok').style.display='none'" style="background:none;border:none;color:inherit;font-size:18px;cursor:pointer;padding:0;line-height:1;flex-shrink:0" title="Dismiss">&times;</button>
+    </div>`;
+    box.style.display = '';
+    $('kn-name').value = '';
+    await loadKeys();
+  } catch (e) { msg($('kn-err'), 'err', e.message); }
+  finally { $('kn-btn').disabled = false; }
+});
+
+/* ── TLS Fingerprint ───────────────────────────────────────────── */
+$('tls-btn').addEventListener('click', async () => {
+  msg($('tls-err'), null, '');
+  $('tls-result').style.display = 'none';
+  $('tls-btn').disabled = true; $('tls-btn').textContent = 'Fetching…';
+  try {
+    const r = await api('GET', '/admin-api/tls-fingerprint');
+    $('tls-host').textContent = r.hostname;
+    $('tls-fp').textContent   = r.fingerprint;
+    $('tls-result').style.display = '';
+    $('tls-copied').style.display = 'none';
+  } catch (e) { msg($('tls-err'), 'err', `Could not fetch fingerprint: ${e.message}`); }
+  finally { $('tls-btn').disabled = false; $('tls-btn').textContent = 'Fetch fingerprint'; }
+});
+
+$('tls-copy').addEventListener('click', async () => {
+  const text = $('tls-fp').textContent;
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const t = document.createElement('textarea');
+    t.value = text; t.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(t); t.select(); document.execCommand('copy');
+    document.body.removeChild(t);
+  }
+  $('tls-copied').style.display = '';
+  setTimeout(() => $('tls-copied').style.display = 'none', 2500);
+});
+
+/* ── Change Password ───────────────────────────────────────────── */
+$('pw-btn').addEventListener('click', async () => {
+  const cur = $('pw-cur').value, nw = $('pw-new').value, cfm = $('pw-cfm').value;
+  msg($('pw-err'), null, ''); msg($('pw-ok'), null, '');
+  if (!cur || !nw || !cfm) { msg($('pw-err'), 'err', 'All fields required'); return; }
+  if (nw.length < 8)       { msg($('pw-err'), 'err', 'New password must be at least 8 characters'); return; }
+  if (nw !== cfm)          { msg($('pw-err'), 'err', 'Passwords do not match'); return; }
+  $('pw-btn').disabled = true; $('pw-btn').textContent = 'Saving…';
+  try {
+    await api('POST', '/admin-api/change-password', { currentPassword: cur, newPassword: nw });
+    msg($('pw-ok'), 'ok', 'Password changed. Signing out…');
+    setTimeout(() => {
+      me = null;
+      showPage('login');
+      msg($('l-msg'), 'ok', 'Password changed. Sign in with your new credentials.');
+    }, 1800);
+  } catch (e) {
+    msg($('pw-err'), 'err', e.message === 'wrong_password' ? 'Current password is incorrect' : e.message);
+    $('pw-btn').disabled = false; $('pw-btn').textContent = 'Update password';
+  } finally {
+    $('pw-cur').value = $('pw-new').value = $('pw-cfm').value = '';
+  }
+});
+
+/* ── Boot ──────────────────────────────────────────────────────── */
+init();
+</script>
+</body>
+</html>

@@ -31,8 +31,11 @@ Object.assign(OUsPage, {
       const checked = selectedSet.has(o.dn);
       const indent = 'padding-left:' + (16 + o.depth * 18) + 'px';
       const count = this.assignmentCountByOU(o.dn);
+      const hasSiblings = filtered.some(other => other.dn !== o.dn
+        && other.parentDN === o.parentDN
+        && other.depth === o.depth);
       return `
-        <label class="ou-picker-row ${checked ? 'checked' : ''}" style="${indent}">
+        <label class="ou-picker-row ${checked ? 'checked' : ''}" style="${indent}" data-dn="${this.escAttr(o.dn)}">
           <div class="assignment-checkbox state-${checked ? 'all' : 'none'} small">
             ${checked ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>' : ''}
           </div>
@@ -40,6 +43,17 @@ Object.assign(OUsPage, {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0; color:var(--text-muted)"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
           <span class="ou-picker-name">${this.esc(o.name)}</span>
           ${count > 0 ? `<span class="tree-badge">${count}</span>` : ''}
+          ${hasSiblings ? `
+            <button type="button" class="ou-picker-siblings-btn" data-dn="${this.escAttr(o.dn)}" title="${this.escAttr(t('ous.pickerSelectSiblings'))}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="8" y1="6" x2="21" y2="6"/>
+                <line x1="8" y1="12" x2="21" y2="12"/>
+                <line x1="8" y1="18" x2="21" y2="18"/>
+                <circle cx="4" cy="6" r="1.5"/>
+                <circle cx="4" cy="12" r="1.5"/>
+                <circle cx="4" cy="18" r="1.5"/>
+              </svg>
+            </button>` : ''}
         </label>`;
     }).join('');
 
@@ -91,10 +105,20 @@ Object.assign(OUsPage, {
       if (el) { el.focus(); el.setSelectionRange(pos, pos); }
     });
 
+    // Sibling-select buttons (must be bound before row clicks so we can stopPropagation)
+    mainArea.querySelectorAll('.ou-picker-siblings-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.selectSiblingsOf(btn.dataset.dn);
+      });
+    });
+
     // Checkboxes
     mainArea.querySelectorAll('.ou-picker-row').forEach(row => {
       row.addEventListener('click', (e) => {
         if (e.target.tagName === 'INPUT') return; // handled separately
+        if (e.target.closest('.ou-picker-siblings-btn')) return; // handled separately
         const cb = row.querySelector('input[type="checkbox"]');
         cb.checked = !cb.checked;
         const dn = cb.value;
@@ -160,6 +184,43 @@ Object.assign(OUsPage, {
     };
     document.getElementById('btn-picker-confirm')?.addEventListener('click', confirm);
     document.getElementById('btn-picker-confirm-bottom')?.addEventListener('click', confirm);
+  },
+
+  // Toggle selection of all siblings (same parentDN + depth) matching the
+  // current search filter. If every visible sibling — including the source —
+  // is already selected, the whole group is deselected. Otherwise the whole
+  // group is selected (preserving flat-tree order).
+  selectSiblingsOf(dn) {
+    const target = this.state.flatOUs.find(o => o.dn === dn);
+    if (!target) return;
+
+    const q = this.state.assignmentOUSearch.trim().toLowerCase();
+    const siblings = this.state.flatOUs.filter(o =>
+      o.parentDN === target.parentDN &&
+      o.depth === target.depth &&
+      (!q || o.name.toLowerCase().includes(q))
+    );
+    if (siblings.length === 0) return;
+
+    const selected = new Set(this.state.assignmentOUs);
+    const allSelected = siblings.every(o => selected.has(o.dn));
+
+    if (allSelected) {
+      const remove = new Set(siblings.map(o => o.dn));
+      this.state.assignmentOUs = this.state.assignmentOUs.filter(d => !remove.has(d));
+    } else {
+      for (const o of siblings) selected.add(o.dn);
+      // Preserve flat-tree order
+      this.state.assignmentOUs = this.state.flatOUs
+        .filter(o => selected.has(o.dn))
+        .map(o => o.dn);
+    }
+
+    const mainArea = document.getElementById('ous-main-area');
+    const scrollTop = mainArea?.querySelector('.ou-picker-list')?.scrollTop || 0;
+    this.renderOUPicker();
+    const list = mainArea?.querySelector('.ou-picker-list');
+    if (list) list.scrollTop = scrollTop;
   },
 
   // ── Step 2: Assignment grid ────────────────────────────

@@ -24,6 +24,15 @@ const DashboardPage = {
     let recentActivity = [];
     try { recentActivity = await window.api.activity.getRecent(10); } catch (e) {}
 
+    // Get installation stats from logs
+    let installOk = 0, installFail = 0;
+    try {
+      const logsOk = await window.api.logs.query({ q: 'install_success', limit: 100 });
+      if (logsOk && logsOk.items) installOk = logsOk.items.length;
+      const logsFail = await window.api.logs.query({ q: 'install_failed', limit: 100 });
+      if (logsFail && logsFail.items) installFail = logsFail.items.length;
+    } catch (e) {}
+
     container.innerHTML = `
       <div class="page-header">
         <div>
@@ -75,10 +84,14 @@ const DashboardPage = {
           <div class="card-label">${t('dashboard.bundles')}</div>
           <div class="card-value">${bundleCount}</div>
         </div>
+
       </div>
 
-      <!-- Health Check -->
-      <div class="card" style="margin-bottom:var(--space-xl)">
+      <!-- Health & Telemetry Section -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(400px, 1fr));gap:var(--space-xl);margin-bottom:var(--space-xl)">
+        
+        <!-- Health Check -->
+        <div class="card">
         <div class="card-title" style="display:flex;align-items:center;gap:8px">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
           ${t('dashboard.healthStatus')}
@@ -99,11 +112,37 @@ const DashboardPage = {
           <div style="margin-top:12px;border-top:1px solid var(--border-color);padding-top:12px">
             ${healthStatus.issues.slice(0, 5).map(issue => `
               <div style="font-size:var(--font-sm);color:${issue.type === 'warn' ? 'var(--accent-warning)' : 'var(--accent-danger)'};padding:4px 0">
-                ${issue.type === 'warn' ? '⚠' : '❌'} ${issue.msg}
+                ${issue.type === 'warn' ? '⚠' : '❌'} ${this.esc(issue.msg)}
               </div>
             `).join('')}
           </div>
         ` : ''}
+        </div>
+
+        <!-- Telemetría de Instalaciones -->
+        <div class="card">
+          <div class="card-title" style="display:flex;align-items:center;gap:8px">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+            Telemetría de Despliegues (Últimas 24h)
+          </div>
+          <div style="display:flex; gap:16px; margin-top:20px; flex-wrap:wrap;">
+            <div class="stat-card" onclick="App.navigate('logs'); setTimeout(() => { const el = document.getElementById('logs-q'); if(el) { el.value='install_success'; el.dispatchEvent(new Event('input')) } }, 100);" style="cursor:pointer; flex:1; min-width:140px;" title="Instalaciones OK">
+              <div class="stat-icon green" style="margin-bottom: 12px; width:38px; height:38px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              </div>
+              <div class="card-label">Instalaciones OK</div>
+              <div class="card-value">${installOk}</div>
+            </div>
+
+            <div class="stat-card" onclick="App.navigate('logs'); setTimeout(() => { const el = document.getElementById('logs-q'); if(el) { el.value='install_failed'; el.dispatchEvent(new Event('input')) } }, 100);" style="cursor:pointer; flex:1; min-width:140px;" title="Instalaciones Fallidas">
+              <div class="stat-icon red" style="margin-bottom: 12px; width:38px; height:38px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+              </div>
+              <div class="card-label">Instalaciones Fallidas</div>
+              <div class="card-value">${installFail}</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-xl)">
@@ -160,6 +199,10 @@ const DashboardPage = {
             <div class="spinner" style="width:10px;height:10px;border-width:2px;margin:0;"></div>
             <span style="color:var(--text-muted)">${t('dashboard.netShareChecking')}</span>
           </div>
+          <div id="log-backend-status" style="display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="App.navigate('logs')" title="${t('nav.logs') || 'Logs'}">
+            <div class="spinner" style="width:10px;height:10px;border-width:2px;margin:0;"></div>
+            <span style="color:var(--text-muted)">${t('logs.title') || 'Logs'}...</span>
+          </div>
         </div>
         ${!App.rsatAvailable ? `
           <div style="margin-top:12px;padding:12px;background:var(--accent-danger-dim);border:1px solid rgba(239,68,68,0.25);border-radius:var(--radius-sm);">
@@ -180,6 +223,27 @@ const DashboardPage = {
 
     // Check network share connectivity asynchronously
     this.checkNetworkShare();
+    this.checkLogBackend();
+  },
+
+  async checkLogBackend() {
+    const el = document.getElementById('log-backend-status');
+    if (!el) return;
+    let st;
+    try { st = await window.api.logs.status(); }
+    catch { return; }
+    const isD = st.mode === 'dedicated';
+    const dotColor = (isD && !st.online) ? 'var(--accent-warning)' : 'var(--accent-secondary)';
+    const shadow   = (isD && !st.online) ? 'rgba(245,158,11,.5)'   : 'rgba(0,212,170,.5)';
+    const label = isD
+      ? (st.online
+          ? `${t('logs.backendDedicated') || 'Servidor dedicado'} — ${st.host || ''}`
+          : `${t('logs.backendOffline') || 'Servidor no alcanzable'} · cola ${st.queueSize}`)
+      : (t('logs.backendLocal') || 'Almacenamiento local');
+    el.innerHTML = `
+      <div style="width:10px;height:10px;border-radius:50%;background:${dotColor};box-shadow:0 0 8px ${shadow};flex-shrink:0;"></div>
+      <span style="color:var(--text-secondary);">Logs — ${App.escapeHtml ? App.escapeHtml(label) : label}</span>
+    `;
   },
 
   async checkNetworkShare() {
@@ -200,7 +264,7 @@ const DashboardPage = {
       if (result.success) {
         el.innerHTML = `
           <div style="width:10px;height:10px;border-radius:50%;background:var(--accent-secondary);box-shadow:0 0 8px rgba(0,212,170,.5);flex-shrink:0;"></div>
-          <span style="color:var(--text-secondary);">${t('dashboard.netShareAccessible')} — <code style="background:rgba(0,0,0,0.2);padding:2px 6px;border-radius:3px;font-size:var(--font-xs);">${config.networkSharePath}</code></span>
+          <span style="color:var(--text-secondary);">${t('dashboard.netShareAccessible')} — <code style="background:rgba(0,0,0,0.2);padding:2px 6px;border-radius:3px;font-size:var(--font-xs);">${this.esc(config.networkSharePath)}</code></span>
         `;
       } else {
         el.innerHTML = `
@@ -214,8 +278,8 @@ const DashboardPage = {
             <div style="padding:12px;background:var(--accent-danger-dim);border:1px solid rgba(239,68,68,0.25);border-radius:var(--radius-sm);margin-top:4px;">
               <div style="font-size:var(--font-sm);color:#fca5a5;">
                 <strong>❌ ${t('dashboard.netShareInaccessible')}</strong>
-                <p style="margin-top:4px;color:var(--text-muted);">Ruta: <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:3px;font-size:var(--font-xs);">${config.networkSharePath}</code></p>
-                <p style="margin-top:4px;color:var(--text-muted);">${result.error}</p>
+                <p style="margin-top:4px;color:var(--text-muted);">Ruta: <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:3px;font-size:var(--font-xs);">${this.esc(config.networkSharePath)}</code></p>
+                <p style="margin-top:4px;color:var(--text-muted);">${this.esc(result.error)}</p>
               </div>
             </div>
           `);
@@ -224,7 +288,7 @@ const DashboardPage = {
     } catch (err) {
       el.innerHTML = `
         <div style="width:10px;height:10px;border-radius:50%;background:var(--accent-danger);box-shadow:0 0 8px rgba(239,68,68,.5);flex-shrink:0;"></div>
-        <span style="color:#fca5a5;">Error: ${err.message}</span>
+        <span style="color:#fca5a5;">Error: ${this.esc(err.message)}</span>
       `;
     }
   },
@@ -263,6 +327,7 @@ const DashboardPage = {
   },
 
   getActivityColor(action) {
+    const safeAction = String(action || '');
     const colors = {
       app_create: 'var(--accent-secondary-dim)',
       app_update: 'var(--accent-info-dim)',
@@ -279,38 +344,65 @@ const DashboardPage = {
       config_export: 'var(--accent-primary-dim)',
       config_import: 'var(--accent-warning-dim)',
     };
-    return colors[action] || 'var(--accent-primary-dim)';
+    return colors[safeAction] || 'var(--accent-primary-dim)';
   },
 
   getActivityIcon(action) {
-    if (action.includes('uninstall')) return '&#128465;';
-    if (action.includes('create')) return '&#10133;';
-    if (action.includes('update')) return '&#9999;&#65039;';
-    if (action.includes('delete')) return '&#128465;';
-    if (action.includes('deploy')) return '&#128640;';
-    if (action.includes('disable')) return '&#9209;&#65039;';
-    if (action.includes('export')) return '&#128228;';
-    if (action.includes('import')) return '&#128229;';
+    const safeAction = String(action || '');
+    if (safeAction.includes('uninstall')) return '&#128465;';
+    if (safeAction.includes('create')) return '&#10133;';
+    if (safeAction.includes('update')) return '&#9999;&#65039;';
+    if (safeAction.includes('delete')) return '&#128465;';
+    if (safeAction.includes('deploy')) return '&#128640;';
+    if (safeAction.includes('disable')) return '&#9209;&#65039;';
+    if (safeAction.includes('export')) return '&#128228;';
+    if (safeAction.includes('import')) return '&#128229;';
     return '&#128203;';
   },
 
+  esc(str) {
+    const div = document.createElement('div');
+    div.textContent = str || '';
+    return div.innerHTML;
+  },
+
   getActivityText(entry) {
+    entry = entry || {};
+    const e = s => this.esc(String(s ?? '?'));
+    const appName    = e(entry.appName);
+    const bundleName = e(entry.bundleName);
+    const gpoName    = e(entry.gpoName);
+    const version    = e(entry.version || '1.0.0');
+    const newVersion = entry.newVersion ? ` → v${e(entry.newVersion)}` : '';
     const texts = {
-      app_create: `App creada: <strong>${entry.appName || '?'}</strong> v${entry.version || '1.0.0'}`,
-      app_update: `App actualizada: <strong>${entry.appName || '?'}</strong>`,
-      app_uninstall_prepare: `Desinstalacion preparada: <strong>${entry.appName || '?'}</strong>`,
-      app_disable: `App deshabilitada: <strong>${entry.appName || '?'}</strong>`,
-      app_delete: `App eliminada: <strong>${entry.appName || '?'}</strong>`,
-      bundle_create: `Bundle creado: <strong>${entry.bundleName || '?'}</strong> (${entry.appCount || 0} apps)`,
-      bundle_deploy: `Bundle desplegado: <strong>${entry.bundleName || '?'}</strong> v${entry.version || '?'}`,
-      bundle_uninstall_prepare: `Desinstalacion de bundle preparada: <strong>${entry.bundleName || '?'}</strong>`,
-      bundle_update: `Bundle actualizado: <strong>${entry.bundleName || '?'}</strong>`,
-      bundle_delete: `Bundle eliminado`,
-      bundle_disable: `Bundle deshabilitado`,
-      gpo_create: `GPO creada: <strong>${entry.gpoName || '?'}</strong>`,
-      config_export: `Configuración exportada`,
-      config_import: `Configuración importada`,
+      app_create:             `App creada: <strong>${appName}</strong> v${version}`,
+      app_update:             `App actualizada: <strong>${appName}</strong>`,
+      app_quick_update:       `Actualización rápida: <strong>${appName}</strong>`,
+      app_auto_update:        `Auto-update: <strong>${appName}</strong>${newVersion}`,
+      app_uninstall_prepare:  `Desinstalación preparada: <strong>${appName}</strong>`,
+      app_disable:            `App deshabilitada: <strong>${appName}</strong>`,
+      app_delete:             `App eliminada: <strong>${appName}</strong>`,
+      bundle_create:          `Bundle creado: <strong>${bundleName}</strong> (${Number(entry.appCount) || 0} apps)`,
+      bundle_deploy:          `Bundle desplegado: <strong>${bundleName}</strong>`,
+      bundle_uninstall_prepare: `Desinstalación de bundle: <strong>${bundleName}</strong>`,
+      bundle_update:          `Bundle actualizado: <strong>${bundleName}</strong>`,
+      bundle_delete:          `Bundle eliminado`,
+      bundle_disable:         `Bundle deshabilitado: <strong>${bundleName}</strong>`,
+      gpo_create:             `GPO creada: <strong>${gpoName}</strong>`,
+      gpo_delete:             `GPO eliminada: <strong>${gpoName}</strong>`,
+      script_deploy:          `Script desplegado: <strong>${appName}</strong>`,
+      install_success:        `Instalado: <strong>${appName}</strong> v${version}`,
+      install_failed:         `Error de instalación: <strong>${appName}</strong>`,
+      install_skipped:        `Omitido: <strong>${appName}</strong>`,
+      uninstall_success:      `Desinstalado: <strong>${appName}</strong>`,
+      uninstall_failed:       `Error de desinstalación: <strong>${appName}</strong>`,
+      config_export:          `Configuración exportada`,
+      config_import:          `Configuración importada`,
+      log_backend_enrolled:   `Enrolled en servidor de logs`,
+      log_backend_reconnected:`Servidor de logs reconectado`,
+      log_backend_offline:    `Servidor de logs no disponible`,
+      log_share_config_published: `Config de logging publicada`,
     };
-    return texts[entry.action] || `${entry.action}`;
+    return texts[String(entry.action || '')] || this.esc(entry.action || entry.message || '');
   }
 };

@@ -1,5 +1,6 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
+const { getCurrentAppVersion } = require('./services/app-version');
 
 let mainWindow;
 
@@ -53,15 +54,19 @@ app.whenReady().then(() => {
   const adService = require('./services/ad-service');
   const appService = require('./services/app-service');
   const { assertString, assertStringOrNull, assertArray, assertBoolean, assertObject, assertId } = require('./services/ipc-validators');
+  const { ipcLog } = require('./services/ipc-logger');
   const scriptService = require('./services/script-service');
   const fileService = require('./services/file-service');
   const configService = require('./services/config');
   const bundleService = require('./services/bundle-service');
   const activityLog = require('./services/activity-log');
+  const logSink = require('./services/log-sink');
   const i18nService = require('./services/i18n');
   const catalogService = require('./services/catalog-service');
   const templateService = require('./services/template-service');
   const shareHealth = require('./services/share-health');
+  const updateService = require('./services/update-service');
+  const scriptUpdateService = require('./services/script-update-service');
 
   console.log('Initialize i18n...');
   i18nService.initialize();
@@ -77,6 +82,10 @@ app.whenReady().then(() => {
   console.log('Services loaded, creating window...');
   createWindow();
   console.log('Window created');
+
+  scriptUpdateService.ensureBackgroundSync(getCurrentAppVersion()).catch(err => {
+    console.warn('Background script update sync failed:', err?.message || err);
+  });
 
   // Run initial share health check (non-blocking) so the cache is warm
   // before the renderer starts making sync share calls.
@@ -135,15 +144,23 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('ad:getGPOs', () => adService.getGPOs());
   ipcMain.handle('ad:getGPOLinkCounts', () => adService.getGPOLinkCounts());
-  ipcMain.handle('ad:createGPO', (_, name, scriptPath, ouDN) => {
+  ipcMain.handle('ad:createGPO', ipcLog('ad:createGPO', async (_, name, scriptPath, ouDN) => {
     try {
       assertString(name, 'name');
       assertString(scriptPath, 'scriptPath');
       if (Array.isArray(ouDN)) ouDN.forEach((dn, idx) => assertString(dn, `ouDN[${idx}]`));
       else assertStringOrNull(ouDN, 'ouDN');
     } catch (e) { return { success: false, error: 'Invalid arguments' }; }
-    return adService.createGPO(name, scriptPath, ouDN);
-  });
+    const result = await adService.createGPO(name, scriptPath, ouDN);
+    if (result.success) {
+      logSink.addSync('gpo_create', {
+        source: 'ad', level: 'info',
+        message: `GPO creada: ${name}`,
+        gpoName: name
+      });
+    }
+    return result;
+  }));
   ipcMain.handle('ad:linkGPOtoOU', (_, gpoName, ouDN) => {
     try { assertString(gpoName, 'gpoName'); assertString(ouDN, 'ouDN'); }
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
@@ -154,11 +171,19 @@ app.whenReady().then(() => {
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
     return adService.bulkLinkGPO(gpoName, ouDNs);
   });
-  ipcMain.handle('ad:deleteGPO', (_, gpoName) => {
+  ipcMain.handle('ad:deleteGPO', ipcLog('ad:deleteGPO', async (_, gpoName) => {
     try { assertString(gpoName, 'gpoName'); }
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
-    return adService.deleteGPO(gpoName);
-  });
+    const result = await adService.deleteGPO(gpoName);
+    if (result.success) {
+      logSink.addSync('gpo_delete', {
+        source: 'ad', level: 'warn',
+        message: `GPO eliminada: ${gpoName}`,
+        gpoName
+      });
+    }
+    return result;
+  }));
   ipcMain.handle('ad:checkGPOExists', (_, gpoName) => {
     try { assertString(gpoName, 'gpoName'); }
     catch (e) { return { exists: false }; }
@@ -178,6 +203,15 @@ app.whenReady().then(() => {
     try { assertString(ouDN, 'ouDN'); }
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
     return adService.checkGPOConflicts(ouDN);
+  });
+  ipcMain.handle('ad:getManagedGPOLinks', (_, gpoNames, ouDNs = []) => {
+    try {
+      assertArray(gpoNames, 'gpoNames');
+      assertArray(ouDNs, 'ouDNs');
+    } catch (e) {
+      return { success: false, error: 'Invalid arguments', data: {} };
+    }
+    return adService.getManagedGPOLinks(gpoNames, ouDNs);
   });
 
   // ─── IPC Handlers: App Service ───────────────────────────────────
@@ -208,10 +242,16 @@ app.whenReady().then(() => {
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
     return appService.bulkAssignGPO(ids, gpoName);
   });
-  ipcMain.handle('apps:applyAssignmentPlan', (_, plan) => {
+  ipcMain.handle('apps:applyAssignmentPlan', (_, plan, allVisibleOUs) => {
     try { assertObject(plan, 'plan'); }
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
-    return appService.applyAssignmentPlan(plan);
+    const safeOUs = Array.isArray(allVisibleOUs) ? allVisibleOUs : [];
+    return appService.applyAssignmentPlan(plan, safeOUs);
+  });
+  ipcMain.handle('apps:reconcileManagedAssignments', (_, ouDNs = []) => {
+    try { assertArray(ouDNs, 'ouDNs'); }
+    catch (e) { return { success: false, error: 'Invalid arguments', data: [], links: {} }; }
+    return appService.reconcileManagedAssignments(ouDNs);
   });
   ipcMain.handle('apps:getInstallerVersion', (_, filePath) => {
     try { assertString(filePath, 'filePath', 1024); }
@@ -239,11 +279,43 @@ app.whenReady().then(() => {
       return '';
     }
   });
-  ipcMain.handle('scripts:deploy', (_, appConfig) => {
+  const _deployingScripts = new Set();
+  ipcMain.handle('scripts:deploy', ipcLog('scripts:deploy', async (_, appConfig) => {
     try { assertObject(appConfig, 'appConfig'); }
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
-    return scriptService.deployScript(appConfig);
-  });
+
+    const appId = appConfig.id || appConfig.name;
+    if (_deployingScripts.has(appId)) return { success: false, error: 'Deploy in progress' };
+    _deployingScripts.add(appId);
+
+    try {
+      const result = await scriptService.deployScript(appConfig);
+      if (result.success) {
+        logSink.addSync('script_deploy', {
+          source: 'deploy', level: 'info',
+          message: `Script desplegado: ${appConfig.name || appId}`,
+          appName: appConfig.name || appId
+        });
+      }
+      return result;
+    } finally {
+      _deployingScripts.delete(appId);
+    }
+  }));
+  ipcMain.handle('scripts:regenerate', ipcLog('scripts:regenerate', async (_, appConfig) => {
+    try { assertObject(appConfig, 'appConfig'); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+
+    const appId = appConfig.id || appConfig.name;
+    if (_deployingScripts.has(appId)) return { success: false, error: 'Deploy in progress' };
+    _deployingScripts.add(appId);
+
+    try {
+      return await scriptService.regenerateScripts(appConfig);
+    } finally {
+      _deployingScripts.delete(appId);
+    }
+  }));
   ipcMain.handle('scripts:deployUninstall', (_, appConfig) => {
     try { assertObject(appConfig, 'appConfig'); }
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
@@ -295,8 +367,9 @@ app.whenReady().then(() => {
 
       const entries = await fs.promises.readdir(destDir, { withFileTypes: true }).catch(() => []);
       for (const entry of entries) {
-        if (entry.name === tempName) continue;
-        await fs.promises.rm(pathMod.join(destDir, entry.name), { recursive: true, force: true });
+        if (!entry.name.startsWith('.__uploading__')) {
+          await fs.promises.rm(pathMod.join(destDir, entry.name), { recursive: true, force: true });
+        }
       }
 
       await fs.promises.rename(tempPath, destPath);
@@ -368,6 +441,19 @@ app.whenReady().then(() => {
     catch (e) { return { wingetId: '', wingetSource: 'winget', latestVersion: null, name: '', available: false }; }
     return catalogService.resolvePackage(reference);
   });
+  ipcMain.handle('scriptUpdates:getStatus', () => scriptUpdateService.getStatus());
+  ipcMain.handle('updates:getCurrent', () => ({
+    currentVersion: getCurrentAppVersion()
+  }));
+  ipcMain.handle('updates:check', async () => updateService.checkForUpdates(getCurrentAppVersion()));
+  ipcMain.handle('updates:openReleasePage', async () => {
+    try {
+      await shell.openExternal(updateService.RELEASE_PAGE_URL);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
 
   // ─── IPC Handlers: File Service ──────────────────────────────────
   ipcMain.handle('files:listDeployed', () => fileService.listDeployedApps());
@@ -426,7 +512,12 @@ app.whenReady().then(() => {
           publishedAction: 'install',
           publishedAt: new Date().toISOString()
         });
-        activityLog.add('bundle_deploy', { bundleName: bundle.name, version: bundle.version });
+        logSink.addSync('bundle_deploy', {
+          bundleName: bundle.name,
+          version: bundle.version,
+          source: 'bundle',
+          message: `Bundle desplegado: ${bundle.name}`
+        });
       }
       return result;
     } finally {
@@ -453,7 +544,12 @@ app.whenReady().then(() => {
           publishedAction: 'uninstall',
           publishedAt: new Date().toISOString()
         });
-        activityLog.add('bundle_uninstall_prepare', { bundleName: bundle.name, version: bundle.version });
+        logSink.addSync('bundle_uninstall_prepare', {
+          bundleName: bundle.name,
+          version: bundle.version,
+          source: 'bundle',
+          message: `Desinstalacion de bundle preparada: ${bundle.name}`
+        });
       }
       return result;
     } finally {
@@ -481,7 +577,244 @@ app.whenReady().then(() => {
 
   // ─── IPC Handlers: Activity Log ───────────────────────────────────
   ipcMain.handle('activity:getRecent', (_, count) => activityLog.getRecent(count));
-  ipcMain.handle('activity:add', (_, action, details) => activityLog.add(action, details));
+  ipcMain.handle('activity:add', async (_, action, details) => {
+    try { assertString(action, 'action', 128); assertObject(details || {}, 'details'); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    // Allowlist the fields the renderer is permitted to log — prevents
+    // accidental credential leakage from renderer-side app config objects.
+    const allowed = new Set([
+      'message', 'source', 'level', 'severity',
+      'appName', 'bundleName', 'gpoName', 'ouDN', 'version', 'context'
+    ]);
+    const safe = {};
+    for (const k of allowed) {
+      if ((details || {})[k] !== undefined) safe[k] = details[k];
+    }
+    return logSink.add(action, safe);
+  });
+
+  // ─── IPC Handlers: Logging backend (local vs dedicated) ──────────
+  const configShare = require('./services/config-share');
+  const secretStore = require('./services/secret-store');
+  const os = require('os');
+
+  ipcMain.handle('logs:query', async (_, filters) => {
+    try { assertObject(filters || {}, 'filters'); } catch (e) { return { items: [], nextCursor: null, error: 'Invalid arguments' }; }
+    try { return await logSink.query(filters || {}); }
+    catch (err) { return { items: [], nextCursor: null, error: err.message }; }
+  });
+  ipcMain.handle('logs:recent', async (_, count) => {
+    try { return await logSink.getRecent(Number(count) || 10); }
+    catch (err) { return []; }
+  });
+  ipcMain.handle('logs:statsSummary', async (_, win) => {
+    try { return await logSink.statsSummary(typeof win === 'string' ? win : '24h'); }
+    catch (err) { return { error: err.message }; }
+  });
+  ipcMain.handle('logs:equipos', async (_, search) => {
+    try { return await logSink.equipos(typeof search === 'string' ? search : ''); }
+    catch (err) { return []; }
+  });
+  ipcMain.handle('logs:status', async () => {
+    try { return await logSink.status(); }
+    catch (err) { return { mode: 'local', online: true, queueSize: 0, error: err.message }; }
+  });
+  ipcMain.handle('logs:reload', async () => {
+    try { await logSink.reload(); return { success: true }; }
+    catch (err) { return { success: false, error: err.message }; }
+  });
+
+  // Peek the share for a logging-config.json (called on setup).
+  ipcMain.handle('share:detectLoggingConfig', async () => {
+    try {
+      const cfg = configService.getConfig();
+      if (!cfg.networkSharePath) return { present: false };
+      const peek = await configShare.peekSharedConfig(cfg.networkSharePath);
+      if (!peek) return { present: false };
+      const configFingerprint = configShare.fingerprint(peek);
+      const remote = cfg.remoteLogging || {};
+      return {
+        present: true,
+        apiBaseUrl: peek.apiBaseUrl,
+        tlsFingerprint: peek.tlsFingerprint || null,
+        shareId: peek.shareId,
+        issuedAt: peek.issuedAt,
+        signaturePresent: !!peek.signature,
+        configFingerprint,
+        changed: !!(remote.configFingerprint && remote.configFingerprint !== configFingerprint),
+        readonly: true
+      };
+    } catch (err) {
+      return { present: false, error: err.message };
+    }
+  });
+
+  // Consume the share config and enroll this equipo.
+  ipcMain.handle('share:enrollFromConfig', async () => {
+    try {
+      const cfg = configService.getConfig();
+      if (!cfg.networkSharePath) return { success: false, error: 'no_share_path' };
+      const peek = await configShare.peekSharedConfig(cfg.networkSharePath);
+      if (!peek) return { success: false, error: 'no_shared_config' };
+      if (!peek.signature) return { success: false, error: 'shared_config_unsigned' };
+
+      const configFingerprint = configShare.fingerprint(peek);
+      const remote = cfg.remoteLogging || {};
+      if (remote.configFingerprint && remote.configFingerprint !== configFingerprint) {
+        return { success: false, error: 'shared_config_changed' };
+      }
+
+      const enroll = await configShare.enrollWithShare(peek, os.hostname());
+      if (!enroll || !enroll.apiKey) {
+        return { success: false, error: 'enrollment_failed' };
+      }
+
+      if (!secretStore.available()) {
+        return { success: false, error: 'safe_storage_unavailable' };
+      }
+      secretStore.set('ingest_api_key', enroll.apiKey);
+
+      configService.setConfig({
+        logMode: 'dedicated',
+        shareId: peek.shareId,
+        remoteLogging: {
+          apiBaseUrl: peek.apiBaseUrl,
+          tlsFingerprint: peek.tlsFingerprint || null,
+          readonly: true,
+          enrolledAt: new Date().toISOString(),
+          equipoId: enroll.equipoId,
+          configFingerprint,
+          configSignature: peek.signature
+        }
+      });
+      await logSink.reload();
+      await logSink.add('log_backend_enrolled', {
+        apiBaseUrl: peek.apiBaseUrl,
+        equipoId: enroll.equipoId,
+        source: 'logging',
+        message: `Equipo enrolado en servidor dedicado: ${peek.apiBaseUrl}`
+      });
+      return { success: true, equipoId: enroll.equipoId };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Admin helper: publish a signed logging-config.json to the share.
+  ipcMain.handle('share:publishLoggingConfig', async (_, options = {}) => {
+    try {
+      try { assertObject(options || {}, 'options'); }
+      catch { return { success: false, error: 'Invalid arguments' }; }
+
+      let cfg = configService.getConfig();
+      if (!cfg.networkSharePath) return { success: false, error: 'no_share_path' };
+
+      if (!cfg.shareId) {
+        const saved = configService.setConfig({});
+        if (!saved.success) return { success: false, error: saved.error || 'share_id_failed' };
+        cfg = saved.data || configService.getConfig();
+      }
+
+      const remote = cfg.remoteLogging || {};
+      const apiBaseUrl = String(options.apiBaseUrl || remote.apiBaseUrl || '').trim();
+      if (!apiBaseUrl) return { success: false, error: 'no_api_base_url' };
+
+      const admin = require('./services/admin-service');
+      const ttlHours = Number(options.ttlHours) || 720;
+      const usesLeft = Number(options.usesLeft) || 1000;
+      const shareSecret = await admin.createShareSecret(cfg.shareId);
+      const token = await admin.createEnrollmentToken({
+        shareId: cfg.shareId,
+        ttlHours,
+        usesLeft
+      });
+
+      const written = await configShare.writeSharedConfig(cfg.networkSharePath, {
+        apiBaseUrl,
+        enrollmentToken: token.enrollmentToken,
+        shareId: cfg.shareId,
+        tlsFingerprint: options.tlsFingerprint ?? remote.tlsFingerprint ?? null
+      }, shareSecret.secret);
+
+      await logSink.add('log_share_config_published', {
+        source: 'logging',
+        message: `Configuracion de logs publicada en share: ${cfg.shareId}`,
+        shareId: cfg.shareId,
+        apiBaseUrl
+      });
+
+      return {
+        success: true,
+        path: written.path,
+        shareId: cfg.shareId,
+        expiresInHours: token.expiresInHours,
+        usesLeft: token.usesLeft
+      };
+    } catch (err) {
+      return { success: false, error: err.message || String(err) };
+    }
+  });
+
+  // Switch to local mode (reversible). Does not touch the share file.
+  ipcMain.handle('logs:useLocal', async () => {
+    configService.setConfig({ logMode: 'local' });
+    secretStore.delete('ingest_api_key');
+    await logSink.reload();
+    return { success: true };
+  });
+
+  // ─── IPC Handlers: Admin (API key management) ─────────────────────
+  const adminService = require('./services/admin-service');
+
+  function wrapAdmin(fn) {
+    return async (...args) => {
+      try { return { success: true, data: await fn(...args) }; }
+      catch (err) { return { success: false, error: err.message || String(err) }; }
+    };
+  }
+
+  ipcMain.handle('admin:status', () => adminService.status());
+  ipcMain.handle('admin:login', (_, payload) => {
+    try { assertObject(payload, 'payload'); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    return adminService.login(payload);
+  });
+  ipcMain.handle('admin:logout', () => adminService.logout());
+
+  ipcMain.handle('admin:listKeys',           wrapAdmin(() => adminService.listKeys()));
+  ipcMain.handle('admin:createKey',          wrapAdmin((_, p) => adminService.createKey(p)));
+  ipcMain.handle('admin:revokeKey',          wrapAdmin((_, id) => adminService.revokeKey(id)));
+  ipcMain.handle('admin:listShareSecrets',   wrapAdmin(() => adminService.listShareSecrets()));
+  ipcMain.handle('admin:createShareSecret',  wrapAdmin((_, id) => adminService.createShareSecret(id)));
+  ipcMain.handle('admin:listEnrollTokens',   wrapAdmin(() => adminService.listEnrollmentTokens()));
+  ipcMain.handle('admin:createEnrollToken',  wrapAdmin((_, p) => adminService.createEnrollmentToken(p)));
+  ipcMain.handle('admin:provisionIngestKey', wrapAdmin(async (_, name) => {
+    const r = await adminService.provisionIngestKey(name);
+    await logSink.reload();
+    return r;
+  }));
+
+  // ─── IPC Handlers: TLS cert inspection / trust ────────────────────
+  const certTrust = require('./services/cert-trust');
+  ipcMain.handle('cert:inspect', async (_, baseUrl) => {
+    try { assertString(baseUrl, 'baseUrl', 512); }
+    catch { return { success: false, error: 'invalid_arguments' }; }
+    try { return { success: true, data: await certTrust.inspect(baseUrl) }; }
+    catch (err) { return { success: false, error: err.message }; }
+  });
+  ipcMain.handle('cert:trust', async (_, baseUrl) => {
+    try { assertString(baseUrl, 'baseUrl', 512); }
+    catch { return { success: false, error: 'invalid_arguments' }; }
+    try { return { success: true, data: await certTrust.trust(baseUrl) }; }
+    catch (err) { return { success: false, error: err.message }; }
+  });
+
+  // Prime the log sink so queued entries drain on boot. The
+  // sink reads its API key from the encrypted secret store, so
+  // nothing sensitive is handed to the renderer.
+  if (configService.getConfig().logMode === 'dedicated') {
+    logSink.reload().catch(err => console.warn('log-sink init:', err.message));
+  }
 
   // ─── IPC Handlers: Export/Import ──────────────────────────────────
   ipcMain.handle('apps:exportAll', () => appService.exportAll());

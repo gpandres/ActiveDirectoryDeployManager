@@ -4,7 +4,13 @@
 
 const SettingsPage = {
   async render(container) {
-    const config = await window.api.config.get();
+    const [config, updateInfo] = await Promise.all([
+      window.api.config.get(),
+      window.api.updates.getCurrent().catch(() => ({
+        currentVersion: App.updateCheckResult?.currentVersion || '0.0.0'
+      }))
+    ]);
+    this.currentConfig = config;
 
     container.innerHTML = `
       <div class="page-header">
@@ -35,6 +41,15 @@ const SettingsPage = {
         </div>
 
         <div class="form-group">
+          <label class="form-label">${this.tr('settings.uiModeLabel', 'Modo de interfaz')}</label>
+          <select class="form-select" id="cfg-ui-mode">
+            <option value="simple" ${(config.uiMode || 'simple') !== 'advanced' ? 'selected' : ''}>${this.tr('settings.uiModeSimple', 'Sencillo')}</option>
+            <option value="advanced" ${(config.uiMode || '') === 'advanced' ? 'selected' : ''}>${this.tr('settings.uiModeAdvanced', 'Avanzado')}</option>
+          </select>
+          <p class="form-hint">${this.tr('settings.uiModeHint', 'En modo sencillo se ocultan las opciones avanzadas del alta de apps y plantillas.')}</p>
+        </div>
+
+        <div class="form-group">
           <label class="form-label">${t('settings.netShare')}</label>
           <div class="input-with-btn">
             <input class="form-input" id="cfg-share-path" value="${this.esc(config.networkSharePath)}" placeholder="\\\\servidor\\share\\apps">
@@ -43,14 +58,7 @@ const SettingsPage = {
           <p class="form-hint">${t('settings.netShareHint')}</p>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">${t('settings.logs')}</label>
-          <div class="input-with-btn">
-            <input class="form-input" id="cfg-log-dir" value="${this.esc(config.logDirectory)}" placeholder="C:\\ProgramData\\AppDeploy_Logs">
-            <button class="btn btn-secondary" id="btn-browse-log">${t('settings.browse')}</button>
-          </div>
-          <p class="form-hint">${t('settings.logsHint')}</p>
-        </div>
+        
 
         <div class="form-group">
           <label class="form-label">${t('settings.defaultGpo')}</label>
@@ -79,6 +87,16 @@ const SettingsPage = {
           <p class="form-hint" style="margin-top:6px;">${t('settings.baseOuHint')}</p>
           <input type="hidden" id="cfg-base-ou" value="${JSON.stringify(config.baseOUs || (config.baseOU ? [config.baseOU] : [])).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">
         </div>
+      </div>
+
+      
+      <!-- Logs backend -->
+      <div class="settings-section">
+        <div class="settings-section-title">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+          ${t('settings.logsBackendTitle') || 'Sistema de logs'}
+        </div>
+        <div id="settings-logs-block" style="margin-top:12px;"></div>
       </div>
 
       <!-- RSAT Status -->
@@ -137,6 +155,14 @@ const SettingsPage = {
         </div>
       </div>
 
+      <div class="settings-section">
+        <div class="settings-section-title">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+          ${t('updates.sectionTitle')}
+        </div>
+        <div id="settings-app-updates-content" style="margin-top:12px;"></div>
+      </div>
+
       <!-- Save Button -->
       <div class="flex justify-between mt-lg">
         <div></div>
@@ -158,13 +184,438 @@ const SettingsPage = {
       langSelect.appendChild(el);
     });
 
+    this.currentAppVersion = updateInfo?.currentVersion || App.updateCheckResult?.currentVersion || '0.0.0';
     this.bindEvents(config);
+    this.renderUpdateSection(this.currentAppVersion);
     this.loadGPOs(config);
     if (App.rsatAvailable) {
       this.loadOUs(config.baseOUs || (config.baseOU ? [config.baseOU] : []));
     } else {
       document.getElementById('cfg-baseou-tree').innerHTML = `<p style="padding:8px;font-size:13px;color:var(--text-muted);">RSAT requerido para listar OUs</p>`;
     }
+
+    await this._renderLogsBlock(config);
+  },
+
+
+  // ─── Logs / Admin section (lives inside Settings) ─────────────
+
+  async _renderLogsBlock(config) {
+    const block = document.getElementById('settings-logs-block');
+    if (!block) return;
+
+    const remote = config.remoteLogging || {};
+    const adminStatus = await window.api.admin.status();
+
+    block.innerHTML = `
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <label style="flex:1;cursor:pointer;border:1px solid var(--border-color);border-radius:6px;padding:10px;">
+          <input type="radio" name="cfg-logmode" value="local" ${config.logMode === 'local' || !config.logMode ? 'checked' : ''}>
+          <strong style="margin-left:6px;">${t('settings.logModeLocal') || 'Local'}</strong>
+          <p class="form-hint" style="margin:4px 0 0 22px;">${t('settings.logModeLocalHint') || 'Logs en este equipo.'}</p>
+        </label>
+        <label style="flex:1;cursor:pointer;border:1px solid var(--border-color);border-radius:6px;padding:10px;">
+          <input type="radio" name="cfg-logmode" value="dedicated" ${config.logMode === 'dedicated' ? 'checked' : ''}>
+          <strong style="margin-left:6px;">${t('settings.logModeDedicated') || 'Servidor dedicado'}</strong>
+          <p class="form-hint" style="margin:4px 0 0 22px;">${t('settings.logModeDedicatedHint') || 'API HTTPS centralizada.'}</p>
+        </label>
+      </div>
+
+      <div id="cfg-local-block" style="display:${config.logMode !== 'dedicated' ? 'block' : 'none'};padding:12px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-secondary);margin-bottom:12px;">
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label">${t('settings.logsLocalPath') || 'Carpeta de logs locales'}</label>
+          <div class="input-with-btn">
+            <input class="form-input" id="cfg-log-dir" value="${this.esc(config.logDirectory || '')}" placeholder="C:\\ProgramData\\AppDeploy_Logs">
+            <button class="btn btn-secondary" id="btn-browse-log" type="button">${t('settings.browse') || 'Examinar'}</button>
+          </div>
+          <p class="form-hint">${t('settings.logsLocalPathHint') || 'Vacío = carpeta de usuario por defecto.'}</p>
+        </div>
+      </div>
+
+      <div id="cfg-dedicated-block" style="display:${config.logMode === 'dedicated' ? 'block' : 'none'};padding:12px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-secondary);margin-bottom:12px;">
+        <div class="form-group" style="margin-bottom:10px;">
+          <label class="form-label">${t('settings.dedBaseUrl') || 'URL del servidor'}</label>
+          <input class="form-input" id="cfg-ded-baseurl" placeholder="https://logs.example.local" value="${this.esc(remote.apiBaseUrl || '')}">
+        </div>
+        <div class="form-group" style="margin-bottom:10px;">
+          <label class="form-label">${t('settings.dedTlsFp') || 'TLS Fingerprint (opcional)'}</label>
+          <input class="form-input" id="cfg-ded-tlsfp" placeholder="sha256//..." value="${this.esc(remote.tlsFingerprint || '')}">
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+          <button class="btn btn-secondary btn-sm" id="cfg-btn-inspect" type="button">${t('settings.inspectCert') || 'Obtener Fingerprint (Certificado)'}</button>
+          <button class="btn btn-secondary btn-sm" id="cfg-btn-save-ded" type="button">${t('settings.saveDedConfig') || 'Guardar URL/Fingerprint'}</button>
+        </div>
+        <p class="form-hint" style="margin-top:-6px;margin-bottom:10px;">No es necesario instalar el certificado en el sistema. Al obtener y guardar el fingerprint, la aplicación confiará de forma segura y exclusiva en este servidor.</p>
+        <div id="cfg-cert-status" style="display:none;font-size:12px;margin-bottom:10px;"></div>
+
+        <hr style="border:none;border-top:1px solid var(--border-color);margin:12px 0;">
+
+        <div id="cfg-admin-block">
+          ${adminStatus.loggedIn
+            ? this._adminLoggedInHtml(adminStatus)
+            : this._adminLoginHtml(remote)}
+        </div>
+      </div>
+    `;
+
+    this._bindLogsBlockEvents();
+    if (adminStatus.loggedIn) await this._loadAdminTables();
+  },
+
+  _adminLoginHtml() {
+    return `
+      <div class="form-group" style="margin-bottom:10px;">
+        <label class="form-label">${t('settings.adminApiKey') || 'Admin API Key'}</label>
+        <input class="form-input" id="cfg-admin-key" type="password" autocomplete="off" placeholder="••••••••">
+        <p class="form-hint">${t('settings.adminApiKeyHint') || 'Necesaria para gestionar claves desde aquí.'}</p>
+      </div>
+      <div id="cfg-admin-error" style="display:none;margin-bottom:8px;padding:8px;border-radius:4px;background:rgba(239,68,68,0.1);color:#ef4444;font-size:12px;"></div>
+      <button class="btn btn-primary btn-sm" id="cfg-btn-admin-login">${t('settings.adminLogin') || 'Conectar admin'}</button>
+    `;
+  },
+
+  _adminLoggedInHtml(st) {
+    return `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <span style="font-size:13px;color:var(--text-secondary);">
+          <span style="color:var(--accent-secondary)">●</span>
+          ${t('settings.adminConnected') || 'Admin conectado'} — ${this.esc(st.baseUrl || '')}
+        </span>
+        <button class="btn btn-secondary btn-sm" id="cfg-btn-admin-logout">${t('settings.adminLogout') || 'Salir'}</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+        <button class="btn btn-secondary btn-sm" id="cfg-btn-publish-share-log">
+          ${t('settings.publishShareLogConfig') || 'Publicar config en share'}
+        </button>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <strong style="font-size:13px;">API Keys</strong>
+          <button class="btn btn-secondary btn-sm" id="cfg-btn-new-key">Nueva API Key</button>
+        </div>
+        <div id="cfg-keys-table"><div class="spinner" style="width:14px;height:14px;border-width:2px;margin:4px 0;"></div></div>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <strong style="font-size:13px;">Share Secrets</strong>
+          <button class="btn btn-secondary btn-sm" id="cfg-btn-new-secret">Nuevo Share Secret</button>
+        </div>
+        <div id="cfg-secrets-table"><div class="spinner" style="width:14px;height:14px;border-width:2px;margin:4px 0;"></div></div>
+      </div>
+
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <strong style="font-size:13px;">Enrollment Tokens</strong>
+          <button class="btn btn-secondary btn-sm" id="cfg-btn-new-token">Nuevo Token</button>
+        </div>
+        <div id="cfg-tokens-table"><div class="spinner" style="width:14px;height:14px;border-width:2px;margin:4px 0;"></div></div>
+      </div>
+    `;
+  },
+
+  _bindLogsBlockEvents() {
+    document.querySelectorAll('input[name="cfg-logmode"]').forEach(rad => {
+      rad.addEventListener('change', async (e) => {
+        const val = e.target.value;
+        const cur = await window.api.config.get();
+        await window.api.config.set({ logMode: val });
+        await window.api.logs.reload();
+        await this._renderLogsBlock({ ...cur, logMode: val });
+        App.toast(t('settings.saved'), 'success');
+      });
+    });
+
+    document.getElementById('cfg-btn-inspect')?.addEventListener('click', async () => {
+      const baseUrl = document.getElementById('cfg-ded-baseurl').value.trim();
+      if (!baseUrl) return App.toast(t('settings.urlRequired') || 'URL requerida', 'warning');
+      const st = document.getElementById('cfg-cert-status');
+      st.style.display = 'block';
+      st.textContent = t('settings.inspecting') || 'Inspeccionando...';
+      st.style.color = 'var(--text-muted)';
+      const r = await window.api.cert.inspect(baseUrl);
+      if (!r.success) {
+        st.textContent = r.error;
+        st.style.color = '#ef4444';
+        return;
+      }
+      const i = r.data;
+      document.getElementById('cfg-ded-tlsfp').value = i.fingerprint || '';
+      st.innerHTML = `
+        <div style="color:var(--text-primary);">
+          <strong>Sujeto:</strong> ${this.esc(i.subject)}<br>
+          <strong>Emisor:</strong> ${this.esc(i.issuer)}<br>
+          <strong>Validez:</strong> ${new Date(i.validFrom).toLocaleDateString()} al ${new Date(i.validTo).toLocaleDateString()}<br>
+          <strong style="color:var(--accent-secondary)">Fingerprint SHA-256 extraído correctamente.</strong>
+        </div>
+      `;
+    });
+
+    document.getElementById('cfg-btn-save-ded')?.addEventListener('click', async () => {
+      const baseUrl = document.getElementById('cfg-ded-baseurl').value.trim();
+      const tlsFp   = document.getElementById('cfg-ded-tlsfp').value.trim() || null;
+      if (!baseUrl) return App.toast(t('settings.urlRequired') || 'URL requerida', 'warning');
+      const cur = await window.api.config.get();
+      await window.api.config.set({
+        logMode: 'dedicated',
+        remoteLogging: { ...(cur.remoteLogging || {}), apiBaseUrl: baseUrl, tlsFingerprint: tlsFp }
+      });
+      await window.api.logs.reload();
+      App.toast(t('settings.saved'), 'success');
+    });
+
+    document.getElementById('btn-browse-log')?.addEventListener('click', async () => {
+      const path = await window.api.config.selectFolder();
+      if (path) document.getElementById('cfg-log-dir').value = path;
+    });
+
+    document.getElementById('cfg-btn-admin-login')?.addEventListener('click', () => this._doAdminLogin());
+    document.getElementById('cfg-btn-admin-logout')?.addEventListener('click', () => this._doAdminLogout());
+    document.getElementById('cfg-btn-new-key')?.addEventListener('click', () => this._modalNewKey());
+    document.getElementById('cfg-btn-new-secret')?.addEventListener('click', () => this._modalNewSecret());
+    document.getElementById('cfg-btn-new-token')?.addEventListener('click', () => this._modalNewToken());
+    document.getElementById('cfg-btn-publish-share-log')?.addEventListener('click', () => this._publishShareLoggingConfig());
+  },
+
+  async _doAdminLogin() {
+    const baseUrl = document.getElementById('cfg-ded-baseurl').value.trim();
+    const apiKey  = document.getElementById('cfg-admin-key').value.trim();
+    const tlsFp   = document.getElementById('cfg-ded-tlsfp').value.trim() || null;
+    const err = document.getElementById('cfg-admin-error');
+    err.style.display = 'none';
+
+    if (!baseUrl || !apiKey) {
+      err.textContent = t('settings.adminLoginMissing') || 'URL y clave requeridas';
+      err.style.display = 'block';
+      return;
+    }
+
+    const r = await window.api.admin.login({ baseUrl, apiKey, tlsFingerprint: tlsFp });
+    if (!r.success) {
+      err.textContent = r.error;
+      err.style.display = 'block';
+      return;
+    }
+
+    // Save dedicated config alongside admin login so the sink can use it.
+    const cur = await window.api.config.get();
+    await window.api.config.set({
+      logMode: 'dedicated',
+      remoteLogging: { ...(cur.remoteLogging || {}), apiBaseUrl: baseUrl, tlsFingerprint: tlsFp }
+    });
+
+    // Auto-provision an ingest key so this workstation can ship logs.
+    const prov = await window.api.admin.provisionIngestKey();
+    if (!prov.success) {
+      App.toast(`${t('settings.ingestProvisionFailed') || 'No se pudo provisionar la clave de ingesta'}: ${prov.error}`, 'warning');
+    } else {
+      App.toast(t('settings.ingestProvisioned') || 'Clave de ingesta creada', 'success');
+    }
+
+    await window.api.logs.reload();
+    const cfg2 = await window.api.config.get();
+    await this._renderLogsBlock(cfg2);
+  },
+
+  async _doAdminLogout() {
+    await window.api.admin.logout();
+    const cfg = await window.api.config.get();
+    await this._renderLogsBlock(cfg);
+  },
+
+  async _publishShareLoggingConfig() {
+    const baseUrl = document.getElementById('cfg-ded-baseurl')?.value.trim() || '';
+    const tlsFingerprint = document.getElementById('cfg-ded-tlsfp')?.value.trim() || null;
+    if (!baseUrl) return App.toast(t('settings.urlRequired') || 'URL requerida', 'warning');
+    const result = await window.api.share.publishLoggingConfig({
+      apiBaseUrl: baseUrl,
+      tlsFingerprint,
+      ttlHours: 720,
+      usesLeft: 1000
+    });
+    if (!result.success) {
+      App.toast(`${t('common.error') || 'Error'}: ${result.error}`, 'error');
+      return;
+    }
+    App.toast(
+      `${t('settings.shareLogConfigPublished') || 'Configuracion publicada'}: ${result.path}`,
+      'success'
+    );
+    await this._loadTokensTable();
+    await this._loadSecretsTable();
+  },
+
+  async _loadAdminTables() {
+    await Promise.all([this._loadKeysTable(), this._loadSecretsTable(), this._loadTokensTable()]);
+  },
+
+  async _loadKeysTable() {
+    const r = await window.api.admin.listKeys();
+    const el = document.getElementById('cfg-keys-table');
+    if (!el) return;
+    if (!r.success) { el.innerHTML = `<div class="logs-muted">${this.esc(r.error)}</div>`; return; }
+    const rows = r.data || [];
+    if (!rows.length) { el.innerHTML = `<div class="logs-muted">${t('settings.empty') || 'Sin entradas'}</div>`; return; }
+    el.innerHTML = `
+      <table class="logs-table">
+        <thead><tr>
+          <th>${t('settings.colName') || 'Nombre'}</th>
+          <th style="width:80px;">${t('settings.colScope') || 'Scope'}</th>
+          <th style="width:140px;">${t('settings.colCreated') || 'Creada'}</th>
+          <th style="width:140px;">${t('settings.colLastUsed') || 'Último uso'}</th>
+          <th style="width:80px;">${t('settings.colState') || 'Estado'}</th>
+          <th style="width:90px;"></th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(k => `
+            <tr>
+              <td>${this.esc(k.name)}</td>
+              <td><span class="level-pill level-${k.scope === 'admin' ? 'error' : k.scope === 'read' ? 'info' : 'warn'}">${k.scope}</span></td>
+              <td class="mono">${this._fmtTs(k.createdAt)}</td>
+              <td class="mono">${this._fmtTs(k.lastUsed)}</td>
+              <td>${k.revokedAt ? `<span class="logs-muted">${t('settings.revoked') || 'revocada'}</span>` : `<span style="color:var(--accent-secondary)">●</span>`}</td>
+              <td>${!k.revokedAt ? `<button class="btn btn-secondary btn-sm" data-revoke="${k.id}">${t('settings.revoke') || 'Revocar'}</button>` : ''}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+    el.querySelectorAll('[data-revoke]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm(t('settings.confirmRevoke') || '¿Revocar?')) return;
+        const r = await window.api.admin.revokeKey(btn.dataset.revoke);
+        if (!r.success) App.toast(r.error, 'error');
+        await this._loadKeysTable();
+      });
+    });
+  },
+
+  async _loadSecretsTable() {
+    const r = await window.api.admin.listShareSecrets();
+    const el = document.getElementById('cfg-secrets-table');
+    if (!el) return;
+    if (!r.success) { el.innerHTML = `<div class="logs-muted">${this.esc(r.error)}</div>`; return; }
+    const rows = r.data || [];
+    if (!rows.length) { el.innerHTML = `<div class="logs-muted">${t('settings.empty') || 'Sin entradas'}</div>`; return; }
+    el.innerHTML = `
+      <table class="logs-table">
+        <thead><tr><th>shareId</th><th style="width:140px;">${t('settings.colCreated') || 'Creada'}</th></tr></thead>
+        <tbody>${rows.map(s => `<tr><td class="mono">${this.esc(s.shareId)}</td><td class="mono">${this._fmtTs(s.createdAt)}</td></tr>`).join('')}</tbody>
+      </table>
+    `;
+  },
+
+  async _loadTokensTable() {
+    const r = await window.api.admin.listEnrollTokens();
+    const el = document.getElementById('cfg-tokens-table');
+    if (!el) return;
+    if (!r.success) { el.innerHTML = `<div class="logs-muted">${this.esc(r.error)}</div>`; return; }
+    const rows = r.data || [];
+    if (!rows.length) { el.innerHTML = `<div class="logs-muted">${t('settings.empty') || 'Sin entradas'}</div>`; return; }
+    el.innerHTML = `
+      <table class="logs-table">
+        <thead><tr><th>shareId</th><th style="width:60px;">${t('settings.colUses') || 'Usos'}</th><th style="width:140px;">${t('settings.colExpires') || 'Expira'}</th></tr></thead>
+        <tbody>${rows.map(o => `<tr><td class="mono">${this.esc(o.shareId)}</td><td class="mono">${o.usesLeft}</td><td class="mono">${this._fmtTs(o.expiresAt)}</td></tr>`).join('')}</tbody>
+      </table>
+    `;
+  },
+
+  _modalFooter(idCreate) {
+    return `
+      <button class="btn btn-secondary" id="modal-close-btn">${t('common.close') || 'Cerrar'}</button>
+      <button class="btn btn-primary" id="${idCreate}">${t('settings.create') || 'Crear'}</button>
+    `;
+  },
+  _wireModalClose() {
+    document.getElementById('modal-close-btn')?.addEventListener('click', () => App.closeModal());
+    const x = document.getElementById('modal-close');
+    if (x) x.onclick = () => App.closeModal();
+  },
+  _resultBlock(id) {
+    return `
+      <div id="modal-result" style="display:none;margin-top:12px;padding:10px;border-radius:6px;background:var(--bg-secondary);">
+        <p class="form-hint">${t('settings.copyOnce') || 'Cópialo ahora — no se volverá a mostrar'}</p>
+        <code id="${id}" style="display:block;padding:8px;background:rgba(0,0,0,0.25);border-radius:4px;word-break:break-all;font-family:ui-monospace,monospace;font-size:12px;"></code>
+      </div>
+    `;
+  },
+
+  _modalNewKey() {
+    const body = `
+      <div class="form-group"><label class="form-label">${t('settings.colName') || 'Nombre'}</label>
+        <input class="form-input" id="modal-name" placeholder="dashboard-read"></div>
+      <div class="form-group"><label class="form-label">${t('settings.colScope') || 'Scope'}</label>
+        <select class="form-select" id="modal-scope">
+          <option value="read">read</option><option value="ingest">ingest</option><option value="admin">admin</option>
+        </select></div>
+      ${this._resultBlock('modal-newkey')}
+    `;
+    App.openModal(t('settings.newKey') || 'Nueva API Key', body, this._modalFooter('modal-create-key'));
+    this._wireModalClose();
+    document.getElementById('modal-create-key').addEventListener('click', async () => {
+      const name = document.getElementById('modal-name').value.trim();
+      const scope = document.getElementById('modal-scope').value;
+      if (!name) return App.toast(t('settings.nameRequired') || 'Nombre requerido', 'warning');
+      const r = await window.api.admin.createKey({ name, scope });
+      if (!r.success) return App.toast(r.error, 'error');
+      document.getElementById('modal-result').style.display = 'block';
+      document.getElementById('modal-newkey').textContent = r.data.apiKey;
+      await this._loadKeysTable();
+    });
+  },
+
+  _modalNewSecret() {
+    const body = `
+      <div class="form-group"><label class="form-label">shareId</label>
+        <input class="form-input" id="modal-shareid" placeholder="ABC12345"></div>
+      ${this._resultBlock('modal-newsecret')}
+    `;
+    App.openModal(t('settings.newShareSecret') || 'Nuevo share secret', body, this._modalFooter('modal-create-secret'));
+    this._wireModalClose();
+    document.getElementById('modal-create-secret').addEventListener('click', async () => {
+      const id = document.getElementById('modal-shareid').value.trim();
+      if (!id) return;
+      const r = await window.api.admin.createShareSecret(id);
+      if (!r.success) return App.toast(r.error, 'error');
+      document.getElementById('modal-result').style.display = 'block';
+      document.getElementById('modal-newsecret').textContent = r.data.secret;
+      await this._loadSecretsTable();
+    });
+  },
+
+  _modalNewToken() {
+    const body = `
+      <div class="form-group"><label class="form-label">shareId</label>
+        <input class="form-input" id="modal-shareid" placeholder="ABC12345"></div>
+      <div class="form-group"><label class="form-label">${t('settings.ttlHours') || 'TTL (horas)'}</label>
+        <input class="form-input" id="modal-ttl" type="number" value="720" min="1" max="720"></div>
+      <div class="form-group"><label class="form-label">${t('settings.uses') || 'Usos máximos'}</label>
+        <input class="form-input" id="modal-uses" type="number" value="1000" min="1" max="10000"></div>
+      ${this._resultBlock('modal-newtoken')}
+    `;
+    App.openModal(t('settings.newEnrollToken') || 'Nuevo enrollment token', body, this._modalFooter('modal-create-token'));
+    this._wireModalClose();
+    document.getElementById('modal-create-token').addEventListener('click', async () => {
+      const shareId = document.getElementById('modal-shareid').value.trim();
+      const ttlHours = Number(document.getElementById('modal-ttl').value) || 24;
+      const usesLeft = Number(document.getElementById('modal-uses').value) || 1000;
+      if (!shareId) return;
+      const r = await window.api.admin.createEnrollToken({ shareId, ttlHours, usesLeft });
+      if (!r.success) return App.toast(r.error, 'error');
+      document.getElementById('modal-result').style.display = 'block';
+      document.getElementById('modal-newtoken').textContent = r.data.enrollmentToken;
+      await this._loadTokensTable();
+    });
+  },
+
+  _fmtTs(ts) {
+    if (!ts) return '—';
+    try {
+      const d = new Date(ts);
+      const pad = x => String(x).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    } catch { return String(ts); }
   },
 
   bindEvents(config) {
@@ -173,12 +624,7 @@ const SettingsPage = {
       if (path) document.getElementById('cfg-share-path').value = path;
     });
 
-    document.getElementById('btn-browse-log').addEventListener('click', async () => {
-      const path = await window.api.config.selectFolder();
-      if (path) document.getElementById('cfg-log-dir').value = path;
-    });
-
-    document.getElementById('btn-save-config').addEventListener('click', () => this.save());
+document.getElementById('btn-save-config').addEventListener('click', () => this.save());
 
     document.getElementById('btn-check-rsat').addEventListener('click', async () => {
       await App.checkRSAT();
@@ -263,7 +709,8 @@ const SettingsPage = {
       defaultGPO: document.getElementById('cfg-default-gpo').value,
       preferredDC: document.getElementById('cfg-preferred-dc').value.trim(),
       baseOUs: this.getSelectedDNs(),
-      language: document.getElementById('cfg-language').value
+      language: document.getElementById('cfg-language').value,
+      uiMode: document.getElementById('cfg-ui-mode').value
     };
 
     if (!data.networkSharePath) {
@@ -276,6 +723,7 @@ const SettingsPage = {
 
     const result = await window.api.config.set(data);
     if (result.success) {
+      this.currentConfig = result.data || { ...currentConfig, ...data };
       if (isLangChanged) {
         await window.initI18n(); // Reload the dictionary immediately 
         App.updateSidebarLanguage();
@@ -289,10 +737,139 @@ const SettingsPage = {
     }
   },
 
+  renderUpdateSection(currentVersion = this.currentAppVersion, result = App.updateCheckResult, isChecking = App.isCheckingAppUpdates()) {
+    const container = document.getElementById('settings-app-updates-content');
+    if (!container) return;
+
+    container.innerHTML = this.getUpdateSectionHTML(currentVersion, result, isChecking);
+    this.bindUpdateActions();
+  },
+
+  bindUpdateActions() {
+    document.getElementById('btn-check-app-updates')?.addEventListener('click', async () => {
+      this.renderUpdateSection(this.currentAppVersion, App.updateCheckResult, true);
+      const result = await App.checkAppUpdates({ force: true });
+      this.currentAppVersion = result?.currentVersion || this.currentAppVersion || '0.0.0';
+      this.renderUpdateSection(this.currentAppVersion, result, false);
+    });
+
+    document.getElementById('btn-open-app-release')?.addEventListener('click', async () => {
+      await App.openLatestReleasePage();
+    });
+
+    document.getElementById('btn-reset-app-update-reminder')?.addEventListener('click', async () => {
+      const button = document.getElementById('btn-reset-app-update-reminder');
+      if (button) button.disabled = true;
+
+      try {
+        await App.clearDismissedAppUpdateVersion();
+        this.currentConfig = { ...(this.currentConfig || {}), dismissedAppUpdateVersion: '' };
+        this.renderUpdateSection(this.currentAppVersion, App.updateCheckResult, App.isCheckingAppUpdates());
+        App.updateAppUpdateBanner();
+        App.toast(t('updates.reminderRestoredToast'), 'success');
+      } catch (err) {
+        if (button) button.disabled = false;
+        App.toast(`${t('common.error')}: ${err?.message || t('updates.reminderSaveFailed')}`, 'error');
+      }
+    });
+  },
+
+  getUpdateSectionHTML(currentVersion, result, isChecking) {
+    const safeCurrentVersion = this.esc(currentVersion || result?.currentVersion || '0.0.0');
+    const safeLatestVersion = this.esc(result?.latestVersion || '');
+    const safeReleaseName = this.esc(result?.releaseName || result?.tagName || '');
+    const checkedAt = result?.checkedAt ? App.formatDate(result.checkedAt) : '—';
+    const publishedAt = result?.publishedAt ? App.formatDate(result.publishedAt) : '—';
+
+    const reminderMuted = App.isUpdateReminderDismissedPersistently(result);
+    let statusText = t('updates.statusUnknown');
+    let statusColor = 'var(--text-secondary)';
+    if (isChecking) {
+      statusText = t('updates.statusChecking');
+      statusColor = 'var(--accent-primary)';
+    } else if (result?.success && result?.hasUpdate) {
+      statusText = t('updates.statusAvailable').replace('{version}', result.latestVersion || '?');
+      statusColor = 'var(--accent-warning)';
+    } else if (result?.success) {
+      statusText = t('updates.statusUpToDate');
+      statusColor = 'var(--accent-secondary)';
+    } else if (result?.error) {
+      statusText = t('updates.statusError');
+      statusColor = 'var(--accent-danger)';
+    }
+
+    return `
+      <div style="display:grid;gap:14px;">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;">
+          <span style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,0.04);border:1px solid var(--border-color);font-size:12px;">
+            <strong style="color:var(--text-secondary);">${t('updates.currentVersion')}:</strong>
+            <span style="color:var(--text-primary);">v${safeCurrentVersion}</span>
+          </span>
+          <span style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,0.04);border:1px solid var(--border-color);font-size:12px;">
+            <strong style="color:var(--text-secondary);">${t('updates.latestVersion')}:</strong>
+            <span style="color:var(--text-primary);">${safeLatestVersion ? `v${safeLatestVersion}` : '—'}</span>
+          </span>
+          <span style="font-size:13px;font-weight:700;color:${statusColor};">${this.esc(statusText)}</span>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
+          <div style="padding:12px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-secondary);">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">${t('updates.releaseLabel')}</div>
+            <div style="font-weight:600;color:var(--text-primary);">${safeReleaseName || '—'}</div>
+          </div>
+          <div style="padding:12px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-secondary);">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">${t('updates.checkedAt')}</div>
+            <div style="font-weight:600;color:var(--text-primary);">${this.esc(checkedAt)}</div>
+          </div>
+          <div style="padding:12px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-secondary);">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">${t('updates.publishedAt')}</div>
+            <div style="font-weight:600;color:var(--text-primary);">${this.esc(publishedAt)}</div>
+          </div>
+        </div>
+
+        ${result?.error ? `
+          <div style="padding:12px;border-radius:10px;border:1px solid rgba(239,68,68,0.35);background:rgba(239,68,68,0.08);color:var(--text-primary);font-size:13px;">
+            <strong style="display:block;color:var(--accent-danger);margin-bottom:4px;">${t('updates.errorLabel')}</strong>
+            ${this.esc(result.error)}
+          </div>
+        ` : ''}
+
+        ${reminderMuted ? `
+          <div style="padding:12px;border-radius:10px;border:1px solid rgba(245,158,11,0.35);background:rgba(245,158,11,0.08);color:var(--text-primary);font-size:13px;">
+            <strong style="display:block;color:var(--accent-warning);margin-bottom:4px;">${t('updates.reminderMutedLabel')}</strong>
+            ${t('updates.reminderMutedMessage').replace('{version}', safeLatestVersion ? `v${safeLatestVersion}` : '?')}
+          </div>
+        ` : ''}
+
+        <div class="flex gap-sm" style="flex-wrap:wrap;">
+          <button class="btn btn-secondary" id="btn-check-app-updates" ${isChecking ? 'disabled' : ''}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            ${isChecking ? t('updates.statusChecking') : t('updates.checkNow')}
+          </button>
+          <button class="btn btn-secondary" id="btn-open-app-release">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3h7v7"/><path d="M10 14L21 3"/><path d="M21 14v7h-7"/><path d="M3 10V3h7"/><path d="M3 21l11-11"/></svg>
+            ${t('updates.openRelease')}
+          </button>
+          ${reminderMuted ? `
+            <button class="btn btn-secondary" id="btn-reset-app-update-reminder">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.71"/><path d="M3 3v6h6"/></svg>
+              ${t('updates.enableReminder')}
+            </button>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  },
+
   esc(str) {
     const div = document.createElement('div');
     div.textContent = str || '';
     return div.innerHTML;
+  },
+
+  tr(key, fallback) {
+    const value = t(key);
+    return value === key ? fallback : value;
   },
 
   getSelectedDNs() {

@@ -11,7 +11,42 @@ contextBridge.exposeInMainWorld('api', {
   // Share Health
   share: {
     checkHealth: () => ipcRenderer.invoke('share:checkHealth'),
-    getStatus: () => ipcRenderer.invoke('share:getStatus')
+    getStatus: () => ipcRenderer.invoke('share:getStatus'),
+    detectLoggingConfig: () => ipcRenderer.invoke('share:detectLoggingConfig'),
+    enrollFromConfig: () => ipcRenderer.invoke('share:enrollFromConfig'),
+    publishLoggingConfig: (options) => ipcRenderer.invoke('share:publishLoggingConfig', options)
+  },
+
+  // Logging backend (local vs dedicated)
+  logs: {
+    query: (filters) => ipcRenderer.invoke('logs:query', filters),
+    recent: (count) => ipcRenderer.invoke('logs:recent', count),
+    statsSummary: (win) => ipcRenderer.invoke('logs:statsSummary', win),
+    equipos: (search) => ipcRenderer.invoke('logs:equipos', search),
+    status: () => ipcRenderer.invoke('logs:status'),
+    reload: () => ipcRenderer.invoke('logs:reload'),
+    useLocal: () => ipcRenderer.invoke('logs:useLocal')
+  },
+
+  // TLS cert inspection / install into Windows user trust store
+  cert: {
+    inspect: (baseUrl) => ipcRenderer.invoke('cert:inspect', baseUrl),
+    trust:   (baseUrl) => ipcRenderer.invoke('cert:trust',   baseUrl)
+  },
+
+  // Admin API (key/token/share-secret management)
+  admin: {
+    status: () => ipcRenderer.invoke('admin:status'),
+    login:  (payload) => ipcRenderer.invoke('admin:login', payload),
+    logout: () => ipcRenderer.invoke('admin:logout'),
+    listKeys:           () => ipcRenderer.invoke('admin:listKeys'),
+    createKey:          (p) => ipcRenderer.invoke('admin:createKey', p),
+    revokeKey:          (id) => ipcRenderer.invoke('admin:revokeKey', id),
+    listShareSecrets:   () => ipcRenderer.invoke('admin:listShareSecrets'),
+    createShareSecret:  (id) => ipcRenderer.invoke('admin:createShareSecret', id),
+    listEnrollTokens:   () => ipcRenderer.invoke('admin:listEnrollTokens'),
+    createEnrollToken:  (p) => ipcRenderer.invoke('admin:createEnrollToken', p),
+    provisionIngestKey: (name) => ipcRenderer.invoke('admin:provisionIngestKey', name)
   },
 
   // Config
@@ -35,7 +70,8 @@ contextBridge.exposeInMainWorld('api', {
     unlinkGPOfromOU: (gpoName, ouDN) => ipcRenderer.invoke('ad:unlinkGPOfromOU', gpoName, ouDN),
     removeGPOStartupScript: (gpoName) => ipcRenderer.invoke('ad:removeGPOStartupScript', gpoName),
     checkGPOConflicts: (ouDN) => ipcRenderer.invoke('ad:checkGPOConflicts', ouDN),
-    checkGPOExists: (gpoName) => ipcRenderer.invoke('ad:checkGPOExists', gpoName)
+    checkGPOExists: (gpoName) => ipcRenderer.invoke('ad:checkGPOExists', gpoName),
+    getManagedGPOLinks: (gpoNames, ouDNs = []) => ipcRenderer.invoke('ad:getManagedGPOLinks', gpoNames, ouDNs)
   },
 
   // Apps
@@ -46,7 +82,8 @@ contextBridge.exposeInMainWorld('api', {
     update: (id, data) => ipcRenderer.invoke('apps:update', id, data),
     delete: (id, deleteFiles) => ipcRenderer.invoke('apps:delete', id, deleteFiles),
     bulkAssignGPO: (ids, gpoName) => ipcRenderer.invoke('apps:bulkAssignGPO', ids, gpoName),
-    applyAssignmentPlan: (plan) => ipcRenderer.invoke('apps:applyAssignmentPlan', plan),
+    applyAssignmentPlan: (plan, allVisibleOUs = []) => ipcRenderer.invoke('apps:applyAssignmentPlan', plan, allVisibleOUs),
+    reconcileManagedAssignments: (ouDNs = []) => ipcRenderer.invoke('apps:reconcileManagedAssignments', ouDNs),
     getInstallerVersion: (filePath) => ipcRenderer.invoke('apps:getInstallerVersion', filePath),
     computeHash: (filePath) => ipcRenderer.invoke('apps:computeHash', filePath)
   },
@@ -55,9 +92,14 @@ contextBridge.exposeInMainWorld('api', {
   scripts: {
     generate: (appConfig) => ipcRenderer.invoke('scripts:generate', appConfig),
     deploy: (appConfig) => ipcRenderer.invoke('scripts:deploy', appConfig),
+    regenerate: (appConfig) => ipcRenderer.invoke('scripts:regenerate', appConfig),
     generateUninstall: (appConfig) => ipcRenderer.invoke('scripts:generateUninstall', appConfig),
     deployUninstall: (appConfig) => ipcRenderer.invoke('scripts:deployUninstall', appConfig),
     getTemplates: () => ipcRenderer.invoke('scripts:getTemplates')
+  },
+
+  scriptUpdates: {
+    getStatus: () => ipcRenderer.invoke('scriptUpdates:getStatus')
   },
 
   templates: {
@@ -106,6 +148,12 @@ contextBridge.exposeInMainWorld('api', {
   i18n: {
     getAvailable: () => ipcRenderer.invoke('i18n:getAvailable'),
     getTranslations: (langCode) => ipcRenderer.invoke('i18n:getTranslations', langCode)
+  },
+
+  updates: {
+    getCurrent: () => ipcRenderer.invoke('updates:getCurrent'),
+    check: () => ipcRenderer.invoke('updates:check'),
+    openReleasePage: () => ipcRenderer.invoke('updates:openReleasePage')
   },
 
   // Winget catalog + version checking (legacy, used by apps.js wizard)

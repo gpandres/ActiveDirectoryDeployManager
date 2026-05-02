@@ -55,7 +55,7 @@ const DeploymentsPage = {
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
             <div>
               <strong>${t('deployments.accessError')}</strong>
-              <p class="mt-sm">${result.error}</p>
+              <p class="mt-sm">${this.esc(result.error)}</p>
               <p class="mt-sm text-muted">${t('deployments.pathConfigured')}: <code>${this.esc(config.networkSharePath)}</code></p>
               <p class="mt-sm"><a href="#" onclick="App.navigate('settings')" style="color:var(--accent-primary)">${t('deployments.changePath')} →</a></p>
             </div>
@@ -135,12 +135,12 @@ const DeploymentsPage = {
                     <td style="text-align:right;">
                       <div style="display:flex;gap:4px;justify-content:flex-end;">
                         ${hash ? `
-                          <button class="btn btn-ghost btn-sm" onclick="DeploymentsPage.showDetails('${this.esc(app.name)}', '${this.esc(version || '')}', '${this.esc(hash)}', '${this.esc(app.deployedAt || '')}')">
+                          <button class="btn btn-ghost btn-sm" onclick="DeploymentsPage.showDetails('${this.jsArg(app.name)}', '${this.jsArg(version || '')}', '${this.jsArg(hash)}', '${this.jsArg(app.deployedAt || '')}')">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                             ${t('deployments.seeMore')}
                           </button>
                         ` : ''}
-                        <button class="btn btn-ghost btn-sm" onclick="DeploymentsPage.showFiles('${this.esc(app.name)}')">
+                        <button class="btn btn-ghost btn-sm" onclick="DeploymentsPage.showFiles('${this.jsArg(app.name)}')">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                           ${t('deployments.files')}
                         </button>
@@ -158,7 +158,7 @@ const DeploymentsPage = {
       container.innerHTML = `
         <div class="rsat-warning">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-          <div><strong>Error</strong><p class="mt-sm">${err.message}</p></div>
+          <div><strong>Error</strong><p class="mt-sm">${this.esc(err.message)}</p></div>
         </div>`;
     }
   },
@@ -258,5 +258,17 @@ const DeploymentsPage = {
     const div = document.createElement('div');
     div.textContent = str || '';
     return div.innerHTML;
+  },
+
+  jsArg(str) {
+    return String(str || '')
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '\\x22')
+      .replace(/\r/g, '\\r')
+      .replace(/\n/g, '\\n')
+      .replace(/</g, '\\x3C')
+      .replace(/>/g, '\\x3E')
+      .replace(/&/g, '\\x26');
   }
 };

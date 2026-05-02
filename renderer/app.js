@@ -25,16 +25,24 @@ const App = {
   rsatAvailable: false,
   rsatMissingGPMC: false,
   shareAvailable: true,
+  updateCheckResult: null,
+  dismissedAppUpdateVersion: '',
+  sessionDismissedAppUpdateVersion: '',
+  _updateCheckPromise: null,
 
   async init() {
     await window.initI18n();
 
     this.bindWindowControls();
     this.bindNavigation();
+    this.bindSidebarToggle();
+    this.bindMarqueeHover();
     this.bindModal();
     await this.checkRSAT();
 
     const config = await window.api.config.get();
+    this.dismissedAppUpdateVersion = config.dismissedAppUpdateVersion || '';
+    this.sessionDismissedAppUpdateVersion = '';
     if (config.firstRun || !config.networkSharePath) {
       document.querySelector('.sidebar').style.display = 'none';
       this.navigate('setup');
@@ -44,6 +52,8 @@ const App = {
       this.updateSidebarLanguage();
       this.navigate('dashboard');
     }
+
+    this.checkAppUpdates().catch(() => {});
   },
 
   updateSidebarLanguage() {
@@ -54,6 +64,8 @@ const App = {
     document.querySelector('.nav-item[data-page="catalog"] span').textContent = t('nav.catalog');
     document.querySelector('.nav-item[data-page="bundles"] span').textContent = t('nav.bundles');
     document.querySelector('.nav-item[data-page="deployments"] span').textContent = t('nav.deployments');
+    const logsNav = document.querySelector('.nav-item[data-page="logs"] span');
+    if (logsNav) logsNav.textContent = t('nav.logs');
     document.querySelector('.nav-item[data-page="settings"] span').textContent = t('nav.settings');
   },
 
@@ -100,6 +112,7 @@ const App = {
         case 'catalog': await CatalogPage.render(container); break;
         case 'bundles': await BundlesPage.render(container); break;
         case 'deployments': await DeploymentsPage.render(container); break;
+        case 'logs': await LogsPage.render(container); break;
         case 'settings': await SettingsPage.render(container); break;
         default: container.innerHTML = '<p>' + t('common.pageNotFound') + '</p>';
       }
@@ -141,13 +154,43 @@ const App = {
     const closeBtn = document.getElementById('modal-close');
 
     closeBtn.addEventListener('click', () => { if (!this._modalLocked) this.closeModal(); });
-    overlay.addEventListener('click', (e) => {
+    // overlay auto-close disabled to prevent accidental data loss
+    /* overlay.addEventListener('click', (e) => {
       if (e.target === overlay && !this._modalLocked) this.closeModal();
-    });
+    }); */
 
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && !this._modalLocked) this.closeModal();
     });
+  },
+
+  // ─── Sidebar Toggle ────────────────────────────────
+  bindSidebarToggle() {
+    const sidebar = document.querySelector('.sidebar');
+    const toggleBtn = document.getElementById('sidebar-toggle');
+    if (!sidebar || !toggleBtn) return;
+    toggleBtn.addEventListener('click', () => {
+      sidebar.classList.toggle('collapsed');
+    });
+  },
+
+  // ─── Marquee Hover Effect ──────────────────────────
+  bindMarqueeHover() {
+    document.addEventListener('mouseenter', (e) => {
+      const target = e.target.closest && e.target.closest('.marquee-text');
+      if (target && target.scrollWidth > target.clientWidth) {
+        const overflow = target.scrollWidth - target.clientWidth;
+        target.style.transition = `transform \${overflow * 18}ms linear`;
+        target.style.transform = `translateX(-\${overflow + 10}px)`; // extra pixels to see end
+      }
+    }, true);
+    document.addEventListener('mouseleave', (e) => {
+      const target = e.target.closest && e.target.closest('.marquee-text');
+      if (target) {
+        target.style.transition = 'transform 0.2s ease-out';
+        target.style.transform = 'translateX(0)';
+      }
+    }, true);
   },
 
   applyModalOptions(options = {}) {
@@ -216,6 +259,95 @@ const App = {
     this.shareAvailable = false;
     this.updateShareBanner();
     this.toast('El share de red no esta disponible. Comprueba la conexion y pulsa Reintentar.', 'error');
+  },
+
+  refreshSettingsUpdateSection() {
+    if (this.currentPage !== 'settings') return;
+    if (typeof SettingsPage === 'undefined' || typeof SettingsPage.renderUpdateSection !== 'function') return;
+    SettingsPage.renderUpdateSection(
+      SettingsPage.currentAppVersion,
+      this.updateCheckResult,
+      this.isCheckingAppUpdates()
+    );
+  },
+
+  isUpdateReminderDismissedPersistently(result = this.updateCheckResult) {
+    const latestVersion = result?.latestVersion;
+    return !!latestVersion && this.dismissedAppUpdateVersion === latestVersion;
+  },
+
+  isUpdateReminderDismissedForSession(result = this.updateCheckResult) {
+    const latestVersion = result?.latestVersion;
+    return !!latestVersion && this.sessionDismissedAppUpdateVersion === latestVersion;
+  },
+
+  isUpdateBannerSuppressed(result = this.updateCheckResult) {
+    return this.isUpdateReminderDismissedPersistently(result) || this.isUpdateReminderDismissedForSession(result);
+  },
+
+  async persistDismissedAppUpdateVersion(latestVersion) {
+    const result = await window.api.config.set({ dismissedAppUpdateVersion: latestVersion || '' });
+    if (!result?.success) {
+      throw new Error(result?.error || t('updates.reminderSaveFailed'));
+    }
+    this.dismissedAppUpdateVersion = latestVersion || '';
+    this.sessionDismissedAppUpdateVersion = latestVersion || '';
+    return result;
+  },
+
+  async clearDismissedAppUpdateVersion() {
+    const result = await window.api.config.set({ dismissedAppUpdateVersion: '' });
+    if (!result?.success) {
+      throw new Error(result?.error || t('updates.reminderSaveFailed'));
+    }
+    this.dismissedAppUpdateVersion = '';
+    this.sessionDismissedAppUpdateVersion = '';
+    return result;
+  },
+  async checkAppUpdates(options = {}) {
+    const force = options?.force === true;
+    if (this._updateCheckPromise) return this._updateCheckPromise;
+    if (!force && this.updateCheckResult) return this.updateCheckResult;
+
+    this._updateCheckPromise = window.api.updates.check()
+      .then(result => {
+        this.updateCheckResult = result;
+        this.updateAppUpdateBanner();
+        this.refreshSettingsUpdateSection();
+        return result;
+      })
+      .catch(err => {
+        const fallbackResult = {
+          success: false,
+          currentVersion: this.updateCheckResult?.currentVersion || '0.0.0',
+          latestVersion: null,
+          hasUpdate: false,
+          tagName: null,
+          releaseName: null,
+          publishedAt: null,
+          checkedAt: new Date().toISOString(),
+          error: err?.message || 'Unable to check for updates'
+        };
+        this.updateCheckResult = fallbackResult;
+        this.updateAppUpdateBanner();
+        this.refreshSettingsUpdateSection();
+        return fallbackResult;
+      })
+      .finally(() => {
+        this._updateCheckPromise = null;
+      });
+
+    return this._updateCheckPromise;
+  },
+  isCheckingAppUpdates() {
+    return !!this._updateCheckPromise;
+  },
+  async openLatestReleasePage() {
+    const result = await window.api.updates.openReleasePage();
+    if (!result?.success) {
+      this.toast(t('updates.openReleaseFailed'), 'error');
+    }
+    return result;
   },
 
   // ─── Toast ─────────────────────────────────────────
@@ -287,32 +419,158 @@ const App = {
     let banner = document.getElementById('share-offline-banner');
     if (this.shareAvailable) {
       if (banner) banner.remove();
+      this.updateAppUpdateBanner();
       return;
     }
-    if (banner) return; // already showing
-    banner = document.createElement('div');
-    banner.id = 'share-offline-banner';
-    banner.style.cssText = 'position:fixed;top:32px;left:0;right:0;z-index:9999;display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 20px;background:rgba(239,68,68,0.95);color:#fff;font-size:13px;font-weight:600;backdrop-filter:blur(6px);';
-    banner.innerHTML = `
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;">
-        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-      </svg>
-      <span>No se puede acceder al share de red. La aplicacion funciona en modo local hasta que se restablezca la conexion.</span>
-      <button id="btn-retry-share" style="margin-left:auto;background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.4);color:#fff;border-radius:6px;padding:4px 14px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;">Reintentar</button>
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'share-offline-banner';
+      banner.style.cssText = 'position:fixed;left:0;right:0;z-index:9999;display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 20px;background:rgba(239,68,68,0.95);color:#fff;font-size:13px;font-weight:600;backdrop-filter:blur(6px);';
+      banner.innerHTML = `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        <span>No se puede acceder al share de red. La aplicacion funciona en modo local hasta que se restablezca la conexion.</span>
+        <button id="btn-retry-share" style="margin-left:auto;background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.4);color:#fff;border-radius:6px;padding:4px 14px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;">Reintentar</button>
+      `;
+      document.body.appendChild(banner);
+      document.getElementById('btn-retry-share').addEventListener('click', async () => {
+        const btn = document.getElementById('btn-retry-share');
+        if (btn) { btn.disabled = true; btn.textContent = 'Comprobando...'; }
+        const ok = await this.checkShareHealth();
+        if (ok) {
+          this.toast('Conexion al share restablecida', 'success');
+          // Re-render current page to refresh data
+          this.navigate(this.currentPage);
+        } else {
+          this.toast('El share sigue sin estar disponible', 'error');
+          if (btn) { btn.disabled = false; btn.textContent = 'Reintentar'; }
+        }
+      });
+    }
+    banner.style.top = `${this.getBannerTop('share')}px`;
+    this.updateAppUpdateBanner();
+  },
+
+  getBannerTop(kind = 'share') {
+    const titleBarOffset = 32;
+    if (kind === 'update' && !this.shareAvailable) return 78;
+    return titleBarOffset;
+  },
+
+  updateAppUpdateBanner() {
+    let banner = document.getElementById('app-update-banner');
+    const result = this.updateCheckResult;
+
+    if (!result?.success || !result?.hasUpdate || !result?.latestVersion || this.isUpdateBannerSuppressed(result)) {
+      if (banner) banner.remove();
+      return;
+    }
+
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'app-update-banner';
+      banner.style.cssText = 'position:fixed;left:0;right:0;z-index:9998;display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;padding:10px 20px;background:rgba(245,158,11,0.97);color:#111827;font-size:13px;font-weight:700;backdrop-filter:blur(6px);';
+      document.body.appendChild(banner);
+    }
+
+    banner.style.top = `${this.getBannerTop('update')}px`;
+    banner.replaceChildren();
+
+    const icon = document.createElement('span');
+    icon.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:block;"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>';
+
+    const message = document.createElement('span');
+    message.textContent = t('updates.bannerMessage')
+      .replace('{current}', result.currentVersion || '?')
+      .replace('{latest}', result.latestVersion || '?');
+    message.style.flex = '1 1 260px';
+
+    const actions = document.createElement('div');
+    actions.style.cssText = 'margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+
+    const openButton = document.createElement('button');
+    openButton.type = 'button';
+    openButton.textContent = t('updates.openRelease');
+    openButton.style.cssText = 'background:rgba(17,24,39,0.14);border:1px solid rgba(17,24,39,0.28);color:#111827;border-radius:6px;padding:4px 14px;cursor:pointer;font-size:12px;font-weight:700;white-space:nowrap;';
+    openButton.addEventListener('click', () => {
+      this.openLatestReleasePage();
+    });
+
+    const dismissButton = document.createElement('button');
+    dismissButton.type = 'button';
+    dismissButton.textContent = t('updates.dismissButton');
+    dismissButton.style.cssText = 'background:rgba(255,255,255,0.28);border:1px solid rgba(17,24,39,0.18);color:#111827;border-radius:6px;padding:4px 14px;cursor:pointer;font-size:12px;font-weight:700;white-space:nowrap;';
+    dismissButton.addEventListener('click', () => {
+      this.promptAppUpdateDismissal();
+    });
+
+    banner.appendChild(icon);
+    banner.appendChild(message);
+    actions.appendChild(openButton);
+    actions.appendChild(dismissButton);
+    banner.appendChild(actions);
+  },
+
+  promptAppUpdateDismissal() {
+    const result = this.updateCheckResult;
+    const latestVersion = result?.latestVersion;
+    if (!result?.hasUpdate || !latestVersion) return;
+
+    const safeVersion = this._esc(`v${latestVersion}`);
+    const body = `
+      <div style="display:grid;gap:12px;line-height:1.5;">
+        <p style="margin:0;color:var(--text-primary);">${t('updates.dismissPrompt').replace('{version}', safeVersion)}</p>
+        <div style="padding:12px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-secondary);">
+          <strong style="display:block;margin-bottom:4px;color:var(--text-primary);">${t('updates.dismissOnce')}</strong>
+          <span style="color:var(--text-secondary);font-size:13px;">${t('updates.dismissOnceDescription')}</span>
+        </div>
+        <div style="padding:12px;border:1px solid rgba(245,158,11,0.35);border-radius:10px;background:rgba(245,158,11,0.08);">
+          <strong style="display:block;margin-bottom:4px;color:var(--text-primary);">${t('updates.dismissVersion')}</strong>
+          <span style="color:var(--text-secondary);font-size:13px;">${t('updates.dismissVersionDescription').replace('{version}', safeVersion)}</span>
+        </div>
+      </div>
     `;
-    document.body.appendChild(banner);
-    document.getElementById('btn-retry-share').addEventListener('click', async () => {
-      const btn = document.getElementById('btn-retry-share');
-      if (btn) { btn.disabled = true; btn.textContent = 'Comprobando...'; }
-      const ok = await this.checkShareHealth();
-      if (ok) {
-        this.toast('Conexion al share restablecida', 'success');
-        // Re-render current page to refresh data
-        this.navigate(this.currentPage);
-      } else {
-        this.toast('El share sigue sin estar disponible', 'error');
-        if (btn) { btn.disabled = false; btn.textContent = 'Reintentar'; }
+    const footer = `
+      <button class="btn btn-secondary" id="btn-update-dismiss-cancel">${t('common.cancel')}</button>
+      <button class="btn btn-secondary" id="btn-update-dismiss-once">${t('updates.dismissOnce')}</button>
+      <button class="btn btn-primary" id="btn-update-dismiss-version">${t('updates.dismissVersion')}</button>
+    `;
+
+    this.openModal(t('updates.dismissTitle'), body, footer);
+
+    document.getElementById('btn-update-dismiss-cancel')?.addEventListener('click', () => {
+      this.closeModal();
+    });
+
+    document.getElementById('btn-update-dismiss-once')?.addEventListener('click', () => {
+      this.sessionDismissedAppUpdateVersion = latestVersion;
+      this.closeModal();
+      this.updateAppUpdateBanner();
+      this.refreshSettingsUpdateSection();
+      this.toast(t('updates.dismissedSessionToast'), 'info');
+    });
+
+    document.getElementById('btn-update-dismiss-version')?.addEventListener('click', async () => {
+      const onceBtn = document.getElementById('btn-update-dismiss-once');
+      const versionBtn = document.getElementById('btn-update-dismiss-version');
+      const cancelBtn = document.getElementById('btn-update-dismiss-cancel');
+      [onceBtn, versionBtn, cancelBtn].forEach(btn => {
+        if (btn) btn.disabled = true;
+      });
+
+      try {
+        await this.persistDismissedAppUpdateVersion(latestVersion);
+        this.closeModal();
+        this.updateAppUpdateBanner();
+        this.refreshSettingsUpdateSection();
+        this.toast(t('updates.dismissedVersionToast').replace('{version}', `v${latestVersion}`), 'info');
+      } catch (err) {
+        [onceBtn, versionBtn, cancelBtn].forEach(btn => {
+          if (btn) btn.disabled = false;
+        });
+        this.toast(`${t('common.error')}: ${err?.message || t('updates.reminderSaveFailed')}`, 'error');
       }
     });
   },
