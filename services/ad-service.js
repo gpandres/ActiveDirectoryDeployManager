@@ -112,10 +112,18 @@ function validateScriptPath(scriptPath, config) {
 
 const DEFAULT_PS_TIMEOUT_MS = 120000; // 2 min per command
 
+// Fire-and-forget log helper. Wrapped in try/catch so it never
+// disrupts PS execution if the sink isn't ready yet (e.g. checkRSAT on boot).
+function _logPS(action, level, message, elapsed) {
+  try { require('./log-sink').addSync(action, { source: 'powershell', level, message, elapsed }); }
+  catch { /* log-sink not yet initialized */ }
+}
+
 // Run a PowerShell command via a temporary .ps1 file. Script is written
 // as UTF-8 with BOM so PowerShell parses non-ASCII characters correctly,
 // and the file is deleted as soon as the process exits.
-function runPowerShell(command, { timeoutMs = DEFAULT_PS_TIMEOUT_MS } = {}) {
+function runPowerShell(command, { timeoutMs = DEFAULT_PS_TIMEOUT_MS, label = '' } = {}) {
+  const t0 = Date.now();
   return new Promise((resolve, reject) => {
     const prelude =
       "$ErrorActionPreference='Stop'\r\n" +
@@ -132,6 +140,7 @@ function runPowerShell(command, { timeoutMs = DEFAULT_PS_TIMEOUT_MS } = {}) {
 
     let killed = false;
     const cleanup = () => { try { fs.unlinkSync(scriptPath); } catch { /* ignore */ } };
+    const tag = label ? `[${label}]` : '';
 
     const child = execFile(
       'powershell',
@@ -139,8 +148,19 @@ function runPowerShell(command, { timeoutMs = DEFAULT_PS_TIMEOUT_MS } = {}) {
       { maxBuffer: 1024 * 1024 * 50, windowsHide: true },
       (error, stdout, stderr) => {
         cleanup();
-        if (killed) return reject(new Error(`PowerShell timeout tras ${timeoutMs}ms`));
-        if (error) return reject(new Error(stderr || error.message));
+        const elapsed = Date.now() - t0;
+        if (killed) {
+          _logPS('ps_timeout', 'error', `PowerShell timeout${tag}: ${timeoutMs}ms`, elapsed);
+          return reject(new Error(`PowerShell timeout tras ${timeoutMs}ms`));
+        }
+        if (error) {
+          const msg = (stderr || error.message || '').slice(0, 400);
+          _logPS('ps_error', 'error', `PowerShell error${tag}: ${msg}`, elapsed);
+          return reject(new Error(stderr || error.message));
+        }
+        if (elapsed > 15000) {
+          _logPS('ps_slow', 'warn', `PowerShell slow${tag}: ${elapsed}ms`, elapsed);
+        }
         resolve(stdout.trim());
       }
     );
@@ -263,8 +283,8 @@ function normalizeUnlinkResult(result) {
   return { success: false, error: result?.error || 'Error desconocido' };
 }
 
-async function runPSJson(command) {
-  const raw = await runPowerShell(wrapJsonResult(command));
+async function runPSJson(command, label = '') {
+  const raw = await runPowerShell(wrapJsonResult(command), { label });
   return parseJsonObject(raw);
 }
 
@@ -541,7 +561,7 @@ const adService = {
           throw
         }
       `;
-      const result = await runPSJson(ps);
+      const result = await runPSJson(ps, 'createGPO');
       if (result.ok) {
         const linkResults = Array.isArray(result.linkResults) ? result.linkResults : [];
         const failed = linkResults.filter(r => !r.ok);
@@ -566,7 +586,8 @@ const adService = {
     const safe = sanitizePSInput(gpoName).replace(/'/g, "''");
     return withGPOLock(gpoName, async () => {
       const result = await runPSJson(
-        `Import-Module ActiveDirectory; Import-Module GroupPolicy; ${dcSnippet(config.preferredDC)}; Remove-GPO -Name '${safe}' -Server $adServer -ErrorAction Stop; @{ ok = $true } | ConvertTo-Json -Compress`
+        `Import-Module ActiveDirectory; Import-Module GroupPolicy; ${dcSnippet(config.preferredDC)}; Remove-GPO -Name '${safe}' -Server $adServer -ErrorAction Stop; @{ ok = $true } | ConvertTo-Json -Compress`,
+        'deleteGPO'
       );
       if (result.ok) return { success: true };
       if (result.code === 'NOT_FOUND') return { success: true };

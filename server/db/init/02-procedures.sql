@@ -106,18 +106,18 @@ BEGIN
    WHERE expires_at < NOW() OR uses_left = 0;
 END$$
 
-DELIMITER ;
-
 -- ─────────────────────────────────────────────────────────────
--- Enable the event scheduler and register daily maintenance.
+-- Register daily maintenance event.
+-- event_scheduler = ON is set in my.cnf (perf.cnf); no need
+-- to SET GLOBAL here — that fails in Docker's bootstrap mode.
 -- ─────────────────────────────────────────────────────────────
-SET GLOBAL event_scheduler = ON;
-
-DROP EVENT IF EXISTS ev_daily_maintenance;
+DROP EVENT IF EXISTS ev_daily_maintenance$$
 CREATE EVENT ev_daily_maintenance
   ON SCHEDULE EVERY 1 DAY STARTS (CURRENT_DATE + INTERVAL 1 DAY + INTERVAL 3 HOUR)
   DO
   BEGIN
     CALL sp_rotate_log_partitions(90);
     CALL sp_purge_expired_tokens();
-  END;
+  END$$
+
+DELIMITER ;

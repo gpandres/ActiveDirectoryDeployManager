@@ -14,6 +14,7 @@ const path = require('path');
 const { RetryQueue } = require('./retry-queue');
 const { request } = require('./http-client');
 const activityLog = require('../activity-log');
+const { sanitize } = require('./log-sanitizer');
 
 const BATCH_MAX         = 200;
 const FLUSH_DEBOUNCE_MS = 2_000;
@@ -86,7 +87,8 @@ class RemoteSink {
 
   _stripContext(details) {
     const { level, severity, ts, source, message, ...ctx } = details;
-    return Object.keys(ctx).length ? ctx : null;
+    const safe = sanitize(ctx);
+    return Object.keys(safe).length ? safe : null;
   }
 
   async getRecent(count = 10) {
@@ -180,6 +182,7 @@ class RemoteSink {
     if (!batch.length) return;
 
     this.flushing = true;
+    const wasOnline = this.online;
     try {
       await request({
         baseUrl: this.cfg.apiBaseUrl,
@@ -197,18 +200,40 @@ class RemoteSink {
       await this.queue.ack(batch);
       this.backoff = BACKOFF_MIN_MS;
       this.consecutiveFailures = 0;
-      this.online = true;
       this.lastError = null;
       this.lastFlushAt = new Date().toISOString();
       this.lastSuccessAt = this.lastFlushAt;
-      // Drain aggressively if more queued.
+
+      if (!wasOnline) {
+        this.online = true;
+        activityLog.add('log_backend_reconnected', {
+          source: 'logging',
+          level: 'info',
+          message: `Conexión con servidor de logs restaurada: ${this.cfg.apiBaseUrl}`
+        });
+      } else {
+        this.online = true;
+      }
+
       if (this.queue.size() > 0) this._scheduleFlush(0);
     } catch (err) {
       this.queue.nack(batch);
       this.consecutiveFailures++;
-      if (this.consecutiveFailures >= FAILURE_THRESHOLD) this.online = false;
       this.lastError = err?.message || String(err);
       this.lastFlushAt = new Date().toISOString();
+
+      if (this.consecutiveFailures >= FAILURE_THRESHOLD && wasOnline) {
+        this.online = false;
+        activityLog.add('log_backend_offline', {
+          source: 'logging',
+          level: 'warn',
+          message: `Servidor de logs no disponible tras ${this.consecutiveFailures} intentos: ${this.lastError}`,
+          host: this.cfg.apiBaseUrl
+        });
+      } else if (this.consecutiveFailures >= FAILURE_THRESHOLD) {
+        this.online = false;
+      }
+
       const delay = this.backoff;
       this.backoff = Math.min(this.backoff * 2, BACKOFF_MAX_MS);
       this._scheduleRetry(delay);

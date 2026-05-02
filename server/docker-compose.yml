@@ -53,6 +53,7 @@ services:
       TRUST_PROXY: "false"
       BATCH_MAX_SIZE: "500"
       BATCH_MAX_BYTES: "1048576"
+      LOG_HOSTNAME: ${LOG_HOSTNAME:?LOG_HOSTNAME must be set (e.g. logs.example.local)}
     # The API container starts as root (entrypoint.sh reads the
     # secret), then exec's node as the unprivileged "app" user.
     secrets:

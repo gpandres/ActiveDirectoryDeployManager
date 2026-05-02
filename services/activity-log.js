@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { sanitize } = require('./log-sink/log-sanitizer');
 
 function getUserDataDir() {
   try {
@@ -81,7 +82,7 @@ const activityLog = {
       id: Date.now().toString(36) + Math.random().toString(36).substr(2, 4),
       timestamp: new Date().toISOString(),
       action,
-      ...details
+      ...sanitize(details)
     };
     log.push(entry);
     saveLog(log);

@@ -1,6 +1,6 @@
 {
   "name": "ad-app-deploy-manager",
-  "version": "1.2.7",
+  "version": "1.2.10",
   "description": "Active Directory App Deployment Manager - Drop & Run GPO System",
   "main": "main.js",
   "scripts": {

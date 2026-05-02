@@ -190,17 +190,21 @@ const LogsPage = {
       ul.innerHTML = `<li class="logs-muted">${t('logs.noRecent') || 'Sin actividad reciente'}</li>`;
       return;
     }
-    ul.innerHTML = recent.map(r => `
-      <li class="logs-side-item">
-        <span class="level-pill level-${this._levelName(r.level)}">${this._levelName(r.level).toUpperCase()}</span>
-        <div class="logs-side-body">
-          <div class="logs-side-msg">${this.esc(r.message || '')}</div>
-          <div class="logs-side-meta">
-            ${this.esc(r.hostname || '—')} · ${this.esc(r.source || '')} · ${this._fmtTs(r.ts)}
+    ul.innerHTML = recent.map(r => {
+      const lvl = this._levelName(r.level);
+      const { primary } = this._formatMessage(r);
+      return `
+        <li class="logs-side-item">
+          <span class="level-pill level-${lvl}">${lvl.toUpperCase()}</span>
+          <div class="logs-side-body">
+            <div class="logs-side-msg">${primary}</div>
+            <div class="logs-side-meta">
+              ${this.esc(r.hostname || '—')} · ${this.esc(r.source || '')} · ${this._fmtTs(r.ts)}
+            </div>
           </div>
-        </div>
-      </li>
-    `).join('');
+        </li>
+      `;
+    }).join('');
   },
 
   async _refreshBackendBadge() {
@@ -302,9 +306,7 @@ const LogsPage = {
     }
     tbody.innerHTML = this._items.map(r => {
       const lvl = this._levelName(r.level);
-      const ctx = (r.context && typeof r.context === 'object')
-        ? JSON.stringify(r.context)
-        : (typeof r.context === 'string' ? r.context : '');
+      const { primary, secondary } = this._formatMessage(r);
       return `
         <tr>
           <td class="mono">${this._fmtTs(r.ts)}</td>
@@ -312,8 +314,8 @@ const LogsPage = {
           <td class="mono">${this.esc(r.hostname || '—')}</td>
           <td class="mono">${this.esc(r.source || '')}</td>
           <td>
-            <div>${this.esc(r.message || '')}</div>
-            ${ctx ? `<div class="logs-ctx mono">${this.esc(ctx)}</div>` : ''}
+            <div>${primary}</div>
+            ${secondary ? `<div class="logs-ctx">${secondary}</div>` : ''}
           </td>
         </tr>
       `;
@@ -357,6 +359,84 @@ const LogsPage = {
   },
 
   // ── Helpers ──────────────────────────────────────────────
+
+  _formatMessage(r) {
+    let ctx = {};
+    if (r.context && typeof r.context === 'object') ctx = r.context;
+    else if (typeof r.context === 'string' && r.context) {
+      try { ctx = JSON.parse(r.context); } catch { /* leave empty */ }
+    }
+
+    const e  = s => this.esc(String(s ?? ''));
+    const app    = ctx.appName    ? `<strong>${e(ctx.appName)}</strong>` : '';
+    const bundle = ctx.bundleName ? `<strong>${e(ctx.bundleName)}</strong>` : '';
+    const gpo    = ctx.gpoName    ? `<strong>${e(ctx.gpoName)}</strong>` : '';
+    const ver    = ctx.version    ? ` <span class="logs-ctx-ver">v${e(ctx.version)}</span>` : '';
+    const newVer = ctx.newVersion ? ` → <span class="logs-ctx-ver">v${e(ctx.newVersion)}</span>` : '';
+    const errTxt = ctx.error      ? e(String(ctx.error).slice(0, 180)) : '';
+
+    const dispMap = { installed: 'Instalado', skipped: 'Omitido (ya instalado)', pending: 'Instalado', updated: 'Actualizado' };
+    const disp = dispMap[ctx.disposition] || (ctx.disposition ? e(ctx.disposition) : 'Instalado');
+
+    const reasonMap = {
+      'tracker-success': 'ya instalado',
+      'detection-rule':  'ya detectado',
+      'max-retries':     `demasiados intentos${ctx.retryCount ? ` (${ctx.retryCount})` : ''}`
+    };
+    const reason = ctx.reason ? (reasonMap[ctx.reason] || e(ctx.reason)) : '';
+
+    const stage = ctx.stage ? ` [${e(ctx.stage)}]` : '';
+
+    const map = {
+      install_start:    `Instalando${app ? ': ' + app : ''}${ver}`,
+      install_skipped:  `Omitido${app ? ': ' + app : ''}${ver}${reason ? ` — ${reason}` : ''}`,
+      install_success:  `${disp}${app ? ': ' + app : ''}${ver}`,
+      install_failed:   `Error de instalación${app ? ': ' + app : ''}${ver}${stage}`,
+      uninstall_start:  `Desinstalando${app ? ': ' + app : ''}${ver}`,
+      uninstall_checked:`Verificación desinstalación${app ? ': ' + app : ''}${ver}`,
+      uninstall_success:`Desinstalado${app ? ': ' + app : ''}${ver}`,
+      uninstall_failed: `Error de desinstalación${app ? ': ' + app : ''}${ver}`,
+      gpo_create:       `GPO creada${gpo ? ': ' + gpo : ''}${app ? ' para ' + app : ''}`,
+      gpo_delete:       `GPO eliminada${gpo ? ': ' + gpo : ''}`,
+      script_deploy:    `Script desplegado${app ? ': ' + app : ''}${ver}`,
+      bundle_deploy:    `Bundle desplegado${bundle ? ': ' + bundle : ''}`,
+      bundle_uninstall_prepare: `Desinstalación de bundle${bundle ? ': ' + bundle : ''}`,
+      app_create:       `App creada${app ? ': ' + app : ''}${ver}`,
+      app_update:       `App actualizada${app ? ': ' + app : ''}`,
+      app_delete:       `App eliminada${app ? ': ' + app : ''}`,
+      app_disable:      `App deshabilitada${app ? ': ' + app : ''}`,
+      app_quick_update: `Actualización rápida${app ? ': ' + app : ''}`,
+      app_auto_update:  `Auto-update${app ? ': ' + app : ''}${newVer}`,
+      app_uninstall_prepare: `Desinstalación preparada${app ? ': ' + app : ''}`,
+      bundle_create:    `Bundle creado${bundle ? ': ' + bundle : ''}${ctx.appCount ? ` (${ctx.appCount} apps)` : ''}`,
+      bundle_update:    `Bundle actualizado${bundle ? ': ' + bundle : ''}`,
+      bundle_delete:    `Bundle eliminado`,
+      bundle_disable:   `Bundle deshabilitado${bundle ? ': ' + bundle : ''}`,
+      config_export:    `Configuración exportada`,
+      config_import:    `Configuración importada`,
+      log_backend_enrolled:       `Enrolled en servidor de logs`,
+      log_backend_reconnected:    `Servidor de logs reconectado`,
+      log_backend_offline:        `Servidor de logs no disponible`,
+      log_share_config_published: `Config de logging publicada en share`,
+      ou_external_changes_detected: `Cambios externos en OU detectados`,
+    };
+
+    const key = String(r.message || '');
+    const primary = map[key] ?? e(key);
+
+    // Secondary line: error text for failures, or nothing for clean messages
+    let secondary = '';
+    if (errTxt) {
+      secondary = `<span style="color:var(--accent-danger,#ef4444)">${errTxt}</span>`;
+    } else if (!map[key] && Object.keys(ctx).length) {
+      // Unknown key — show non-noise context fields
+      const { hash, scriptRoot, ...rest } = ctx;
+      const pairs = Object.entries(rest).map(([k, v]) => `${e(k)}: ${e(String(v).slice(0, 80))}`);
+      if (pairs.length) secondary = pairs.join(' · ');
+    }
+
+    return { primary, secondary };
+  },
 
   _levelName(n) {
     const names = ['debug', 'info', 'warn', 'error', 'fatal'];

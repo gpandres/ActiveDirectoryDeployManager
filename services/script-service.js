@@ -2647,6 +2647,27 @@ try {
         $exeArgs += " /S"
         ${getManagedInstallerInvocation('exe', '$exeArgs')}
     }
+
+    # ── Wazuh service start (avoids reboot requirement) ──────────────────
+    if ($InstallDisposition -ne 'skipped') {
+        $wazuhSvc = Get-Service -Name 'WazuhSvc' -ErrorAction SilentlyContinue
+        if ($null -eq $wazuhSvc) {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Servicio WazuhSvc no encontrado. Puede requerir reinicio."
+        } elseif ($wazuhSvc.Status -ne 'Running') {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Iniciando servicio WazuhSvc..."
+            Set-Service -Name 'WazuhSvc' -StartupType Automatic -ErrorAction SilentlyContinue
+            Start-Service -Name 'WazuhSvc' -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 4
+            $svcStatus = (Get-Service -Name 'WazuhSvc' -ErrorAction SilentlyContinue).Status
+            if ($svcStatus -eq 'Running') {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: WazuhSvc iniciado correctamente."
+            } else {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: WazuhSvc no se pudo iniciar (estado: $svcStatus). Verifica manualmente."
+            }
+        } else {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] WazuhSvc ya en ejecucion."
+        }
+    }
 ${getTrackerSaveLogic(notify)}
 `;
 }

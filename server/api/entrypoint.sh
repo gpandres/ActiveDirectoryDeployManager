@@ -12,5 +12,8 @@ if [ -n "$DB_PASS_FILE" ] && [ -r "$DB_PASS_FILE" ]; then
   unset DB_PASS_FILE
 fi
 
+# Seed default admin user if admin_users table is empty.
+su-exec app:app node src/seed.js
+
 # Hand off to node as "app". su-exec is alpine's tiny gosu-equivalent.
 exec su-exec app:app node src/server.js

@@ -838,10 +838,26 @@ const appService = {
   },
 
   cleanupTempFiles() {
-    // Both runPowerShell (ad-service) and getInstallerVersion now use stdin,
-    // so no temp PS scripts are written to disk. This method is kept as a
-    // no-op safety net for any orphans from older sessions.
-    return { success: true, removed: 0 };
+    // getInstallerVersion uses stdin (-Command -), but runPowerShell in
+    // ad-service still writes temp .ps1 files. Sweep any orphans left
+    // by a previous session that crashed before cleanup could run.
+    const os = require('os');
+    const tmpDir = os.tmpdir();
+    let removed = 0;
+    try {
+      const entries = fs.readdirSync(tmpDir);
+      for (const name of entries) {
+        if (/^addeploy-ps-\d+-[a-z0-9]+\.ps1$/.test(name)) {
+          try {
+            fs.unlinkSync(path.join(tmpDir, name));
+            removed++;
+          } catch { /* file locked by a running process — skip */ }
+        }
+      }
+    } catch (e) {
+      console.warn('Temp cleanup scan failed:', e.message);
+    }
+    return { success: true, removed };
   },
 
   computeFileHash(filePath) {
@@ -857,16 +873,21 @@ const appService = {
 
   exportAll() {
     const configService = require('./config');
+    const { sanitize } = require('./log-sink/log-sanitizer');
     let bundles = [];
     try {
       const bundleService = require('./bundle-service');
       bundles = bundleService.getAll();
     } catch (e) {}
+    const cfg = configService.getConfig();
+    // Strip remoteLogging block (contains enrolled API base URL config)
+    // from config export — sensitive enough to not belong in a portable JSON.
+    const { remoteLogging, ...exportableConfig } = cfg;
     return {
       exportedAt: new Date().toISOString(),
-      config: configService.getConfig(),
-      apps: loadApps(),
-      bundles
+      config: exportableConfig,
+      apps: loadApps().map(app => sanitize(app)),
+      bundles: bundles.map(b => sanitize(b))
     };
   },
 

@@ -29,8 +29,8 @@ function _loadConfigForSink() {
       // a read-only key isn't configured. This lets the dashboard show
       // data the moment the user logs in as admin.
       readApiKey = secretStore.get('read_api_key')
-        || apiKey
         || secretStore.get('admin_api_key')
+        || apiKey
         || '';
     }
   } catch { /* no electron context (e.g. tests) */ }

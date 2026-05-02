@@ -54,6 +54,7 @@ app.whenReady().then(() => {
   const adService = require('./services/ad-service');
   const appService = require('./services/app-service');
   const { assertString, assertStringOrNull, assertArray, assertBoolean, assertObject, assertId } = require('./services/ipc-validators');
+  const { ipcLog } = require('./services/ipc-logger');
   const scriptService = require('./services/script-service');
   const fileService = require('./services/file-service');
   const configService = require('./services/config');
@@ -143,15 +144,23 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('ad:getGPOs', () => adService.getGPOs());
   ipcMain.handle('ad:getGPOLinkCounts', () => adService.getGPOLinkCounts());
-  ipcMain.handle('ad:createGPO', (_, name, scriptPath, ouDN) => {
+  ipcMain.handle('ad:createGPO', ipcLog('ad:createGPO', async (_, name, scriptPath, ouDN) => {
     try {
       assertString(name, 'name');
       assertString(scriptPath, 'scriptPath');
       if (Array.isArray(ouDN)) ouDN.forEach((dn, idx) => assertString(dn, `ouDN[${idx}]`));
       else assertStringOrNull(ouDN, 'ouDN');
     } catch (e) { return { success: false, error: 'Invalid arguments' }; }
-    return adService.createGPO(name, scriptPath, ouDN);
-  });
+    const result = await adService.createGPO(name, scriptPath, ouDN);
+    if (result.success) {
+      logSink.addSync('gpo_create', {
+        source: 'ad', level: 'info',
+        message: `GPO creada: ${name}`,
+        gpoName: name
+      });
+    }
+    return result;
+  }));
   ipcMain.handle('ad:linkGPOtoOU', (_, gpoName, ouDN) => {
     try { assertString(gpoName, 'gpoName'); assertString(ouDN, 'ouDN'); }
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
@@ -162,11 +171,19 @@ app.whenReady().then(() => {
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
     return adService.bulkLinkGPO(gpoName, ouDNs);
   });
-  ipcMain.handle('ad:deleteGPO', (_, gpoName) => {
+  ipcMain.handle('ad:deleteGPO', ipcLog('ad:deleteGPO', async (_, gpoName) => {
     try { assertString(gpoName, 'gpoName'); }
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
-    return adService.deleteGPO(gpoName);
-  });
+    const result = await adService.deleteGPO(gpoName);
+    if (result.success) {
+      logSink.addSync('gpo_delete', {
+        source: 'ad', level: 'warn',
+        message: `GPO eliminada: ${gpoName}`,
+        gpoName
+      });
+    }
+    return result;
+  }));
   ipcMain.handle('ad:checkGPOExists', (_, gpoName) => {
     try { assertString(gpoName, 'gpoName'); }
     catch (e) { return { exists: false }; }
@@ -263,21 +280,29 @@ app.whenReady().then(() => {
     }
   });
   const _deployingScripts = new Set();
-  ipcMain.handle('scripts:deploy', async (_, appConfig) => {
+  ipcMain.handle('scripts:deploy', ipcLog('scripts:deploy', async (_, appConfig) => {
     try { assertObject(appConfig, 'appConfig'); }
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
-    
+
     const appId = appConfig.id || appConfig.name;
     if (_deployingScripts.has(appId)) return { success: false, error: 'Deploy in progress' };
     _deployingScripts.add(appId);
-    
+
     try {
-      return await scriptService.deployScript(appConfig);
+      const result = await scriptService.deployScript(appConfig);
+      if (result.success) {
+        logSink.addSync('script_deploy', {
+          source: 'deploy', level: 'info',
+          message: `Script desplegado: ${appConfig.name || appId}`,
+          appName: appConfig.name || appId
+        });
+      }
+      return result;
     } finally {
       _deployingScripts.delete(appId);
     }
-  });
-  ipcMain.handle('scripts:regenerate', async (_, appConfig) => {
+  }));
+  ipcMain.handle('scripts:regenerate', ipcLog('scripts:regenerate', async (_, appConfig) => {
     try { assertObject(appConfig, 'appConfig'); }
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
 
@@ -290,7 +315,7 @@ app.whenReady().then(() => {
     } finally {
       _deployingScripts.delete(appId);
     }
-  });
+  }));
   ipcMain.handle('scripts:deployUninstall', (_, appConfig) => {
     try { assertObject(appConfig, 'appConfig'); }
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
@@ -555,7 +580,17 @@ app.whenReady().then(() => {
   ipcMain.handle('activity:add', async (_, action, details) => {
     try { assertString(action, 'action', 128); assertObject(details || {}, 'details'); }
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
-    return logSink.add(action, details || {});
+    // Allowlist the fields the renderer is permitted to log — prevents
+    // accidental credential leakage from renderer-side app config objects.
+    const allowed = new Set([
+      'message', 'source', 'level', 'severity',
+      'appName', 'bundleName', 'gpoName', 'ouDN', 'version', 'context'
+    ]);
+    const safe = {};
+    for (const k of allowed) {
+      if ((details || {})[k] !== undefined) safe[k] = details[k];
+    }
+    return logSink.add(action, safe);
   });
 
   // ─── IPC Handlers: Logging backend (local vs dedicated) ──────────

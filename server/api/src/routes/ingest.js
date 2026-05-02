@@ -108,7 +108,7 @@ module.exports = async function ingestRoutes(fastify) {
   // ────────── POST /api/logs/batch ──────────
   fastify.post('/api/logs/batch', {
     schema: batchLogsSchema,
-    preHandler: requireScope('ingest'),
+    preHandler: requireScope('ingest', 'admin'),
     config: { rateLimit: { max: 300, timeWindow: '1 minute' } }
   }, async (req, reply) => {
     const { hostname, shareId, entries } = req.body;
@@ -172,7 +172,7 @@ module.exports = async function ingestRoutes(fastify) {
   // ────────── POST /api/stats ──────────
   fastify.post('/api/stats', {
     schema: statsSchema,
-    preHandler: requireScope('ingest'),
+    preHandler: requireScope('ingest', 'admin'),
     config: { rateLimit: { max: 120, timeWindow: '1 minute' } }
   }, async (req, reply) => {
     const { hostname, shareId, events } = req.body;

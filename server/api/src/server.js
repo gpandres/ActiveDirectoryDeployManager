@@ -52,6 +52,7 @@ async function build() {
   await app.register(require('./routes/read'));
   await app.register(require('./routes/enroll'));
   await app.register(require('./routes/admin'));
+  await app.register(require('./routes/admin-panel'));
 
   app.setErrorHandler((err, req, reply) => {
     req.log.error({ err }, 'request_failed');
