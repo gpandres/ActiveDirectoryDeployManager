@@ -128,11 +128,12 @@ CREATE TABLE IF NOT EXISTS share_secrets (
 -- embedded in the share config. Used to swap for a per-client
 -- API key via POST /api/enroll.
 -- ─────────────────────────────────────────────────────────────
+-- expires_at NULL = no expiration; uses_left NULL = unlimited uses.
 CREATE TABLE IF NOT EXISTS enrollment_tokens (
   token_hash  CHAR(64) NOT NULL,
   share_id    VARCHAR(32) NOT NULL,
-  expires_at  DATETIME NOT NULL,
-  uses_left   INT UNSIGNED NOT NULL DEFAULT 1000,
+  expires_at  DATETIME NULL DEFAULT NULL,
+  uses_left   INT UNSIGNED NULL DEFAULT NULL,
   created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (token_hash),
   KEY idx_expires (expires_at)

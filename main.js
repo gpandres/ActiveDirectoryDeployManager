@@ -640,6 +640,7 @@ app.whenReady().then(() => {
         shareId: peek.shareId,
         issuedAt: peek.issuedAt,
         signaturePresent: !!peek.signature,
+        readKeyPresent: !!peek.readApiKey,
         configFingerprint,
         changed: !!(remote.configFingerprint && remote.configFingerprint !== configFingerprint),
         readonly: true
@@ -673,6 +674,11 @@ app.whenReady().then(() => {
         return { success: false, error: 'safe_storage_unavailable' };
       }
       secretStore.set('ingest_api_key', enroll.apiKey);
+      if (peek.readApiKey) {
+        secretStore.set('read_api_key', peek.readApiKey);
+      } else {
+        secretStore.delete('read_api_key');
+      }
 
       configService.setConfig({
         logMode: 'dedicated',
@@ -720,21 +726,35 @@ app.whenReady().then(() => {
       if (!apiBaseUrl) return { success: false, error: 'no_api_base_url' };
 
       const admin = require('./services/admin-service');
-      const ttlHours = Number(options.ttlHours) || 720;
-      const usesLeft = Number(options.usesLeft) || 1000;
+      // Default: per-app token with no expiry and unlimited uses.
+      // Caller can pass explicit ttlHours/usesLeft to restrict.
+      const ttlHours = options.ttlHours == null ? null : Number(options.ttlHours);
+      const usesLeft = options.usesLeft == null ? null : Number(options.usesLeft);
+      const unlimited = options.unlimited !== false && ttlHours == null && usesLeft == null;
       const shareSecret = await admin.createShareSecret(cfg.shareId);
       const token = await admin.createEnrollmentToken({
         shareId: cfg.shareId,
         ttlHours,
-        usesLeft
+        usesLeft,
+        unlimited
       });
+      const readKey = options.publishReadKey === false
+        ? null
+        : await admin.createKey({
+            name: `share-read-${cfg.shareId}`,
+            scope: 'read'
+          });
 
       const written = await configShare.writeSharedConfig(cfg.networkSharePath, {
         apiBaseUrl,
         enrollmentToken: token.enrollmentToken,
+        readApiKey: readKey?.apiKey || '',
         shareId: cfg.shareId,
         tlsFingerprint: options.tlsFingerprint ?? remote.tlsFingerprint ?? null
       }, shareSecret.secret);
+      if (readKey?.apiKey && secretStore.available()) {
+        secretStore.set('read_api_key', readKey.apiKey);
+      }
 
       await logSink.add('log_share_config_published', {
         source: 'logging',
@@ -748,7 +768,8 @@ app.whenReady().then(() => {
         path: written.path,
         shareId: cfg.shareId,
         expiresInHours: token.expiresInHours,
-        usesLeft: token.usesLeft
+        usesLeft: token.usesLeft,
+        readKeyPublished: !!readKey?.apiKey
       };
     } catch (err) {
       return { success: false, error: err.message || String(err) };
@@ -759,6 +780,7 @@ app.whenReady().then(() => {
   ipcMain.handle('logs:useLocal', async () => {
     configService.setConfig({ logMode: 'local' });
     secretStore.delete('ingest_api_key');
+    secretStore.delete('read_api_key');
     await logSink.reload();
     return { success: true };
   });

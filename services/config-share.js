@@ -12,14 +12,16 @@
 //   "tlsFingerprint": "sha256//...",           // optional pinning
 //   "enrollmentUrl": "https://logs.empresa.local/api/enroll",
 //   "enrollmentToken": "<short-lived token>",  // swapped for an apiKey
+//   "readApiKey": "<read-only api key>",        // optional: lets clients read logs/stats
 //   "shareId": "<8-char id>",
 //   "readonly": true,
 //   "issuedAt": "2026-04-24T12:00:00Z",
 //   "signature": "<base64(HMAC-SHA256(canonicalJson, shareSecret))>"
 // }
 //
-// Clients only need read access. Secrets (the share HMAC key
-// and per-equipo apiKey) never live on the share.
+// Clients only need read access to this file. The share HMAC key
+// and per-equipo ingest apiKey never live on the share. The optional
+// readApiKey is intentionally low-privilege and only grants log reads.
 // ═══════════════════════════════════════════════════════════
 
 const fs = require('fs');
@@ -100,6 +102,13 @@ function normalizeSharedConfig(raw) {
     throw new Error('shared_config_bad_share_id');
   }
 
+  const readApiKey = typeof raw.readApiKey === 'string'
+    ? raw.readApiKey.trim()
+    : '';
+  if (readApiKey && (readApiKey.length < 16 || readApiKey.length > 256)) {
+    throw new Error('shared_config_bad_read_key');
+  }
+
   const tlsFingerprint = typeof raw.tlsFingerprint === 'string' && raw.tlsFingerprint.trim()
     ? raw.tlsFingerprint.trim()
     : null;
@@ -119,6 +128,9 @@ function normalizeSharedConfig(raw) {
     issuedAt: typeof raw.issuedAt === 'string' ? raw.issuedAt : ''
   };
 
+  if (readApiKey) {
+    normalized.readApiKey = readApiKey;
+  }
   if (typeof raw.signature === 'string' && raw.signature) {
     normalized.signature = raw.signature;
   }
@@ -179,6 +191,9 @@ async function writeSharedConfig(networkSharePath, payload, shareSecretHex) {
     readonly: true,
     issuedAt: new Date().toISOString()
   };
+  if (payload.readApiKey) {
+    base.readApiKey = payload.readApiKey;
+  }
   const signed = normalizeSharedConfig(base);
   signed.signature = sign(signed, shareSecretHex);
 

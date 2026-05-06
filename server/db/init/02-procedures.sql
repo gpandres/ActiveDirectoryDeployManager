@@ -102,8 +102,10 @@ END$$
 DROP PROCEDURE IF EXISTS sp_purge_expired_tokens$$
 CREATE PROCEDURE sp_purge_expired_tokens()
 BEGIN
+  -- NULL on either column means "no limit" — never purge those.
   DELETE FROM enrollment_tokens
-   WHERE expires_at < NOW() OR uses_left = 0;
+   WHERE (expires_at IS NOT NULL AND expires_at < NOW())
+      OR (uses_left  IS NOT NULL AND uses_left  = 0);
 END$$
 
 -- ─────────────────────────────────────────────────────────────

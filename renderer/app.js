@@ -4,14 +4,23 @@
 
 window.langDict = {};
 
-window.t = function(key) {
-  const parts = key.split('.');
+// Resolve a dotted i18n key. Returns the localized string, or empty
+// string if missing — that lets callers fall back via `t('x') || 'def'`.
+// Missing keys are logged once (per session) so they're easy to fix.
+window._missingI18n = window._missingI18n || new Set();
+window.t = function(key, fallback) {
+  const parts = String(key || '').split('.');
   let val = window.langDict;
   for (const part of parts) {
     if (val === undefined || val === null) break;
     val = val[part];
   }
-  return val || key;
+  if (typeof val === 'string') return val;
+  if (!window._missingI18n.has(key)) {
+    window._missingI18n.add(key);
+    console.warn('[i18n] missing key:', key);
+  }
+  return fallback != null ? fallback : '';
 };
 
 window.initI18n = async function() {

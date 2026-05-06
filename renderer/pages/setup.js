@@ -216,7 +216,10 @@ const SetupPage = {
 
     document.getElementById('btn-browse-network').addEventListener('click', async () => {
       const folder = await window.api.config.selectFolder();
-      if (folder) document.getElementById('setup-network').value = folder;
+      if (folder) {
+        document.getElementById('setup-network').value = folder;
+        await runDetection();
+      }
     });
 
     if (App.rsatAvailable) {
@@ -226,6 +229,7 @@ const SetupPage = {
     }
 
     document.getElementById('btn-save-setup').addEventListener('click', async () => {
+      await runDetection();
       const selectedMode = document.querySelector('input[name="setup-logmode"]:checked')?.value || 'local';
       const selectedUiMode = document.querySelector('input[name="setup-ui-mode"]:checked')?.value || 'simple';
       const dedBaseUrl = document.getElementById('setup-ded-baseurl')?.value.trim() || '';
@@ -304,6 +308,14 @@ const SetupPage = {
       document.querySelector('.sidebar').style.display = 'flex';
       App.updateSidebarLanguage();
       App.navigate('dashboard');
+      if (selectedMode === 'dedicated' && !this._logModeState?.present) {
+        setTimeout(() => {
+          App.toast(
+            t('setup.dedicatedServerSavedGuide') || 'Servidor guardado. En Configuracion, publica la config en el share y regenera scripts desplegados si ya existian apps.',
+            'info'
+          );
+        }, 250);
+      }
     });
   },
 

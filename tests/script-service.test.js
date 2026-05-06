@@ -499,6 +499,51 @@ describe('generateUninstallScript', () => {
     expect(script).toContain('Ejecutando comando manual');
   });
 
+  it('skips uninstall when a configured file detection anchor is absent', () => {
+    const script = svc.generateUninstallScript(base({
+      template: 'custom',
+      detection: {
+        type: 'file',
+        filePath: 'C:\\Program Files\\Tool\\tool.exe',
+        fileCheck: 'exists'
+      },
+      uninstall: {
+        mode: 'manual',
+        command: 'C:\\Program Files\\Tool\\uninstall.exe',
+        args: '/quiet'
+      }
+    }));
+
+    expect(script).toContain('function Test-AppPresentForUninstall');
+    expect(script).toContain("Test-Path -LiteralPath 'C:\\Program Files\\Tool\\tool.exe'");
+    expect(script).toContain("if (-not (Test-AppPresentForUninstall))");
+    expect(script).toContain("note = 'detection-rule-absent'");
+  });
+
+  it('uses registry detection as an uninstall presence guard without requiring value comparisons', () => {
+    const script = svc.generateUninstallScript(base({
+      template: 'generic',
+      installerType: 'exe',
+      detection: {
+        type: 'registry',
+        registryHive: 'HKLM',
+        registryKey: 'Software\\Vendor\\Tool',
+        registryValueName: 'Version',
+        registryCheck: 'equals',
+        registryExpectedValue: '2.0.0'
+      },
+      uninstall: {
+        mode: 'auto-registry',
+        registryMatchName: 'Vendor Tool'
+      }
+    }));
+
+    expect(script).toContain("function Test-AppPresentForUninstall");
+    expect(script).toContain("$path = 'HKLM:\\Software\\Vendor\\Tool'");
+    expect(script).toContain("return ($null -ne $item.$valueName)");
+    expect(script).not.toContain("registryExpectedValue");
+  });
+
   it('builds winget uninstall scripts with the configured package id', () => {
     const script = svc.generateUninstallScript(base({
       template: 'winget',
