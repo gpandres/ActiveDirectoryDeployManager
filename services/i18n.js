@@ -88,6 +88,7 @@ const TRANSLATIONS_EN = {
     logsDir: "Local logs folder",
     logsDirHint: "Empty = default user folder.",
 
+    dedicatedServerSavedGuide: "Server saved. In Settings, publish the config to the share and regenerate deployed scripts if apps already existed.",
     saveAndContinue: "Save and Continue"
   },
   dashboard: {
@@ -630,7 +631,24 @@ const TRANSLATIONS_EN = {
     nameRequired: "Name required",
     copyOnce: "Copy now — it won't be shown again",
     ttlHours: "TTL (hours)",
-    uses: "Max uses"
+    uses: "Max uses",
+    unlimitedToken: "No expiration / unlimited uses",
+    publishShareLogConfig: "Publish config to share",
+    shareLogConfigPublished: "Configuration published",
+    dedicatedNextStepTitle: "Server ready to publish",
+    dedicatedNextStepHint: "Publish the configuration and a read key to the share. If apps were already deployed, regenerate their scripts to update the logging hooks.",
+    dedicatedServerSavedGuide: "Server saved. Publish the config to the share and regenerate deployed scripts if apps already existed.",
+    regeneratePublishedScripts: "Regenerate deployed scripts",
+    noPublishedScripts: "There are no deployed scripts to regenerate.",
+    regeneratePublishedScriptsSuccess: "{count} scripts regenerated.",
+    regeneratePublishedScriptsPartial: "{updated} scripts regenerated; {failed} failed.",
+    regeneratePublishedScriptsError: "Unable to regenerate scripts",
+    readonlyModeTitle: "Read-only mode",
+    readonlyModeHint: "This configuration comes from the share published by the admin. This computer can read logs, but cannot publish changes.",
+    readonlyConnectedTitle: "Read access connected",
+    readonlyConnectedHint: "This computer uses the read key published by the admin to query logs from {server}.",
+    ingestProvisioned: "Ingest key created",
+    ingestProvisionFailed: "Could not provision ingest key"
   },
   updates: {
     sectionTitle: "Application Updates",
@@ -837,6 +855,7 @@ const TRANSLATIONS_ES = {
     enrollFailed: "No se pudo enrolar el equipo",
     enrollOk: "Equipo enrolado correctamente",
     adminLoginFailed: "Login admin fallido",
+    dedicatedServerSavedGuide: "Servidor guardado. En Configuracion, publica la config en el share y regenera scripts desplegados si ya existian apps.",
     logsDir: "Carpeta de logs locales",
     logsDirHint: "Vacío = carpeta de usuario por defecto.",
 
@@ -1389,7 +1408,24 @@ const TRANSLATIONS_ES = {
     nameRequired: "Nombre requerido",
     copyOnce: "Cópialo ahora — no se podrá volver a mostrar",
     ttlHours: "TTL (horas)",
-    uses: "Usos máximos"
+    uses: "Usos máximos",
+    unlimitedToken: "Sin expiración / usos ilimitados",
+    publishShareLogConfig: "Publicar config en share",
+    dedicatedNextStepTitle: "Servidor listo para publicar",
+    dedicatedNextStepHint: "Publica la configuracion y una clave de lectura en el share. Si ya hay apps desplegadas, regenera sus scripts para actualizar los hooks de logging.",
+    dedicatedServerSavedGuide: "Servidor guardado. Publica la config en el share y regenera scripts desplegados si ya existian apps.",
+    regeneratePublishedScripts: "Regenerar scripts desplegados",
+    noPublishedScripts: "No hay scripts desplegados para regenerar.",
+    regeneratePublishedScriptsSuccess: "{count} scripts regenerados.",
+    regeneratePublishedScriptsPartial: "{updated} scripts regenerados; {failed} con error.",
+    regeneratePublishedScriptsError: "No se pudieron regenerar los scripts",
+    readonlyModeTitle: "Modo lectura",
+    readonlyModeHint: "La configuracion viene del share publicado por el admin. Este equipo puede consultar logs, pero no publicar cambios.",
+    readonlyConnectedTitle: "Lectura conectada",
+    readonlyConnectedHint: "Este equipo usa la clave de lectura publicada por el admin para consultar logs del servidor {server}.",
+    shareLogConfigPublished: "Configuración publicada",
+    ingestProvisioned: "Clave de ingesta creada",
+    ingestProvisionFailed: "No se pudo provisionar la clave de ingesta"
   },
   common: {
     yes: "Sí",

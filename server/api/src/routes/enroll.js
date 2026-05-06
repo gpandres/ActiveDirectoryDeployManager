@@ -33,13 +33,17 @@ module.exports = async function enrollRoutes(fastify) {
       await conn.beginTransaction();
 
       // Atomically consume one use if the token is valid.
+      // NULL expires_at = no expiration; NULL uses_left = unlimited (skip decrement).
       const [result] = await conn.execute(
         `UPDATE enrollment_tokens
-            SET uses_left = uses_left - 1
+            SET uses_left = CASE
+                              WHEN uses_left IS NULL THEN NULL
+                              ELSE uses_left - 1
+                            END
           WHERE token_hash = ?
             AND share_id   = ?
-            AND expires_at > NOW()
-            AND uses_left  > 0`,
+            AND (expires_at IS NULL OR expires_at > NOW())
+            AND (uses_left  IS NULL OR uses_left  > 0)`,
         [tokenHash, shareId]
       );
       if (result.affectedRows === 0) {

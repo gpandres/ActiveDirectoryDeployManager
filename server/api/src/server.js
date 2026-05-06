@@ -4,6 +4,26 @@ const path = require('path');
 const config = require('./config');
 const { getPool, closePool } = require('./lib/db');
 
+// ─── Lightweight idempotent migrations ────────────────────────
+// 01-schema.sql only runs on a fresh MariaDB volume. For existing
+// deployments we apply small ALTERs at startup so they pick up
+// schema changes without a manual maintenance window.
+async function applyMigrations(pool) {
+  // enrollment_tokens: allow NULL on expires_at / uses_left (= unlimited).
+  try {
+    await pool.query(
+      `ALTER TABLE enrollment_tokens
+         MODIFY COLUMN expires_at DATETIME NULL DEFAULT NULL,
+         MODIFY COLUMN uses_left  INT UNSIGNED NULL DEFAULT NULL`
+    );
+  } catch (err) {
+    // Table may not exist yet on first boot; ignore — init scripts will create it.
+    if (err.code !== 'ER_NO_SUCH_TABLE') {
+      console.warn('[migrate] enrollment_tokens ALTER failed:', err.code || err.message);
+    }
+  }
+}
+
 async function sendPublicHtml(reply, filename) {
   const filePath = path.join(__dirname, 'public', filename);
   const html = await fs.promises.readFile(filePath, 'utf8');
@@ -68,6 +88,12 @@ async function build() {
 
 async function start() {
   const app = await build();
+
+  try {
+    await applyMigrations(getPool());
+  } catch (err) {
+    app.log.warn({ err }, 'migrations_failed_continuing');
+  }
 
   const shutdown = async (signal) => {
     app.log.info({ signal }, 'shutting_down');

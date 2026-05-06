@@ -123,10 +123,13 @@ const adminService = {
     const r = await call('GET', '/api/admin/enrollment-tokens');
     return r.body;
   },
-  async createEnrollmentToken({ shareId, ttlHours, usesLeft }) {
-    const r = await call('POST', '/api/admin/enrollment-tokens', {
-      shareId, ttlHours, usesLeft
-    });
+  async createEnrollmentToken({ shareId, ttlHours, usesLeft, unlimited } = {}) {
+    // Server defaults to unlimited; only forward fields that were explicitly set.
+    const body = { shareId };
+    if (ttlHours != null) body.ttlHours = ttlHours;
+    if (usesLeft != null) body.usesLeft = usesLeft;
+    if (typeof unlimited === 'boolean') body.unlimited = unlimited;
+    const r = await call('POST', '/api/admin/enrollment-tokens', body);
     return r.body;
   },
 

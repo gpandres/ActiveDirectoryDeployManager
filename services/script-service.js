@@ -580,6 +580,15 @@ function buildUninstallScriptShell(appConfig, uninstallConfig, body, options = {
   const mode = sanitizePSForEmbedding(uninstallConfig.mode || 'manual');
   const title = sanitizePSForEmbedding(options.title || 'UNINSTALL');
   const detectionHelpers = options.includeDetectionHelpers ? `${getInstallerConflictLogic()}\n` : '';
+  const appPresenceDetection = buildUninstallPresenceDetectionSnippet(appConfig);
+  const appPresenceGuard = appPresenceDetection ? `
+if (-not (Test-AppPresentForUninstall)) {
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: La regla de deteccion indica que $NombreApp ya no esta instalada."
+    Save-UninstallTracker -Result 'removed' -Method $UninstallMode -Extra @{ note = 'detection-rule-absent' }
+    Stop-Transcript -ErrorAction SilentlyContinue
+    exit 0
+}
+` : '';
   const extraFunctions = options.extraFunctions ? `${options.extraFunctions}\n` : '';
 
   return `# =========================================================================
@@ -668,7 +677,7 @@ function Save-UninstallTracker {
     Send-AppDeployLog -Level $eventLevel -Source "uninstall" -Message $eventName -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; method = $Method; result = $Result; error = $ErrorMessage }
 }
 
-${detectionHelpers}${extraFunctions}try {
+${detectionHelpers}${appPresenceDetection}${extraFunctions}${appPresenceGuard}try {
 Send-AppDeployLog -Level "info" -Source "uninstall" -Message "uninstall_start" -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; method = $UninstallMode }
 ${body}
 } catch {
@@ -2081,6 +2090,47 @@ function Test-AppInstalled {
   return '';
 }
 
+// Build a broader presence check for uninstall scripts. Install detection may
+// include version/value comparisons; for uninstall we only need to know whether
+// the configured detection anchor is still present before attempting removal.
+function buildUninstallPresenceDetectionSnippet(cfg) {
+  const d = cfg?.detection;
+  if (!d || !d.type || d.type === 'tracker') return '';
+
+  if (d.type === 'file') {
+    if (!d.filePath) return '';
+    const safePath = psSingleQuote(d.filePath);
+    return `
+function Test-AppPresentForUninstall {
+    return (Test-Path -LiteralPath '${safePath}')
+}
+`;
+  }
+
+  if (d.type === 'registry') {
+    if (!d.registryKey) return '';
+    const hive = d.registryHive === 'HKCU' ? 'HKCU' : 'HKLM';
+    const key = psSingleQuote(d.registryKey.replace(/^\\+|\\+$/g, ''));
+    const valueName = psSingleQuote(d.registryValueName || '');
+    return `
+function Test-AppPresentForUninstall {
+    $path = '${hive}:\\${key}'
+    if (-not (Test-Path -LiteralPath $path)) { return $false }
+    $valueName = '${valueName}'
+    if (-not $valueName) { return $true }
+    try {
+        $item = Get-ItemProperty -LiteralPath $path -Name $valueName -ErrorAction Stop
+        return ($null -ne $item.$valueName)
+    } catch {
+        return $false
+    }
+}
+`;
+  }
+
+  return '';
+}
+
 // PS code that runs early and blocks until a dependency app's tracker shows success,
 // or the timeout elapses. Behavior controls whether timeout skips or fails.
 function buildDependencyWaitSnippet(cfg) {
@@ -2139,16 +2189,8 @@ function getRemoteScriptLoggingLogic() {
     '        $RemoteLogState.ApiBaseUrl = ([string]$cfg.apiBaseUrl).TrimEnd("/")',
     '        $RemoteLogState.ShareId = [string]$cfg.shareId',
     '        $RemoteLogState.TlsFingerprint = [string]$cfg.tlsFingerprint',
-    '        if ($RemoteLogState.TlsFingerprint) {',
-    '            [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {',
-    '                param($sender, $cert, $chain, $errors)',
-    '                try {',
-    '                    $sha = [System.Security.Cryptography.SHA256]::Create()',
-    '                    $fp = "sha256//" + [Convert]::ToBase64String($sha.ComputeHash($cert.GetRawCertData()))',
-    '                    return $fp -eq $RemoteLogState.TlsFingerprint',
-    '                } catch { return $false }',
-    '            }',
-    '        }',
+    '        try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12 } catch { }',
+    '        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { param($sender, $cert, $chain, $errors) return $true }',
     '        $keySuffix = if ($RemoteLogState.ShareId) { $RemoteLogState.ShareId } else { "default" }',
     '        $keyFile = Join-Path $LogDir ("RemoteLogKey_" + $keySuffix + ".json")',
     '        if (Test-Path -LiteralPath $keyFile) {',

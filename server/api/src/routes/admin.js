@@ -132,22 +132,26 @@ module.exports = async function adminRoutes(fastify) {
   });
 
   // ────────── GET /api/admin/enrollment-tokens ──────────
+  // Returns ALL tokens (including unlimited / NULL columns). Filtering
+  // out expired/used-up rows is handled by sp_purge_expired_tokens.
   fastify.get('/api/admin/enrollment-tokens', async () => {
     const [rows] = await getPool().execute(
       `SELECT share_id, expires_at, uses_left, created_at
          FROM enrollment_tokens
-        WHERE expires_at > NOW() AND uses_left > 0
         ORDER BY created_at DESC`
     );
     return rows.map(r => ({
       shareId: r.share_id,
-      expiresAt: r.expires_at?.toISOString?.() ?? null,
-      usesLeft: r.uses_left,
+      expiresAt: r.expires_at?.toISOString?.() ?? null,   // null = no expiration
+      usesLeft: r.uses_left ?? null,                      // null = unlimited
       createdAt: r.created_at?.toISOString?.() ?? null
     }));
   });
 
   // ────────── POST /api/admin/enrollment-tokens ──────────
+  // Defaults to unlimited token (no expiry, infinite uses) — that's the
+  // common case for per-app ingest enrollment. Pass ttlHours/usesLeft to
+  // restrict; pass unlimited:false to require explicit limits.
   fastify.post('/api/admin/enrollment-tokens', {
     schema: {
       body: {
@@ -156,24 +160,32 @@ module.exports = async function adminRoutes(fastify) {
         additionalProperties: false,
         properties: {
           shareId:   { type: 'string', maxLength: 32 },
-          ttlHours:  { type: 'integer', minimum: 1, maximum: 720, default: 24 },
-          usesLeft:  { type: 'integer', minimum: 1, maximum: 10000, default: 1000 }
+          ttlHours:  { type: ['integer', 'null'], minimum: 1, maximum: 87600 },
+          usesLeft:  { type: ['integer', 'null'], minimum: 1, maximum: 1000000 },
+          unlimited: { type: 'boolean', default: true }
         }
       }
     }
   }, async (req, reply) => {
-    const { shareId, ttlHours, usesLeft } = req.body;
+    const { shareId, ttlHours, usesLeft, unlimited } = req.body;
     const raw = randomToken(32);
+
+    // unlimited wins unless caller passed explicit ttlHours/usesLeft.
+    const effTtl   = (unlimited && ttlHours  == null) ? null : (ttlHours  ?? null);
+    const effUses  = (unlimited && usesLeft  == null) ? null : (usesLeft  ?? null);
+
     await getPool().execute(
       `INSERT INTO enrollment_tokens (token_hash, share_id, expires_at, uses_left)
-            VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? HOUR), ?)`,
-      [sha256Hex(raw), shareId, ttlHours, usesLeft]
+            VALUES (?, ?,
+                    CASE WHEN ? IS NULL THEN NULL ELSE DATE_ADD(NOW(), INTERVAL ? HOUR) END,
+                    ?)`,
+      [sha256Hex(raw), shareId, effTtl, effTtl, effUses]
     );
     reply.code(201).send({
       enrollmentToken: raw,
       shareId,
-      expiresInHours: ttlHours,
-      usesLeft
+      expiresInHours: effTtl,   // null = never expires
+      usesLeft: effUses          // null = unlimited
     });
   });
 

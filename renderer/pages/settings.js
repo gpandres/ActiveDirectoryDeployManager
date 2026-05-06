@@ -206,16 +206,19 @@ const SettingsPage = {
 
     const remote = config.remoteLogging || {};
     const adminStatus = await window.api.admin.status();
+    const isReadonlyRemote = config.logMode === 'dedicated' && remote.readonly === true;
+    const readonlyAttr = isReadonlyRemote ? 'disabled' : '';
+    const readonlyFieldAttr = isReadonlyRemote ? 'readonly' : '';
 
     block.innerHTML = `
       <div style="display:flex;gap:8px;margin-bottom:12px;">
         <label style="flex:1;cursor:pointer;border:1px solid var(--border-color);border-radius:6px;padding:10px;">
-          <input type="radio" name="cfg-logmode" value="local" ${config.logMode === 'local' || !config.logMode ? 'checked' : ''}>
+          <input type="radio" name="cfg-logmode" value="local" ${config.logMode === 'local' || !config.logMode ? 'checked' : ''} ${readonlyAttr}>
           <strong style="margin-left:6px;">${t('settings.logModeLocal') || 'Local'}</strong>
           <p class="form-hint" style="margin:4px 0 0 22px;">${t('settings.logModeLocalHint') || 'Logs en este equipo.'}</p>
         </label>
         <label style="flex:1;cursor:pointer;border:1px solid var(--border-color);border-radius:6px;padding:10px;">
-          <input type="radio" name="cfg-logmode" value="dedicated" ${config.logMode === 'dedicated' ? 'checked' : ''}>
+          <input type="radio" name="cfg-logmode" value="dedicated" ${config.logMode === 'dedicated' ? 'checked' : ''} ${readonlyAttr}>
           <strong style="margin-left:6px;">${t('settings.logModeDedicated') || 'Servidor dedicado'}</strong>
           <p class="form-hint" style="margin:4px 0 0 22px;">${t('settings.logModeDedicatedHint') || 'API HTTPS centralizada.'}</p>
         </label>
@@ -233,15 +236,20 @@ const SettingsPage = {
       </div>
 
       <div id="cfg-dedicated-block" style="display:${config.logMode === 'dedicated' ? 'block' : 'none'};padding:12px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-secondary);margin-bottom:12px;">
+        ${isReadonlyRemote ? `
+          <div style="padding:8px 10px;border-radius:6px;background:var(--accent-primary-dim);color:var(--accent-primary);font-size:12px;margin-bottom:10px;">
+            <strong>${t('settings.readonlyModeTitle') || 'Modo lectura'}</strong> - ${t('settings.readonlyModeHint') || 'La configuracion viene del share publicado por el admin. Este equipo puede consultar logs, pero no publicar cambios.'}
+          </div>
+        ` : ''}
         <div class="form-group" style="margin-bottom:10px;">
           <label class="form-label">${t('settings.dedBaseUrl') || 'URL del servidor'}</label>
-          <input class="form-input" id="cfg-ded-baseurl" placeholder="https://logs.example.local" value="${this.esc(remote.apiBaseUrl || '')}">
+          <input class="form-input" id="cfg-ded-baseurl" placeholder="https://logs.example.local" value="${this.esc(remote.apiBaseUrl || '')}" ${readonlyFieldAttr}>
         </div>
         <div class="form-group" style="margin-bottom:10px;">
           <label class="form-label">${t('settings.dedTlsFp') || 'TLS Fingerprint (opcional)'}</label>
-          <input class="form-input" id="cfg-ded-tlsfp" placeholder="sha256//..." value="${this.esc(remote.tlsFingerprint || '')}">
+          <input class="form-input" id="cfg-ded-tlsfp" placeholder="sha256//..." value="${this.esc(remote.tlsFingerprint || '')}" ${readonlyFieldAttr}>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <div style="display:${isReadonlyRemote ? 'none' : 'flex'};gap:8px;flex-wrap:wrap;margin-bottom:10px;">
           <button class="btn btn-secondary btn-sm" id="cfg-btn-inspect" type="button">${t('settings.inspectCert') || 'Obtener Fingerprint (Certificado)'}</button>
           <button class="btn btn-secondary btn-sm" id="cfg-btn-save-ded" type="button">${t('settings.saveDedConfig') || 'Guardar URL/Fingerprint'}</button>
         </div>
@@ -253,7 +261,7 @@ const SettingsPage = {
         <div id="cfg-admin-block">
           ${adminStatus.loggedIn
             ? this._adminLoggedInHtml(adminStatus)
-            : this._adminLoginHtml(remote)}
+            : (isReadonlyRemote ? this._readonlyLogsHtml(remote) : this._adminLoginHtml(remote))}
         </div>
       </div>
     `;
@@ -274,6 +282,20 @@ const SettingsPage = {
     `;
   },
 
+  _readonlyLogsHtml(remote = {}) {
+    return `
+      <div style="padding:10px 12px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-secondary);">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px;">
+          ${t('settings.readonlyConnectedTitle') || 'Lectura conectada'}
+        </div>
+        <p class="form-hint" style="margin:0;">
+          ${(t('settings.readonlyConnectedHint') || 'Este equipo usa la clave de lectura publicada por el admin para consultar logs del servidor {server}.')
+            .replace('{server}', this.esc(remote.apiBaseUrl || ''))}
+        </p>
+      </div>
+    `;
+  },
+
   _adminLoggedInHtml(st) {
     return `
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
@@ -283,10 +305,21 @@ const SettingsPage = {
         </span>
         <button class="btn btn-secondary btn-sm" id="cfg-btn-admin-logout">${t('settings.adminLogout') || 'Salir'}</button>
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
-        <button class="btn btn-secondary btn-sm" id="cfg-btn-publish-share-log">
-          ${t('settings.publishShareLogConfig') || 'Publicar config en share'}
-        </button>
+      <div style="padding:10px 12px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-secondary);margin-bottom:12px;">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px;">
+          ${t('settings.dedicatedNextStepTitle') || 'Servidor listo para publicar'}
+        </div>
+        <p class="form-hint" style="margin:0 0 10px 0;">
+          ${t('settings.dedicatedNextStepHint') || 'Publica la configuracion y una clave de lectura en el share. Si ya hay apps desplegadas, regenera sus scripts para actualizar los hooks de logging.'}
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-secondary btn-sm" id="cfg-btn-publish-share-log">
+            ${t('settings.publishShareLogConfig') || 'Publicar config en share'}
+          </button>
+          <button class="btn btn-secondary btn-sm" id="cfg-btn-regenerate-scripts">
+            ${t('settings.regeneratePublishedScripts') || 'Regenerar scripts desplegados'}
+          </button>
+        </div>
       </div>
 
       <div style="margin-bottom:14px;">
@@ -363,6 +396,10 @@ const SettingsPage = {
       });
       await window.api.logs.reload();
       App.toast(t('settings.saved'), 'success');
+      App.toast(
+        t('settings.dedicatedServerSavedGuide') || 'Servidor guardado. Publica la config en el share y regenera scripts desplegados si ya existian apps.',
+        'info'
+      );
     });
 
     document.getElementById('btn-browse-log')?.addEventListener('click', async () => {
@@ -376,6 +413,7 @@ const SettingsPage = {
     document.getElementById('cfg-btn-new-secret')?.addEventListener('click', () => this._modalNewSecret());
     document.getElementById('cfg-btn-new-token')?.addEventListener('click', () => this._modalNewToken());
     document.getElementById('cfg-btn-publish-share-log')?.addEventListener('click', () => this._publishShareLoggingConfig());
+    document.getElementById('cfg-btn-regenerate-scripts')?.addEventListener('click', () => this._regeneratePublishedScripts());
   },
 
   async _doAdminLogin() {
@@ -416,6 +454,10 @@ const SettingsPage = {
     await window.api.logs.reload();
     const cfg2 = await window.api.config.get();
     await this._renderLogsBlock(cfg2);
+    App.toast(
+      t('settings.dedicatedServerSavedGuide') || 'Servidor guardado. Publica la config en el share y regenera scripts desplegados si ya existian apps.',
+      'info'
+    );
   },
 
   async _doAdminLogout() {
@@ -431,8 +473,7 @@ const SettingsPage = {
     const result = await window.api.share.publishLoggingConfig({
       apiBaseUrl: baseUrl,
       tlsFingerprint,
-      ttlHours: 720,
-      usesLeft: 1000
+      unlimited: true   // per-app token, no expiry, no use cap
     });
     if (!result.success) {
       App.toast(`${t('common.error') || 'Error'}: ${result.error}`, 'error');
@@ -444,6 +485,84 @@ const SettingsPage = {
     );
     await this._loadTokensTable();
     await this._loadSecretsTable();
+  },
+
+  async _regeneratePublishedScripts() {
+    const btn = document.getElementById('cfg-btn-regenerate-scripts');
+    const originalHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner" style="width:12px;height:12px;display:inline-block;border-width:2px;"></span>`;
+    }
+
+    try {
+      const apps = await window.api.apps.getAll().catch(() => []);
+      const targets = (Array.isArray(apps) ? apps : [])
+        .filter(app => app && app.id && app.deployed !== false && (app.deployedPath || app.uninstallDeployedPath));
+
+      if (!targets.length) {
+        App.toast(t('settings.noPublishedScripts') || 'No hay scripts desplegados para regenerar.', 'info');
+        return;
+      }
+
+      let updated = 0;
+      const failed = [];
+      for (const app of targets) {
+        const result = await window.api.scripts.regenerate(app);
+        if (!result?.success) {
+          if (App.isShareError(result?.error)) {
+            App.handleShareError();
+            failed.push(`${app.name}: ${result.error}`);
+            break;
+          }
+          failed.push(`${app.name}: ${result?.error || 'error'}`);
+          continue;
+        }
+
+        const nextPublishedAction = String(result.publishedAction || app.publishedAction || '').trim().toLowerCase() === 'uninstall'
+          ? 'uninstall'
+          : 'install';
+        await window.api.apps.update(app.id, {
+          deployed: true,
+          deployedPath: result.installPath || app.deployedPath || '',
+          uninstallDeployedPath: result.uninstallPath || app.uninstallDeployedPath || '',
+          publishedAction: nextPublishedAction,
+          publishedAt: new Date().toISOString(),
+          lastDeployHash: result.hash || app.lastDeployHash || ''
+        });
+        updated += 1;
+      }
+
+      if (updated > 0) {
+        await window.api.activity.add('settings_scripts_regenerated', {
+          updated,
+          failed: failed.length
+        });
+      }
+
+      if (failed.length) {
+        App.toast(
+          (t('settings.regeneratePublishedScriptsPartial') || '{updated} scripts regenerados; {failed} con error.')
+            .replace('{updated}', String(updated))
+            .replace('{failed}', String(failed.length)),
+          'warning'
+        );
+        return;
+      }
+
+      App.toast(
+        (t('settings.regeneratePublishedScriptsSuccess') || '{count} scripts regenerados.')
+          .replace('{count}', String(updated)),
+        'success'
+      );
+    } catch (err) {
+      App.toast(`${t('settings.regeneratePublishedScriptsError') || 'No se pudieron regenerar los scripts'}: ${err.message}`, 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+      }
+    }
   },
 
   async _loadAdminTables() {
@@ -516,7 +635,7 @@ const SettingsPage = {
     el.innerHTML = `
       <table class="logs-table">
         <thead><tr><th>shareId</th><th style="width:60px;">${t('settings.colUses') || 'Usos'}</th><th style="width:140px;">${t('settings.colExpires') || 'Expira'}</th></tr></thead>
-        <tbody>${rows.map(o => `<tr><td class="mono">${this.esc(o.shareId)}</td><td class="mono">${o.usesLeft}</td><td class="mono">${this._fmtTs(o.expiresAt)}</td></tr>`).join('')}</tbody>
+        <tbody>${rows.map(o => `<tr><td class="mono">${this.esc(o.shareId)}</td><td class="mono">${o.usesLeft == null ? '∞' : o.usesLeft}</td><td class="mono">${o.expiresAt == null ? '∞' : this._fmtTs(o.expiresAt)}</td></tr>`).join('')}</tbody>
       </table>
     `;
   },
@@ -588,20 +707,37 @@ const SettingsPage = {
     const body = `
       <div class="form-group"><label class="form-label">shareId</label>
         <input class="form-input" id="modal-shareid" placeholder="ABC12345"></div>
-      <div class="form-group"><label class="form-label">${t('settings.ttlHours') || 'TTL (horas)'}</label>
-        <input class="form-input" id="modal-ttl" type="number" value="720" min="1" max="720"></div>
-      <div class="form-group"><label class="form-label">${t('settings.uses') || 'Usos máximos'}</label>
-        <input class="form-input" id="modal-uses" type="number" value="1000" min="1" max="10000"></div>
+      <div class="form-group">
+        <label class="form-label" style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="modal-unlimited" checked>
+          ${t('settings.unlimitedToken') || 'Sin expiración / usos ilimitados'}
+        </label>
+      </div>
+      <div class="form-group" id="modal-limits-group" style="display:none;">
+        <label class="form-label">${t('settings.ttlHours') || 'TTL (horas)'}</label>
+        <input class="form-input" id="modal-ttl" type="number" value="720" min="1" max="87600">
+        <label class="form-label" style="margin-top:8px;">${t('settings.uses') || 'Usos máximos'}</label>
+        <input class="form-input" id="modal-uses" type="number" value="1000" min="1" max="1000000">
+      </div>
       ${this._resultBlock('modal-newtoken')}
     `;
     App.openModal(t('settings.newEnrollToken') || 'Nuevo enrollment token', body, this._modalFooter('modal-create-token'));
     this._wireModalClose();
+    const cbUnlim = document.getElementById('modal-unlimited');
+    const grpLim  = document.getElementById('modal-limits-group');
+    cbUnlim.addEventListener('change', () => {
+      grpLim.style.display = cbUnlim.checked ? 'none' : 'block';
+    });
     document.getElementById('modal-create-token').addEventListener('click', async () => {
       const shareId = document.getElementById('modal-shareid').value.trim();
-      const ttlHours = Number(document.getElementById('modal-ttl').value) || 24;
-      const usesLeft = Number(document.getElementById('modal-uses').value) || 1000;
       if (!shareId) return;
-      const r = await window.api.admin.createEnrollToken({ shareId, ttlHours, usesLeft });
+      const unlimited = cbUnlim.checked;
+      const payload = { shareId, unlimited };
+      if (!unlimited) {
+        payload.ttlHours = Number(document.getElementById('modal-ttl').value) || 24;
+        payload.usesLeft = Number(document.getElementById('modal-uses').value) || 1000;
+      }
+      const r = await window.api.admin.createEnrollToken(payload);
       if (!r.success) return App.toast(r.error, 'error');
       document.getElementById('modal-result').style.display = 'block';
       document.getElementById('modal-newtoken').textContent = r.data.enrollmentToken;
