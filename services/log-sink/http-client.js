@@ -1,5 +1,9 @@
 // ═══════════════════════════════════════════════════════════
-// Thin HTTPS client with optional certificate pinning.
+// Thin HTTPS client. Self-signed certs are accepted unconditionally
+// for the dedicated logging server: the cert may rotate daily and
+// pinning would break enrollment + log queries every rotation. The
+// shared config still ships a tlsFingerprint field, but it is no
+// longer enforced — we trust whatever cert the server presents.
 //
 // We don't bring in axios/node-fetch to keep the portable .exe
 // small. Node's built-in http/https is enough for our needs.
@@ -8,40 +12,18 @@
 const http  = require('http');
 const https = require('https');
 const { URL } = require('url');
-const crypto = require('crypto');
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
-function makeAgent({ pinnedFingerprint }) {
-  // When pinning, do the certificate comparison ourselves on the
-  // tls socket. We disable default validation if a fingerprint is pinned,
-  // allowing self-signed certs to work without OS installation.
-  const agent = new https.Agent({ 
+function makeAgent() {
+  // Always accept self-signed / rotating certs. No fingerprint check.
+  return new https.Agent({
     keepAlive: true,
-    rejectUnauthorized: !pinnedFingerprint
+    rejectUnauthorized: false
   });
-  if (pinnedFingerprint) {
-    agent.createConnection = ((orig) => function (opts, cb) {
-      const socket = orig.call(this, opts, cb);
-      socket.once('secureConnect', () => {
-        const cert = socket.getPeerCertificate(false);
-        if (!cert || !cert.raw) {
-          socket.destroy(new Error('tls_no_cert'));
-          return;
-        }
-        const fp = 'sha256//' + crypto.createHash('sha256')
-          .update(cert.raw).digest('base64');
-        if (fp !== pinnedFingerprint) {
-          socket.destroy(new Error('tls_pin_mismatch:' + fp));
-        }
-      });
-      return socket;
-    })(agent.createConnection);
-  }
-  return agent;
 }
 
-function request({ baseUrl, method = 'GET', path, headers = {}, body, apiKey, pinnedFingerprint, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+function request({ baseUrl, method = 'GET', path, headers = {}, body, apiKey, pinnedFingerprint: _ignored, timeoutMs = DEFAULT_TIMEOUT_MS }) {
   return new Promise((resolve, reject) => {
     const url = new URL(path, baseUrl);
     const isHttps = url.protocol === 'https:';
@@ -55,7 +37,7 @@ function request({ baseUrl, method = 'GET', path, headers = {}, body, apiKey, pi
       hdrs['Content-Length'] = payload.length;
     }
 
-    const agent = isHttps ? makeAgent({ pinnedFingerprint }) : undefined;
+    const agent = isHttps ? makeAgent() : undefined;
 
     const req = mod.request({
       method,
@@ -64,7 +46,7 @@ function request({ baseUrl, method = 'GET', path, headers = {}, body, apiKey, pi
       path: url.pathname + url.search,
       headers: hdrs,
       agent,
-      rejectUnauthorized: pinnedFingerprint ? false : undefined,
+      rejectUnauthorized: isHttps ? false : undefined,
       timeout: timeoutMs
     }, (res) => {
       const chunks = [];
