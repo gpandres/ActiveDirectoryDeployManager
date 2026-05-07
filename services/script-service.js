@@ -605,12 +605,14 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
 if (-not $PSScriptRoot) { $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
 if (-not $PSScriptRoot) { $PSScriptRoot = $PWD.Path }
 
+${getDedicatedRuntimeDetectionLogic()}
+
 $NombreApp = if ($PSScriptRoot) { Split-Path -Leaf $PSScriptRoot } else { "${safeName}" }
 $LogDir = "C:\\ProgramData\\AppDeploy_Logs"
-if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
-Get-ChildItem "$LogDir\\*.log" -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item -Force -ErrorAction SilentlyContinue
-$LogFile = "$LogDir\\Uninstall_$($NombreApp)_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
-$TrackerFile = "$LogDir\\Tracker_$NombreApp.json"
+if (-not $ADDMDedicatedLogging -and -not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+if (-not $ADDMDedicatedLogging) { Get-ChildItem "$LogDir\\*.log" -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item -Force -ErrorAction SilentlyContinue }
+$LogFile = if ($ADDMDedicatedLogging) { $null } else { "$LogDir\\Uninstall_$($NombreApp)_$(Get-Date -Format 'yyyyMMdd_HHmmss').log" }
+$TrackerFile = if ($ADDMDedicatedLogging) { $null } else { "$LogDir\\Tracker_$NombreApp.json" }
 $VersionFile = Join-Path $PSScriptRoot "version.json"
 $CurrentVersion = "${version}"
 $CurrentHash = ""
@@ -618,7 +620,7 @@ $Manifest = $null
 $ManifestUninstall = $null
 $UninstallMode = "${mode}"
 
-Start-Transcript -Path $LogFile -Force -ErrorAction SilentlyContinue
+if ($LogFile) { Start-Transcript -Path $LogFile -Force -ErrorAction SilentlyContinue }
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ===== AppDeploy Manager ============================="
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] App     : $NombreApp"
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Accion  : uninstall [$UninstallMode]"
@@ -671,7 +673,9 @@ function Save-UninstallTracker {
         $payload[$key] = $Extra[$key]
     }
 
-    $payload | ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+    if ($TrackerFile) {
+        try { $payload | ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8 } catch { }
+    }
     $eventName = if ($Result -eq 'failed') { 'uninstall_failed' } elseif ($Result -eq 'removed') { 'uninstall_success' } else { 'uninstall_checked' }
     $eventLevel = if ($Result -eq 'failed') { 'error' } else { 'info' }
     Send-AppDeployLog -Level $eventLevel -Source "uninstall" -Message $eventName -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; method = $Method; result = $Result; error = $ErrorMessage }
@@ -1309,6 +1313,9 @@ function Invoke-DeployCacheCleanupWithFallback {
     )
     if (Invoke-DeployCacheCleanup -CacheDir $CacheDir -MarkerPath $MarkerPath) {
         return $true
+    }
+    if (-not $MarkerPath) {
+        return (Start-DeployCacheCleanupWorker -CacheDir $CacheDir -MarkerPath "")
     }
     if (Register-DeployCacheCleanupPending -CacheDir $CacheDir -MarkerPath $MarkerPath) {
         return (Start-DeployCacheCleanupWorker -CacheDir $CacheDir -MarkerPath $MarkerPath)
@@ -2144,6 +2151,9 @@ function buildDependencyWaitSnippet(cfg) {
   return `
 # ── Esperar a que termine la dependencia (${safeName}) ───────────────────────
 $DepName = '${psSingleQuote(safeName)}'
+if ($ADDMDedicatedLogging) {
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: Dependencia '$DepName' no usa tracker local en modo dedicado; se continua sin escribir residuos."
+} else {
 $DepTracker = "$LogDir\\Tracker_$DepName.json"
 $DepTimeoutSec = ${timeoutMin * 60}
 $DepBehavior = '${behavior}'
@@ -2171,52 +2181,79 @@ if (-not $DepReady) {
     }
 }
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Dependencia '$DepName' lista."
+}
 `.trim();
+}
+
+function getDedicatedRuntimeDetectionLogic() {
+  return [
+    '# Detect dedicated logging before touching local log paths.',
+    '$ADDMDedicatedLogging = $false',
+    '$ADDMLoggingConfig = $null',
+    '$ADDMLoggingConfigPath = ""',
+    'function Find-AppDeployLoggingConfigPath {',
+    '    try {',
+    '        $dir = $PSScriptRoot',
+    '        for ($i = 0; $i -lt 6 -and $dir; $i++) {',
+    '            $candidate = Join-Path $dir "ADDeploy\\logging-config.json"',
+    '            if (Test-Path -LiteralPath $candidate) { return $candidate }',
+    '            $parent = Split-Path -Parent $dir',
+    '            if (-not $parent -or $parent -eq $dir) { break }',
+    '            $dir = $parent',
+    '        }',
+    '    } catch { }',
+    '    return ""',
+    '}',
+    'try {',
+    '    $ADDMLoggingConfigPath = Find-AppDeployLoggingConfigPath',
+    '    if ($ADDMLoggingConfigPath) {',
+    '        $candidateConfig = Get-Content -LiteralPath $ADDMLoggingConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json',
+    '        if ($candidateConfig.mode -eq "dedicated" -and $candidateConfig.apiBaseUrl) {',
+    '            $ADDMLoggingConfig = $candidateConfig',
+    '            $ADDMDedicatedLogging = $true',
+    '        }',
+    '    }',
+    '} catch {',
+    '    $ADDMDedicatedLogging = $false',
+    '    $ADDMLoggingConfig = $null',
+    '}',
+    'function Save-AppDeployTracker {',
+    '    param([hashtable]$Payload)',
+    '    if (-not $TrackerFile) { return }',
+    '    try { $Payload | ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8 } catch { }',
+    '}'
+  ].join('\n');
 }
 
 function getRemoteScriptLoggingLogic() {
   return [
     '# Remote logging to dedicated server (best effort, non-blocking for deployment)',
-    '$RemoteLogState = @{ Enabled = $false; ApiBaseUrl = ""; ApiKey = ""; ShareId = ""; TlsFingerprint = ""; QueueFile = (Join-Path $LogDir "PendingRemoteLogs.ndjson") }',
+    '$RemoteLogState = @{ Enabled = $false; ApiBaseUrl = ""; ApiKey = ""; ShareId = ""; TlsFingerprint = "" }',
     'function Initialize-AppDeployRemoteLog {',
     '    try {',
-    '        $shareRoot = Split-Path -Parent $PSScriptRoot',
-    '        if (-not $shareRoot) { return }',
-    '        $cfgPath = Join-Path $shareRoot "ADDeploy\\logging-config.json"',
-    '        if (-not (Test-Path -LiteralPath $cfgPath)) { return }',
-    '        $cfg = Get-Content -LiteralPath $cfgPath -Raw -ErrorAction Stop | ConvertFrom-Json',
+    '        $cfg = $ADDMLoggingConfig',
+    '        if (-not $cfg) {',
+    '            $cfgPath = Find-AppDeployLoggingConfigPath',
+    '            if (-not $cfgPath -or -not (Test-Path -LiteralPath $cfgPath)) { return }',
+    '            $cfg = Get-Content -LiteralPath $cfgPath -Raw -ErrorAction Stop | ConvertFrom-Json',
+    '        }',
     '        if ($cfg.mode -ne "dedicated" -or -not $cfg.apiBaseUrl) { return }',
     '        $RemoteLogState.ApiBaseUrl = ([string]$cfg.apiBaseUrl).TrimEnd("/")',
     '        $RemoteLogState.ShareId = [string]$cfg.shareId',
     '        $RemoteLogState.TlsFingerprint = [string]$cfg.tlsFingerprint',
     '        try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12 } catch { }',
     '        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { param($sender, $cert, $chain, $errors) return $true }',
-    '        $keySuffix = if ($RemoteLogState.ShareId) { $RemoteLogState.ShareId } else { "default" }',
-    '        $keyFile = Join-Path $LogDir ("RemoteLogKey_" + $keySuffix + ".json")',
-    '        if (Test-Path -LiteralPath $keyFile) {',
-    '            try {',
-    '                $saved = Get-Content -LiteralPath $keyFile -Raw | ConvertFrom-Json',
-    '                if ($saved.apiKey) { $RemoteLogState.ApiKey = [string]$saved.apiKey }',
-    '            } catch { }',
-    '        }',
-    '        if (-not $RemoteLogState.ApiKey -and $cfg.enrollmentToken) {',
+    '        if ($cfg.enrollmentToken) {',
     '            $body = @{ hostname = $env:COMPUTERNAME; shareId = $RemoteLogState.ShareId; enrollmentToken = [string]$cfg.enrollmentToken } | ConvertTo-Json -Compress',
     '            $enroll = Invoke-RestMethod -Method Post -Uri ($RemoteLogState.ApiBaseUrl + "/api/enroll") -ContentType "application/json" -Body $body -TimeoutSec 10 -ErrorAction Stop',
     '            if ($enroll.apiKey) {',
     '                $RemoteLogState.ApiKey = [string]$enroll.apiKey',
-    '                @{ apiKey = $RemoteLogState.ApiKey; shareId = $RemoteLogState.ShareId; enrolledAt = (Get-Date).ToString("o") } | ConvertTo-Json -Compress | Set-Content -LiteralPath $keyFile -Encoding UTF8 -Force',
     '            }',
     '        }',
     '        if ($RemoteLogState.ApiBaseUrl -and $RemoteLogState.ApiKey) { $RemoteLogState.Enabled = $true }',
     '    } catch {',
     '        Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] AVISO: logging remoto no inicializado - $_"',
     '    }',
-    '}',
-    'function Add-AppDeployRemoteQueue {',
-    '    param([object[]]$Entries)',
-    '    try {',
-    '        foreach ($entry in $Entries) { ($entry | ConvertTo-Json -Compress -Depth 8) | Add-Content -LiteralPath $RemoteLogState.QueueFile -Encoding UTF8 }',
-    '    } catch { }',
     '}',
     'function Send-AppDeployLogBatch {',
     '    param([object[]]$Entries, [switch]$NoQueue)',
@@ -2227,23 +2264,11 @@ function getRemoteScriptLoggingLogic() {
     '        Invoke-RestMethod -Method Post -Uri ($RemoteLogState.ApiBaseUrl + "/api/logs/batch") -Headers $headers -ContentType "application/json" -Body $body -TimeoutSec 10 -ErrorAction Stop | Out-Null',
     '        return $true',
     '    } catch {',
-    '        if (-not $NoQueue) { Add-AppDeployRemoteQueue -Entries $Entries }',
     '        return $false',
     '    }',
     '}',
     'function Flush-AppDeployLogQueue {',
-    '    if (-not $RemoteLogState.Enabled -or -not (Test-Path -LiteralPath $RemoteLogState.QueueFile)) { return }',
-    '    try {',
-    '        $lines = Get-Content -LiteralPath $RemoteLogState.QueueFile -ErrorAction Stop | Where-Object { $_ }',
-    '        if (-not $lines -or $lines.Count -eq 0) { Remove-Item -LiteralPath $RemoteLogState.QueueFile -Force -ErrorAction SilentlyContinue; return }',
-    '        $entries = @()',
-    '        foreach ($line in $lines | Select-Object -First 200) { try { $entries += ($line | ConvertFrom-Json) } catch { } }',
-    '        if ($entries.Count -gt 0 -and (Send-AppDeployLogBatch -Entries $entries -NoQueue)) {',
-    '            $remaining = $lines | Select-Object -Skip $entries.Count',
-    '            if ($remaining -and $remaining.Count -gt 0) { $remaining | Set-Content -LiteralPath $RemoteLogState.QueueFile -Encoding UTF8 -Force }',
-    '            else { Remove-Item -LiteralPath $RemoteLogState.QueueFile -Force -ErrorAction SilentlyContinue }',
-    '        }',
-    '    } catch { }',
+    '    return',
     '}',
     'function Send-AppDeployLog {',
     '    param([string]$Level = "info", [string]$Source = "install", [string]$Message, [hashtable]$Context = @{})',
@@ -2275,8 +2300,7 @@ function getLocalCachingLogic(filter = "\\.(exe|msi)$", notifyUser = false, appD
 # ── Detección de instalación previa (regla definida por el usuario) ─────────
 if (Test-AppInstalled) {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Regla de deteccion confirma app ya instalada."
-    @{ version = $CurrentVersion; hash = $CurrentHash; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success'; method = 'detection-rule' } |
-        ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+    Save-AppDeployTracker -Payload @{ version = $CurrentVersion; hash = $CurrentHash; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success'; method = 'detection-rule' }
     Send-AppDeployLog -Level "info" -Source "install" -Message "install_skipped" -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; reason = "detection-rule" }
     Stop-Transcript -ErrorAction SilentlyContinue
     exit 0
@@ -2286,16 +2310,18 @@ if (Test-AppInstalled) {
     'if (-not $PSScriptRoot) { $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }',
     'if (-not $PSScriptRoot) { $PSScriptRoot = $PWD.Path }',
     '',
+    getDedicatedRuntimeDetectionLogic(),
+    '',
     '# ── Logging ────────────────────────────────────────────────────────────',
     '$LogDir = "C:\\ProgramData\\AppDeploy_Logs"',
-    'if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }',
+    'if (-not $ADDMDedicatedLogging -and -not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }',
     '# ── Limpieza de logs antiguos (>7 días) ─────────────────────────────────',
-    'Get-ChildItem "$LogDir\\*.log" -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item -Force -ErrorAction SilentlyContinue',
+    'if (-not $ADDMDedicatedLogging) { Get-ChildItem "$LogDir\\*.log" -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item -Force -ErrorAction SilentlyContinue }',
     '',
     '# Split-Path es pura string — no necesita acceso de red (evita fallo si el share aún no responde)',
     '$NombreApp = if ($PSScriptRoot) { Split-Path -Leaf $PSScriptRoot } else { "UnknownApp" }',
-    '$LogFile   = "$LogDir\\Install_$($NombreApp)_$(Get-Date -Format \'yyyyMMdd_HHmmss\').log"',
-    'Start-Transcript -Path $LogFile -Force -ErrorAction SilentlyContinue',
+    '$LogFile   = if ($ADDMDedicatedLogging) { $null } else { "$LogDir\\Install_$($NombreApp)_$(Get-Date -Format \'yyyyMMdd_HHmmss\').log" }',
+    'if ($LogFile) { Start-Transcript -Path $LogFile -Force -ErrorAction SilentlyContinue }',
     '',
     'Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] ===== AppDeploy Manager ============================="',
     'Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] App     : $NombreApp"',
@@ -2304,10 +2330,10 @@ if (Test-AppInstalled) {
     'Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] Fuente  : $PSScriptRoot"',
     'Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] ====================================================="',
     '',
-    '$TrackerFile = "$LogDir\\Tracker_$NombreApp.json"',
-    '$CleanupMarkerDir = Join-Path $LogDir "PendingCacheCleanup"',
-    'if (-not (Test-Path -LiteralPath $CleanupMarkerDir)) { New-Item -ItemType Directory -Path $CleanupMarkerDir -Force | Out-Null }',
-    '$CleanupMarkerPath = Join-Path $CleanupMarkerDir "$NombreApp.json"',
+    '$TrackerFile = if ($ADDMDedicatedLogging) { $null } else { "$LogDir\\Tracker_$NombreApp.json" }',
+    '$CleanupMarkerDir = if ($ADDMDedicatedLogging) { "" } else { Join-Path $LogDir "PendingCacheCleanup" }',
+    'if ($CleanupMarkerDir -and -not (Test-Path -LiteralPath $CleanupMarkerDir)) { New-Item -ItemType Directory -Path $CleanupMarkerDir -Force | Out-Null }',
+    '$CleanupMarkerPath = if ($CleanupMarkerDir) { Join-Path $CleanupMarkerDir "$NombreApp.json" } else { "" }',
     getRemoteScriptLoggingLogic(),
     depWait,
     getDeployCacheCleanupLogic(),
@@ -2337,9 +2363,9 @@ if (Test-AppInstalled) {
     detectionFn,
     detectionCall,
     '# ── Comprobar si ya instalado ────────────────────────────────────────────',
-    'if (Test-Path $TrackerFile) {',
+    'if ($TrackerFile -and (Test-Path -LiteralPath $TrackerFile)) {',
     '    try {',
-    '        $t = Get-Content $TrackerFile -Raw | ConvertFrom-Json',
+    '        $t = Get-Content -LiteralPath $TrackerFile -Raw | ConvertFrom-Json',
     '        if ($t.hash -eq $CurrentHash -and $t.result -eq \'success\') {',
     '            Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] OMITIDO: Ya instalado (v$($t.version), hash coincide)"',
     '            Send-AppDeployLog -Level "info" -Source "install" -Message "install_skipped" -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; reason = "tracker-success" }',
@@ -2383,8 +2409,7 @@ if (Test-AppInstalled) {
     'if (-not $InstaladorRed) {',
     '    Write-Host "[$(Get-Date -Format \'HH:mm:ss\')] ERROR: No se encontro instalador (' + safeFilter + ') en $PSScriptRoot"',
     '    if (Test-Path $VersionFile) {',
-    '        @{ hash = $CurrentHash; version = $CurrentVersion; failedAt = (Get-Date).ToString(\'o\'); computer = $env:COMPUTERNAME; result = \'failed\'; retryCount = ($TrackerRetryBase + 1); error = \'Installer not found in share\' } |',
-    '            ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8',
+    '        Save-AppDeployTracker -Payload @{ hash = $CurrentHash; version = $CurrentVersion; failedAt = (Get-Date).ToString(\'o\'); computer = $env:COMPUTERNAME; result = \'failed\'; retryCount = ($TrackerRetryBase + 1); error = \'Installer not found in share\' }',
     '    }',
     '    Send-AppDeployLog -Level "error" -Source "install" -Message "install_failed" -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; error = "Installer not found in share" }',
     '    Stop-Transcript -ErrorAction SilentlyContinue',
@@ -2451,16 +2476,14 @@ function getTrackerSaveLogic(notifyUser = false) {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: $NombreApp instalado correctamente (v$CurrentVersion)"
     }
 ${notifyAfter}
-    @{ hash = $CurrentHash; version = $CurrentVersion; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success' } |
-        ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+    Save-AppDeployTracker -Payload @{ hash = $CurrentHash; version = $CurrentVersion; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success' }
     Send-AppDeployLog -Level "info" -Source "install" -Message "install_success" -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; disposition = $InstallDisposition }
     Invoke-DeployCacheCleanupWithFallback -CacheDir $CacheDir -MarkerPath $CleanupMarkerPath | Out-Null
 
 } catch {
     # ── Error ──────────────────────────────────────────────────────────
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Fallo instalando $NombreApp - $_"
-    @{ hash = $CurrentHash; version = $CurrentVersion; failedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'failed'; retryCount = ($TrackerRetryBase + 1); error = $_.ToString() } |
-        ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+    Save-AppDeployTracker -Payload @{ hash = $CurrentHash; version = $CurrentVersion; failedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'failed'; retryCount = ($TrackerRetryBase + 1); error = $_.ToString() }
     Send-AppDeployLog -Level "error" -Source "install" -Message "install_failed" -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; retryCount = ($TrackerRetryBase + 1); error = $_.ToString() }
     Invoke-DeployCacheCleanupWithFallback -CacheDir $CacheDir -MarkerPath $CleanupMarkerPath | Out-Null
 }
@@ -3026,13 +3049,15 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
 if (-not $PSScriptRoot) { $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
 if (-not $PSScriptRoot) { $PSScriptRoot = $PWD.Path }
 
+${getDedicatedRuntimeDetectionLogic()}
+
 $LogDir = "C:\\ProgramData\\AppDeploy_Logs"
-if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
-Get-ChildItem "$LogDir\\*.log" -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item -Force -ErrorAction SilentlyContinue
+if (-not $ADDMDedicatedLogging -and -not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+if (-not $ADDMDedicatedLogging) { Get-ChildItem "$LogDir\\*.log" -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item -Force -ErrorAction SilentlyContinue }
 # Split-Path es pura string — no necesita acceso de red
 $NombreApp = if ($PSScriptRoot) { Split-Path -Leaf $PSScriptRoot } else { "UnknownApp" }
-$LogFile   = "$LogDir\\Install_$($NombreApp)_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
-Start-Transcript -Path $LogFile -Force -ErrorAction SilentlyContinue
+$LogFile   = if ($ADDMDedicatedLogging) { $null } else { "$LogDir\\Install_$($NombreApp)_$(Get-Date -Format 'yyyyMMdd_HHmmss').log" }
+if ($LogFile) { Start-Transcript -Path $LogFile -Force -ErrorAction SilentlyContinue }
 
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ===== AppDeploy Manager ============================="
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] App     : $NombreApp [winget: $wingetId | source: $wingetSource]"
@@ -3040,10 +3065,12 @@ Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Equipo  : $env:COMPUTERNAME"
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Usuario : $env:USERNAME"
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ====================================================="
 
-$TrackerFile = "$LogDir\\Tracker_$NombreApp.json"
+$TrackerFile = if ($ADDMDedicatedLogging) { $null } else { "$LogDir\\Tracker_$NombreApp.json" }
+$UserTaskRoot = if ($ADDMDedicatedLogging) { Join-Path $env:TEMP ("ADDM_" + $NombreApp) } else { $LogDir }
+if (-not (Test-Path -LiteralPath $UserTaskRoot)) { New-Item -ItemType Directory -Path $UserTaskRoot -Force | Out-Null }
 $UserTaskName = "ADDM_Install_$NombreApp"
-$UserTaskPs1  = Join-Path $LogDir ("WingetUserInstall_" + $NombreApp + ".ps1")
-$UserTaskVbs  = Join-Path $LogDir ("WingetUserInstall_" + $NombreApp + ".vbs")
+$UserTaskPs1  = Join-Path $UserTaskRoot ("WingetUserInstall_" + $NombreApp + ".ps1")
+$UserTaskVbs  = Join-Path $UserTaskRoot ("WingetUserInstall_" + $NombreApp + ".vbs")
 
 function Clear-UserWingetArtifacts {
     param(
@@ -3159,9 +3186,9 @@ function Test-WingetUserTaskPending {
     }
 }
 
-if (Test-Path $TrackerFile) {
+if ($TrackerFile -and (Test-Path -LiteralPath $TrackerFile)) {
     try {
-        $t = Get-Content $TrackerFile -Raw | ConvertFrom-Json
+        $t = Get-Content -LiteralPath $TrackerFile -Raw | ConvertFrom-Json
         if ($t.version -eq $CurrentVersion -and $t.result -in @('success', 'scheduled')) {
             $installedNow = Wait-WingetPackageInstalled -WingetPath $Winget -PackageId $wingetId -PackageSource $wingetSource -MaxAttempts 2 -SleepSeconds 2
             if ($installedNow) {
@@ -3362,8 +3389,10 @@ shell.Run "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass
                 -Settings $settings -Principal $principal \`
                 -Description "Instalacion de $NombreApp vía AD Deploy Manager" -Force -ErrorAction Stop | Out-Null
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: Tarea programada '$taskName' creada - se instalara en el proximo inicio de sesion del usuario"
-            @{ version = $CurrentVersion; scheduledAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'scheduled'; method = 'winget-usertask'; wingetId = "$wingetId" } |
-                ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+            if ($TrackerFile) {
+                @{ version = $CurrentVersion; scheduledAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'scheduled'; method = 'winget-usertask'; wingetId = "$wingetId" } |
+                    ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+            }
             Stop-Transcript -ErrorAction SilentlyContinue
             exit 0
         } catch {
@@ -3378,12 +3407,16 @@ shell.Run "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: $NombreApp instalado correctamente (v$CurrentVersion)"
     Clear-UserWingetArtifacts -Quiet
 ${notifyAfter}
-    @{ version = $CurrentVersion; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success'; method = 'winget'; wingetId = "$wingetId" } |
-        ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+    if ($TrackerFile) {
+        @{ version = $CurrentVersion; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success'; method = 'winget'; wingetId = "$wingetId" } |
+            ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+    }
 } catch {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Fallo instalando $NombreApp - $_"
-    @{ version = $CurrentVersion; failedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'failed'; error = $_.ToString() } |
-        ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+    if ($TrackerFile) {
+        @{ version = $CurrentVersion; failedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'failed'; error = $_.ToString() } |
+            ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+    }
 }
 Stop-Transcript -ErrorAction SilentlyContinue
 `;
@@ -3434,12 +3467,14 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
 if (-not $PSScriptRoot) { $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
 if (-not $PSScriptRoot) { $PSScriptRoot = $PWD.Path }
 
+${getDedicatedRuntimeDetectionLogic()}
+
 $LogDir = "C:\\ProgramData\\AppDeploy_Logs"
-if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
-Get-ChildItem "$LogDir\\*.log" -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item -Force -ErrorAction SilentlyContinue
+if (-not $ADDMDedicatedLogging -and -not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+if (-not $ADDMDedicatedLogging) { Get-ChildItem "$LogDir\\*.log" -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item -Force -ErrorAction SilentlyContinue }
 $NombreApp = if ($PSScriptRoot) { Split-Path -Leaf $PSScriptRoot } else { "UnknownApp" }
-$LogFile   = "$LogDir\\Install_$($NombreApp)_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
-Start-Transcript -Path $LogFile -Force -ErrorAction SilentlyContinue
+$LogFile   = if ($ADDMDedicatedLogging) { $null } else { "$LogDir\\Install_$($NombreApp)_$(Get-Date -Format 'yyyyMMdd_HHmmss').log" }
+if ($LogFile) { Start-Transcript -Path $LogFile -Force -ErrorAction SilentlyContinue }
 
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ===== AppDeploy Manager ============================="
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] App     : $NombreApp (Office ODT)"
@@ -3448,7 +3483,12 @@ Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Equipo  : $env:COMPUTERNAME"
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Usuario : $env:USERNAME"
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ====================================================="
 
-$TrackerFile = "$LogDir\\Tracker_$NombreApp.json"
+$TrackerFile = if ($ADDMDedicatedLogging) { $null } else { "$LogDir\\Tracker_$NombreApp.json" }
+function Save-AppDeployTracker {
+    param([hashtable]$Payload)
+    if (-not $TrackerFile) { return }
+    try { $Payload | ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8 } catch { }
+}
 
 # ── Leer manifiesto ──────────────────────────────────────
 $CurrentVersion = "${version}"
@@ -3492,8 +3532,7 @@ $TargetOfficeInstalled = $InstalledOfficeProducts -contains "${productId}"
 if ($TargetOfficeInstalled -or $OfficeInstalled) {
     $OfficeDetectedName = if ($TargetOfficeInstalled) { "${productId}" } else { $OfficeInstalled.DisplayName }
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OMITIDO: Office ya instalado - $OfficeDetectedName"
-    @{ version = $CurrentVersion; hash = $CurrentHash; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success'; method = 'odt-detected'; product = "${productId}" } |
-        ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+    Save-AppDeployTracker -Payload @{ version = $CurrentVersion; hash = $CurrentHash; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success'; method = 'odt-detected'; product = "${productId}" }
     Stop-Transcript -ErrorAction SilentlyContinue
     exit 0
 }
@@ -3551,6 +3590,7 @@ if (-not (Test-Path $OdtSetup)) {
 }
 
 # ── Generar XML de configuración ─────────────────────────
+$OfficeLogConfig = if ($ADDMDedicatedLogging) { "" } else { "  <Logging Level=\`"Standard\`" Path=\`"$LogDir\`" />" }
 $XmlContent = @"
 <Configuration>
   <Add OfficeClientEdition="${arch}" Channel="${channel}">
@@ -3563,7 +3603,7 @@ ${excludeLines}
   <Property Name="FORCEAPPSHUTDOWN" Value="TRUE" />
   <Property Name="SharedComputerLicensing" Value="0" />
   <Updates Enabled="TRUE" />
-  <Logging Level="Standard" Path="C:\\ProgramData\\AppDeploy_Logs" />
+$OfficeLogConfig
 </Configuration>
 "@
 
@@ -3581,12 +3621,10 @@ try {
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: $NombreApp instalado correctamente (v$CurrentVersion)"
 ${notifyAfter}
-    @{ version = $CurrentVersion; hash = $CurrentHash; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success'; method = 'odt'; product = "${productId}" } |
-        ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+    Save-AppDeployTracker -Payload @{ version = $CurrentVersion; hash = $CurrentHash; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success'; method = 'odt'; product = "${productId}" }
 } catch {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Fallo instalando $NombreApp - $_"
-    @{ version = $CurrentVersion; hash = $CurrentHash; failedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'failed'; error = $_.ToString() } |
-        ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8
+    Save-AppDeployTracker -Payload @{ version = $CurrentVersion; hash = $CurrentHash; failedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'failed'; error = $_.ToString() }
 }
 Stop-Transcript -ErrorAction SilentlyContinue
 `;

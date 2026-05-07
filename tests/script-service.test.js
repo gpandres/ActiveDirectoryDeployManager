@@ -86,7 +86,8 @@ describe('generateScript — generic template', () => {
     expect(script).toContain('Initialize-AppDeployRemoteLog');
     expect(script).toContain('Send-AppDeployLog -Level "info" -Source "install" -Message "install_start"');
     expect(script).toContain('Send-AppDeployLog -Level "info" -Source "install" -Message "install_success"');
-    expect(script).toContain('PendingRemoteLogs.ndjson');
+    expect(script).not.toContain('PendingRemoteLogs.ndjson');
+    expect(script).not.toContain('RemoteLogKey_');
   });
 
   it('includes the 32→64 bit redirect guard', () => {
@@ -451,7 +452,8 @@ describe('generateUninstallScript', () => {
     expect(script).toContain('Initialize-AppDeployRemoteLog');
     expect(script).toContain('Send-AppDeployLog -Level "info" -Source "uninstall" -Message "uninstall_start"');
     expect(script).toContain('uninstall_success');
-    expect(script).toContain('PendingRemoteLogs.ndjson');
+    expect(script).not.toContain('PendingRemoteLogs.ndjson');
+    expect(script).not.toContain('RemoteLogKey_');
   });
 
   it('builds MSI uninstall scripts that resolve ProductCode automatically', () => {

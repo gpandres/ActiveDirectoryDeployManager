@@ -5,6 +5,36 @@ const { resolveNamedSubdirectory, resolveWithinBase, sanitizeDeploymentName } = 
 
 let bundlesFilePath = null;
 
+function getDedicatedRuntimeDetectionLogic() {
+  return `# Detect dedicated logging before touching local log paths.
+$ADDMDedicatedLogging = $false
+$ADDMLoggingConfigPath = ""
+function Find-AppDeployLoggingConfigPath {
+    try {
+        $dir = $PSScriptRoot
+        for ($i = 0; $i -lt 6 -and $dir; $i++) {
+            $candidate = Join-Path $dir "ADDeploy\\logging-config.json"
+            if (Test-Path -LiteralPath $candidate) { return $candidate }
+            $parent = Split-Path -Parent $dir
+            if (-not $parent -or $parent -eq $dir) { break }
+            $dir = $parent
+        }
+    } catch { }
+    return ""
+}
+try {
+    $ADDMLoggingConfigPath = Find-AppDeployLoggingConfigPath
+    if ($ADDMLoggingConfigPath) {
+        $candidateConfig = Get-Content -LiteralPath $ADDMLoggingConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json
+        if ($candidateConfig.mode -eq "dedicated" -and $candidateConfig.apiBaseUrl) {
+            $ADDMDedicatedLogging = $true
+        }
+    }
+} catch {
+    $ADDMDedicatedLogging = $false
+}`;
+}
+
 function getBundlesPath() {
   if (!bundlesFilePath) {
     const { app } = require('electron');
@@ -385,17 +415,21 @@ If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
     Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
 }
 
+if (-not $PSScriptRoot) { $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
+if (-not $PSScriptRoot) { $PSScriptRoot = $PWD.Path }
+${getDedicatedRuntimeDetectionLogic()}
+
 $BundleName = "${safeBundleName}"
 $LogDir = "C:\\ProgramData\\AppDeploy_Logs"
-if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
-$BundleTracker = "$LogDir\\Tracker_Bundle_$($BundleName -replace '\\s','_')${trackerSuffix}.txt"
+if (-not $ADDMDedicatedLogging -and -not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+$BundleTracker = if ($ADDMDedicatedLogging) { $null } else { "$LogDir\\Tracker_Bundle_$($BundleName -replace '\\s','_')${trackerSuffix}.txt" }
 $BundleVersion = "${(bundle.version || '1.0.0').replace(/[^a-zA-Z0-9.]/g, '')}"
 
 # Comprobar si esta version exacta ya se ejecuto
-$LastVersion = if (Test-Path $BundleTracker) { Get-Content $BundleTracker } else { "" }
+$LastVersion = if ($BundleTracker -and (Test-Path -LiteralPath $BundleTracker)) { Get-Content -LiteralPath $BundleTracker } else { "" }
 if ($LastVersion -eq $BundleVersion) { exit }
 
-Start-Transcript -Path "$LogDir\\${transcriptPrefix}_$($BundleName -replace '\\s','_').log" -Append -Force
+if (-not $ADDMDedicatedLogging) { Start-Transcript -Path "$LogDir\\${transcriptPrefix}_$($BundleName -replace '\\s','_').log" -Append -Force }
 Write-Output "=========================================="
 Write-Output "Bundle: $BundleName v$BundleVersion [${actionLabel}]"
 Write-Output "Inicio: $(Get-Date)"
@@ -407,11 +441,11 @@ ${appBlocks}
 ${notifyEnd}
 
 # Marcar version como ejecutada
-Set-Content -Path $BundleTracker -Value $BundleVersion -Force
+if ($BundleTracker) { Set-Content -Path $BundleTracker -Value $BundleVersion -Force }
 Write-Output "=========================================="
 Write-Output "Bundle completado: $(Get-Date)"
 Write-Output "=========================================="
-    Stop-Transcript
+    if (-not $ADDMDedicatedLogging) { Stop-Transcript }
     `;
   },
 
