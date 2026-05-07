@@ -41,7 +41,7 @@ Object.assign(OUsPage, {
           </div>
           <input type="checkbox" class="sr-only" value="${this.escAttr(o.dn)}" ${checked ? 'checked' : ''}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0; color:var(--text-muted)"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-          <span class="ou-picker-name">${this.esc(o.name)}</span>
+          <span class="ou-picker-name">${App._esc(o.name)}</span>
           ${count > 0 ? `<span class="tree-badge">${count}</span>` : ''}
           ${hasSiblings ? `
             <button type="button" class="ou-picker-siblings-btn" data-dn="${this.escAttr(o.dn)}" title="${this.escAttr(t('ous.pickerSelectSiblings'))}">
@@ -75,7 +75,7 @@ Object.assign(OUsPage, {
         <div class="ou-picker-toolbar">
           <div class="ous-search-box" style="flex:1; margin-top:0;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" class="form-input" id="ou-picker-search" placeholder="${t('ous.pickerSearch')}" value="${this.esc(this.state.assignmentOUSearch)}">
+            <input type="text" class="form-input" id="ou-picker-search" placeholder="${t('ous.pickerSearch')}" value="${App._esc(this.state.assignmentOUSearch)}">
           </div>
           <button class="btn btn-sm btn-secondary" id="btn-picker-select-all">${t('ous.pickerSelectAll')}</button>
           <button class="btn btn-sm btn-secondary" id="btn-picker-clear">${t('ous.pickerClear')}</button>
@@ -249,7 +249,7 @@ Object.assign(OUsPage, {
     const colWidth = 120;
     const headerCells = ous.map(o =>
       `<div class="ag-col-head" style="width:${colWidth}px; min-width:${colWidth}px;" title="${this.escAttr(o.dn)}">
-        <span class="ag-col-name">${this.esc(o.name)}</span>
+        <span class="ag-col-name">${App._esc(o.name)}</span>
         <span class="ag-col-count">${this.assignmentCountByOU(o.dn)}</span>
       </div>`
     ).join('');
@@ -274,9 +274,9 @@ Object.assign(OUsPage, {
       return `
         <div class="ag-row">
           <div class="ag-row-head">
-            <div class="ag-app-name">${this.esc(app.name)}</div>
+            <div class="ag-app-name">${App._esc(app.name)}</div>
             ${app.gpoName
-              ? `<span class="badge badge-info" style="font-size:10px;">${this.esc(app.gpoName)}</span>`
+              ? `<span class="badge badge-info" style="font-size:10px;">${App._esc(app.gpoName)}</span>`
               : `<span class="badge badge-warning" style="font-size:10px;">${t('ous.noGpoBadge')}</span>`}
           </div>
           <div class="ag-cells">${cells}</div>
@@ -324,7 +324,7 @@ Object.assign(OUsPage, {
     return `
       <div class="ous-search-box" style="flex:1; margin-top:0;">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" class="form-input" id="ag-search-app" placeholder="${t('ous.searchApps')}" value="${this.esc(q)}">
+        <input type="text" class="form-input" id="ag-search-app" placeholder="${t('ous.searchApps')}" value="${App._esc(q)}">
       </div>
       <span class="text-muted text-sm" style="white-space:nowrap;">${ouCount} ${t('ous.assignmentsOUCount')}</span>
       <button class="btn btn-sm btn-secondary" id="btn-change-ous">

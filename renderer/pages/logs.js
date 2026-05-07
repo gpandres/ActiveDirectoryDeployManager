@@ -46,7 +46,7 @@ const LogsPage = {
     const isDedicated = st.mode === 'dedicated';
     const statusLabel = isDedicated
       ? (st.online
-          ? `${t('logs.backendDedicated') || 'Servidor dedicado'} — ${this.esc(st.host || '')}`
+          ? `${t('logs.backendDedicated') || 'Servidor dedicado'} — ${App._esc(st.host || '')}`
           : `${t('logs.backendOffline') || 'Servidor no alcanzable'} — cola: ${st.queueSize}`)
       : (t('logs.backendLocal') || 'Almacenamiento local');
 
@@ -63,7 +63,7 @@ const LogsPage = {
         </div>
         <div id="logs-backend-badge" class="${isDedicated && (!st.online || !st.canWrite) ? 'logs-badge logs-badge-warn' : 'logs-badge'}">
           <span class="logs-badge-dot ${isDedicated && (!st.online || !st.canWrite) ? 'off' : 'on'}"></span>
-          <span id="logs-backend-label">${this.esc(this._backendStatusLabel(st) || statusLabel)}</span>
+          <span id="logs-backend-label">${App._esc(this._backendStatusLabel(st) || statusLabel)}</span>
         </div>
       </div>
 
@@ -199,7 +199,7 @@ const LogsPage = {
           <div class="logs-side-body">
             <div class="logs-side-msg">${primary}</div>
             <div class="logs-side-meta">
-              ${this.esc(r.hostname || '—')} · ${this.esc(r.source || '')} · ${this._fmtTs(r.ts)}
+              ${App._esc(r.hostname || '—')} · ${App._esc(r.source || '')} · ${this._fmtTs(r.ts)}
             </div>
           </div>
         </li>
@@ -234,7 +234,7 @@ const LogsPage = {
       const rows = await window.api.logs.equipos(search || '');
       const dl = document.getElementById('logs-equipos-datalist');
       if (!dl) return;
-      dl.innerHTML = rows.map(e => `<option value="${this.esc(e.hostname)}">`).join('');
+      dl.innerHTML = rows.map(e => `<option value="${App._esc(e.hostname)}">`).join('');
     } catch { /* ignore */ }
   },
 
@@ -271,11 +271,11 @@ const LogsPage = {
     try {
       result = await window.api.logs.query(filters);
     } catch (e) {
-      if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--danger);padding:24px;">${this.esc(e.message || 'error')}</td></tr>`;
+      if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--danger);padding:24px;">${App._esc(e.message || 'error')}</td></tr>`;
       return;
     }
     if (result?.error) {
-      if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--danger);padding:24px;">${this.esc(result.error)}</td></tr>`;
+      if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--danger);padding:24px;">${App._esc(result.error)}</td></tr>`;
       this._items = [];
       this._cursor = null;
       return;
@@ -311,8 +311,8 @@ const LogsPage = {
         <tr>
           <td class="mono">${this._fmtTs(r.ts)}</td>
           <td><span class="level-pill level-${lvl}">${lvl.toUpperCase()}</span></td>
-          <td class="mono">${this.esc(r.hostname || '—')}</td>
-          <td class="mono">${this.esc(r.source || '')}</td>
+          <td class="mono">${App._esc(r.hostname || '—')}</td>
+          <td class="mono">${App._esc(r.source || '')}</td>
           <td>
             <div>${primary}</div>
             ${secondary ? `<div class="logs-ctx">${secondary}</div>` : ''}
@@ -367,7 +367,7 @@ const LogsPage = {
       try { ctx = JSON.parse(r.context); } catch { /* leave empty */ }
     }
 
-    const e  = s => this.esc(String(s ?? ''));
+    const e  = s => App._esc(String(s ?? ''));
     const app    = ctx.appName    ? `<strong>${e(ctx.appName)}</strong>` : '';
     const bundle = ctx.bundleName ? `<strong>${e(ctx.bundleName)}</strong>` : '';
     const gpo    = ctx.gpoName    ? `<strong>${e(ctx.gpoName)}</strong>` : '';
@@ -454,9 +454,4 @@ const LogsPage = {
     } catch { return String(ts); }
   },
 
-  esc(s) {
-    const div = document.createElement('div');
-    div.textContent = s == null ? '' : String(s);
-    return div.innerHTML;
-  }
 };

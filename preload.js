@@ -156,13 +156,7 @@ contextBridge.exposeInMainWorld('api', {
     openReleasePage: () => ipcRenderer.invoke('updates:openReleasePage')
   },
 
-  // Winget catalog + version checking (legacy, used by apps.js wizard)
-  winget: {
-    getCatalog: () => ipcRenderer.invoke('winget:getCatalog'),
-    checkVersions: (ids) => ipcRenderer.invoke('winget:checkVersions', ids)
-  },
-
-  // Catalog service (new, used by catalog page)
+  // Catalog service (used by catalog page and apps wizard)
   catalog: {
     getCatalog: () => ipcRenderer.invoke('catalog:getCatalog'),
     search: (query, category) => ipcRenderer.invoke('catalog:search', query, category),

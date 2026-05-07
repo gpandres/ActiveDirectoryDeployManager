@@ -132,7 +132,7 @@ const OUsPage = {
       ]);
 
       if (!ouResult.success) {
-        mainArea.innerHTML = `<div class="empty-state"><p class="empty-state-text">${this.esc(ouResult.error || t('ous.noOusFound'))}</p></div>`;
+        mainArea.innerHTML = `<div class="empty-state"><p class="empty-state-text">${App._esc(ouResult.error || t('ous.noOusFound'))}</p></div>`;
         return;
       }
 
@@ -202,7 +202,7 @@ const OUsPage = {
       this.renderStatsBar();
       this.renderPendingBar();
     } catch (err) {
-      mainArea.innerHTML = `<div class="empty-state"><p class="empty-state-text">${t('ous.errorConnecting')} ${this.esc(err.message)}</p></div>`;
+      mainArea.innerHTML = `<div class="empty-state"><p class="empty-state-text">${t('ous.errorConnecting')} ${App._esc(err.message)}</p></div>`;
     } finally {
       this.state.loading = false;
     }
@@ -344,7 +344,7 @@ const OUsPage = {
           <div class="card-title" style="margin-bottom:8px;">${t('ous.treeTitle')}</div>
           <div class="ous-search-box">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" class="form-input" id="ous-search-ou" placeholder="${t('ous.searchOUs')}" value="${this.esc(this.state.ouSearch)}">
+            <input type="text" class="form-input" id="ous-search-ou" placeholder="${t('ous.searchOUs')}" value="${App._esc(this.state.ouSearch)}">
           </div>
           <p class="text-muted text-sm mt-xs" style="padding: 0 4px;">${t('ous.ctrlClickHint')}</p>
           <div id="ou-tree-container" class="mt-md"></div>
@@ -419,7 +419,7 @@ const OUsPage = {
             <span class="tree-icon">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
             </span>
-            <span class="tree-label marquee-text-container"><span class="marquee-text">${this.esc(node.name)}</span></span>
+            <span class="tree-label marquee-text-container"><span class="marquee-text">${App._esc(node.name)}</span></span>
             ${direct > 0 ? `<span class="tree-badge" title="${this.escAttr(t('ous.directBadgeTooltip'))}">${direct}</span>` : ''}
             ${descendant > 0 ? `<span class="tree-badge tree-badge-descendant" title="${this.escAttr(t('ous.descendantBadgeTooltip').replace('{n}', descendant))}">${descendant}</span>` : ''}
           </div>
@@ -517,9 +517,9 @@ const OUsPage = {
 
   copyAssignmentsFrom(targetOuDN) {
     const otherOUs = this.state.flatOUs.filter(o => o.dn !== targetOuDN);
-    const options = otherOUs.map(o => `<option value="${this.escAttr(o.dn)}">${this.esc(o.name)}</option>`).join('');
+    const options = otherOUs.map(o => `<option value="${this.escAttr(o.dn)}">${App._esc(o.name)}</option>`).join('');
     const body = `
-      <p>${t('ous.copyFromDesc').replace('{ou}', '<strong>' + this.esc(targetOuDN.split(',')[0].replace(/^OU=/i, '')) + '</strong>')}</p>
+      <p>${t('ous.copyFromDesc').replace('{ou}', '<strong>' + App._esc(targetOuDN.split(',')[0].replace(/^OU=/i, '')) + '</strong>')}</p>
       <select class="form-select mt-md" id="copy-source-select">
         <option value="">${t('ous.selectSourceOu')}</option>
         ${options}
@@ -566,12 +566,6 @@ const OUsPage = {
   },
 
   // ─── Utilities ───────────────────────────────────────
-  esc(str) {
-    const div = document.createElement('div');
-    div.textContent = str == null ? '' : String(str);
-    return div.innerHTML;
-  },
-
   escAttr(str) {
     return (str == null ? '' : String(str))
       .replace(/&/g, '&amp;')

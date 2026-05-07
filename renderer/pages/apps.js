@@ -3,21 +3,29 @@
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 const AppsPage = {
-  selectedIds: new Set(),
-  gposCache: null,
-  ousCache: null,
-  ousTreeCache: null,
-  wingetCatalogCache: null,
-  _wizardOpening: false,
-  _viewMode: 'grid', // 'grid' | 'list'
-  _groupBy: 'none',  // 'none' | 'template'
-  _updateCheckResults: [],  // { appId, appName, wingetId, currentVersion, latestVersion }
-  _checkingUpdates: false,
+  // State still used by wizard/catalog/quickflow (not yet extracted)
+  gposCache:              null,
+  ousCache:               null,
+  ousTreeCache:           null,
+  wingetCatalogCache:     null,
+  _wizardOpening:         false,
+  _updateCheckResults:    [],
+  _checkingUpdates:       false,
   _regeneratingScriptIds: new Set(),
-  _scriptUpdatePollTimer: null,
-  _scriptUpdatePollToken: 0,
-  _scriptUpdateModalVisible: false,
-  _uiMode: 'simple',
+
+  // ── Delegations → AppsListModule ──────────────────────────────────────
+  async render(container)            { return AppsListModule.render(container); },
+  isAdvancedUIMode()                 { return AppsListModule.isAdvancedUIMode(); },
+  isSimpleUIMode()                   { return AppsListModule.isSimpleUIMode(); },
+  stopScriptUpdatePolling(c = true)  { return AppsListModule.stopScriptUpdatePolling(c); },
+  keepAppCardVisible(id)             { return AppsListModule.keepAppCardVisible(id); },
+  toggleMenu(btn)                    { return AppsListModule.toggleMenu(btn); },
+  toggleFolder(header)               { return AppsListModule.toggleFolder(header); },
+  toggleSelect(id, checked)          { return AppsListModule.toggleSelect(id, checked); },
+  clearSelection()                   { return AppsListModule.clearSelection(); },
+  selectAll()                        { return AppsListModule.selectAll(); },
+  toggleSelectAll(checked)           { return AppsListModule.toggleSelectAll(checked); },
+  updateBulkBar()                    { return AppsListModule.updateBulkBar(); },
 
   async render(container) {
     this.stopScriptUpdatePolling(false);
@@ -52,7 +60,7 @@ const AppsPage = {
           ${this.isAdvancedUIMode() ? `
             <button class="btn btn-secondary" id="btn-manage-templates">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M12 12l8-4.5"/><path d="M12 12v9"/><path d="M12 12L4 7.5"/></svg>
-              ${this.tr('apps.manageTemplates', 'Plantillas')}
+              ${t('apps.manageTemplates', 'Plantillas')}
             </button>
           ` : ''}
           <button class="btn btn-secondary" id="btn-check-updates">
@@ -261,29 +269,29 @@ const AppsPage = {
   },
 
   getScriptUpdateModalContent(status = {}) {
-    const title = this.tr('apps.scriptUpdateTitle', 'Actualizando scripts');
+    const title = t('apps.scriptUpdateTitle', 'Actualizando scripts');
     const isScanning = status.status === 'scanning';
     const total = Number(status?.progress?.total) || 0;
     const completed = Number(status?.progress?.completed) || 0;
     const updated = Number(status?.progress?.updated) || 0;
     const currentAppName = typeof status.currentAppName === 'string' ? status.currentAppName.trim() : '';
     const headline = isScanning
-      ? this.tr('apps.scriptUpdateScanning', 'Comprobando scripts desplegados...')
-      : this.tr('apps.scriptUpdateInProgress', 'Los scripts se están actualizando...');
+      ? t('apps.scriptUpdateScanning', 'Comprobando scripts desplegados...')
+      : t('apps.scriptUpdateInProgress', 'Los scripts se están actualizando...');
     const detail = isScanning
-      ? this.tr('apps.scriptUpdateScanningHint', 'Estamos revisando si hay scripts generados con una versión anterior de la app.')
-      : this.tr('apps.scriptUpdateBusyHint', 'Esta vista se desbloqueará automáticamente cuando termine la regeneración.');
+      ? t('apps.scriptUpdateScanningHint', 'Estamos revisando si hay scripts generados con una versión anterior de la app.')
+      : t('apps.scriptUpdateBusyHint', 'Esta vista se desbloqueará automáticamente cuando termine la regeneración.');
     const progressText = total > 0
-      ? this.tr('apps.scriptUpdateProgress', '{done} de {total} apps procesadas')
+      ? t('apps.scriptUpdateProgress', '{done} de {total} apps procesadas')
         .replace('{done}', String(completed))
         .replace('{total}', String(total))
       : '';
     const updatedText = total > 0
-      ? this.tr('apps.scriptUpdateUpdatedCount', '{count} scripts regenerados')
+      ? t('apps.scriptUpdateUpdatedCount', '{count} scripts regenerados')
         .replace('{count}', String(updated))
       : '';
     const currentAppText = currentAppName
-      ? this.tr('apps.scriptUpdateCurrentApp', 'App actual: {app}')
+      ? t('apps.scriptUpdateCurrentApp', 'App actual: {app}')
         .replace('{app}', currentAppName)
       : '';
 
@@ -292,12 +300,12 @@ const AppsPage = {
       body: `
         <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;min-height:180px;text-align:center;">
           <span class="spinner" style="width:28px;height:28px;border-width:3px;flex-shrink:0;"></span>
-          <div style="font-size:15px;font-weight:700;color:var(--text-primary);">${this.esc(headline)}</div>
-          <p style="margin:0;max-width:420px;color:var(--text-secondary);font-size:13px;line-height:1.5;">${this.esc(detail)}</p>
+          <div style="font-size:15px;font-weight:700;color:var(--text-primary);">${App._esc(headline)}</div>
+          <p style="margin:0;max-width:420px;color:var(--text-secondary);font-size:13px;line-height:1.5;">${App._esc(detail)}</p>
           ${progressText ? `<div style="display:flex;flex-direction:column;gap:4px;padding:12px 14px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-secondary);min-width:280px;">
-            <span style="font-size:13px;font-weight:600;color:var(--text-primary);">${this.esc(progressText)}</span>
-            ${updatedText ? `<span style="font-size:12px;color:var(--text-muted);">${this.esc(updatedText)}</span>` : ''}
-            ${currentAppText ? `<span style="font-size:12px;color:var(--text-secondary);">${this.esc(currentAppText)}</span>` : ''}
+            <span style="font-size:13px;font-weight:600;color:var(--text-primary);">${App._esc(progressText)}</span>
+            ${updatedText ? `<span style="font-size:12px;color:var(--text-muted);">${App._esc(updatedText)}</span>` : ''}
+            ${currentAppText ? `<span style="font-size:12px;color:var(--text-secondary);">${App._esc(currentAppText)}</span>` : ''}
           </div>` : ''}
         </div>
       `
@@ -369,14 +377,14 @@ const AppsPage = {
         <div class="app-card-top">
           <div class="app-card-icon">${icon}</div>
           <div class="app-card-info">
-            <div class="app-card-name">${this.esc(app.name)}</div>
-            <div class="app-card-template">${this.esc(templateInfo.name)}</div>
+            <div class="app-card-name">${App._esc(app.name)}</div>
+            <div class="app-card-template">${App._esc(templateInfo.name)}</div>
           </div>
         </div>
         <div class="app-card-badges">
-          <span class="badge badge-info app-card-version">v${this.esc(app.version || '1.0.0')}</span>
-          ${statusClass === 'uninstalling' ? `<span class="badge badge-warning">${this.tr('apps.uninstallPublished', 'Desinstalacion')}</span>` : ''}
-          ${app.gpoName ? `<span class="badge badge-info" title="GPO">${this.esc(app.gpoName)}</span>` : ''}
+          <span class="badge badge-info app-card-version">v${App._esc(app.version || '1.0.0')}</span>
+          ${statusClass === 'uninstalling' ? `<span class="badge badge-warning">${t('apps.uninstallPublished', 'Desinstalacion')}</span>` : ''}
+          ${app.gpoName ? `<span class="badge badge-info" title="GPO">${App._esc(app.gpoName)}</span>` : ''}
           ${(() => { const n = Array.isArray(app.assignedOUs) ? app.assignedOUs.length : (app.ouDN ? 1 : 0); return n > 0 ? `<span class="badge badge-neutral" title="${t('apps.detailAssignedOUs')}">&#127970; ${n} OU${n > 1 ? 's' : ''}</span>` : ''; })()}
         </div>
         <div class="app-card-footer" onclick="event.stopPropagation()">
@@ -399,7 +407,7 @@ const AppsPage = {
               ${canUninstall ? `
                 <button class="dropdown-item" onclick="AppsPage.previewUninstallScript('${app.id}')">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                  ${this.tr('apps.uninstallScript', 'Script uninstall')}
+                  ${t('apps.uninstallScript', 'Script uninstall')}
                 </button>
               ` : ''}
               ${isDeployed ? `
@@ -416,12 +424,12 @@ const AppsPage = {
                 ` : '')}
                 <button class="dropdown-item" onclick="AppsPage.regenerateScripts('${app.id}')">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
-                  ${this.tr('apps.regenerateScripts', 'Regenerar scripts')}
+                  ${t('apps.regenerateScripts', 'Regenerar scripts')}
                 </button>
                 ${canPublishUninstall && canUninstall ? `
                   <button class="dropdown-item dropdown-item--warning" onclick="AppsPage.uninstallApp('${app.id}')">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    ${this.tr('apps.uninstallAction', 'Desinstalar')}
+                    ${t('apps.uninstallAction', 'Desinstalar')}
                   </button>
                 ` : ''}
                 ${publishedAction === 'uninstall' ? `
@@ -505,7 +513,7 @@ const AppsPage = {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
           </div>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-          <span class="app-folder-name">${this.esc(cat)}</span>
+          <span class="app-folder-name">${App._esc(cat)}</span>
           <span class="app-folder-count">${catApps.length}</span>
         </div>
         ${catApps.map(app => this.renderAppCard(app, templates)).join('')}
@@ -555,13 +563,6 @@ const AppsPage = {
       'sap-gui': '&#128188;'
     };
     return icons[key] || '&#128230;';
-  },
-
-  esc(str) {
-    if (!str) return '';
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
   },
 
   isSupportedInstallerExtension(extension) {
@@ -615,13 +616,13 @@ const AppsPage = {
 
   getUninstallModeLabel(mode) {
     const labels = {
-      none: this.tr('apps.uninstallModeNone', 'Sin desinstalacion'),
-      'auto-msi': this.tr('apps.uninstallModeMsi', 'MSI automatico'),
-      'auto-registry': this.tr('apps.uninstallModeRegistry', 'Auto por registro'),
-      manual: this.tr('apps.uninstallModeManual', 'Comando manual'),
-      winget: this.tr('apps.uninstallModeWinget', 'Winget')
+      none: t('apps.uninstallModeNone', 'Sin desinstalacion'),
+      'auto-msi': t('apps.uninstallModeMsi', 'MSI automatico'),
+      'auto-registry': t('apps.uninstallModeRegistry', 'Auto por registro'),
+      manual: t('apps.uninstallModeManual', 'Comando manual'),
+      winget: t('apps.uninstallModeWinget', 'Winget')
     };
-    return labels[mode] || mode || this.tr('apps.uninstallModeNone', 'Sin desinstalacion');
+    return labels[mode] || mode || t('apps.uninstallModeNone', 'Sin desinstalacion');
   },
 
   canGenerateUninstall(appLike) {
@@ -676,14 +677,14 @@ const AppsPage = {
 
   getDeploymentStatusLabel(appLike) {
     const state = this.getDeploymentVisualState(appLike);
-    if (state === 'uninstalling') return this.tr('apps.uninstallPublished', 'Desinstalacion');
-    if (state === 'deployed') return this.tr('apps.installPublished', 'Instalacion');
+    if (state === 'uninstalling') return t('apps.uninstallPublished', 'Desinstalacion');
+    if (state === 'deployed') return t('apps.installPublished', 'Instalacion');
     return t('apps.detailNotDeployed');
   },
 
   getInstallActionLabel(appLike) {
     return this.getPublishedAction(appLike) === 'uninstall'
-      ? this.tr('apps.reinstallAction', 'Volver a instalar')
+      ? t('apps.reinstallAction', 'Volver a instalar')
       : t('apps.deploy');
   },
 
@@ -783,7 +784,7 @@ const AppsPage = {
       <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-tertiary);border-radius:6px;">
         <span style="font-size:18px;">${icon}</span>
         <div style="flex:1;min-width:0;">
-          <div style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.esc(title)}</div>
+          <div style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${App._esc(title)}</div>
           ${subtitle ? `<div style="font-size:11px;color:var(--text-muted);">${subtitle}</div>` : ''}
         </div>
       </div>`;
@@ -838,11 +839,11 @@ const AppsPage = {
     };
 
     const ousHtml = app.assignedOUs && app.assignedOUs.length > 0
-      ? app.assignedOUs.map(ou => `<div style="font-size:12px; color:var(--text-secondary); padding:4px 8px; background:var(--bg-tertiary); border-radius:4px; margin-top:4px;" title="${this.esc(ou)}">${this.esc(ouNameFromDN(ou))}</div>`).join('')
+      ? app.assignedOUs.map(ou => `<div style="font-size:12px; color:var(--text-secondary); padding:4px 8px; background:var(--bg-tertiary); border-radius:4px; margin-top:4px;" title="${App._esc(ou)}">${App._esc(ouNameFromDN(ou))}</div>`).join('')
       : `<span style="color:var(--text-muted); font-size:13px;">${t('apps.detailNoOUs')}</span>`;
 
     const paramsHtml = app.customParams && Object.keys(app.customParams).length > 0
-      ? Object.entries(app.customParams).map(([k, v]) => row(this.esc(k), this.esc(String(v)))).join('')
+      ? Object.entries(app.customParams).map(([k, v]) => row(App._esc(k), App._esc(String(v)))).join('')
       : '';
     const uninstallSummary = this.getUninstallSummary(app);
     const canUninstall = this.canGenerateUninstall(app);
@@ -856,55 +857,55 @@ const AppsPage = {
             ${this.templateIcon(app.template)}
           </div>
           <div>
-            <div style="font-size:18px; font-weight:700; color:var(--text-primary);">${this.esc(app.name)}</div>
-            <div style="font-size:13px; color:var(--text-muted);">${this.esc(templateInfo.name)}</div>
+            <div style="font-size:18px; font-weight:700; color:var(--text-primary);">${App._esc(app.name)}</div>
+            <div style="font-size:13px; color:var(--text-muted);">${App._esc(templateInfo.name)}</div>
           </div>
         </div>
 
         <!-- Status badges -->
         <div style="display:flex; flex-wrap:wrap; gap:6px;">
-          <span class="badge badge-primary">${this.esc((app.installerType || 'exe').toUpperCase())}</span>
-          <span class="badge badge-info">v${this.esc(app.version || '1.0.0')}</span>
+          <span class="badge badge-primary">${App._esc((app.installerType || 'exe').toUpperCase())}</span>
+          <span class="badge badge-info">v${App._esc(app.version || '1.0.0')}</span>
           ${statusClass === 'uninstalling'
-            ? `<span class="badge badge-warning">${this.tr('apps.uninstallPublished', 'Desinstalacion')}</span>`
+            ? `<span class="badge badge-warning">${t('apps.uninstallPublished', 'Desinstalacion')}</span>`
             : (isDeployed
-                ? `<span class="badge badge-success">${this.tr('apps.installPublished', 'Instalacion')}</span>`
+                ? `<span class="badge badge-success">${t('apps.installPublished', 'Instalacion')}</span>`
                 : `<span class="badge badge-neutral">${t('apps.detailNotDeployed')}</span>`)}
-          ${app.gpoName ? `<span class="badge badge-info">${this.esc(app.gpoName)}</span>` : `<span class="badge badge-neutral">${t('apps.noGpoBadge')}</span>`}
+          ${app.gpoName ? `<span class="badge badge-info">${App._esc(app.gpoName)}</span>` : `<span class="badge badge-neutral">${t('apps.noGpoBadge')}</span>`}
           ${app.notifyUser ? `<span class="badge badge-warning">${t('apps.detailNotifyEnabled')}</span>` : ''}
         </div>
 
         <!-- General Info -->
         <div class="card" style="padding:12px 16px; margin:0;">
           <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionGeneral')}</div>
-          ${row(t('apps.detailTemplate'), this.esc(templateInfo.name))}
+          ${row(t('apps.detailTemplate'), App._esc(templateInfo.name))}
           ${app.template === 'winget'
-            ? row('Winget ID', `<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">${this.esc(app.wingetId || '-')}</code>`)
+            ? row('Winget ID', `<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">${App._esc(app.wingetId || '-')}</code>`)
             : app.template === 'odt'
-              ? row('Producto ODT', `<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">${this.esc((app.odtConfig?.product || 'O365BusinessRetail') + ' · ' + (app.odtConfig?.channel || 'MonthlyEnterprise') + ' · ' + (app.odtConfig?.language || 'es-es'))}</code>`)
-              : row(t('apps.detailInstallerType'), this.esc((app.installerType || 'exe').toUpperCase()))
+              ? row('Producto ODT', `<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">${App._esc((app.odtConfig?.product || 'O365BusinessRetail') + ' · ' + (app.odtConfig?.channel || 'MonthlyEnterprise') + ' · ' + (app.odtConfig?.language || 'es-es'))}</code>`)
+              : row(t('apps.detailInstallerType'), App._esc((app.installerType || 'exe').toUpperCase()))
           }
-          ${(app.template !== 'winget' && app.template !== 'odt') ? row(t('apps.detailSilentArgs'), app.silentArgs ? '<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">' + this.esc(app.silentArgs) + '</code>' : '-') : ''}
-          ${row(this.tr('apps.publishedState', 'Estado publicado'), this.esc(statusText))}
-          ${row(this.tr('apps.uninstallMode', 'Modo de desinstalacion'), this.esc(uninstallSummary))}
-          ${row(t('apps.detailVersion'), this.esc(app.version || '1.0.0'))}
+          ${(app.template !== 'winget' && app.template !== 'odt') ? row(t('apps.detailSilentArgs'), app.silentArgs ? '<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">' + App._esc(app.silentArgs) + '</code>' : '-') : ''}
+          ${row(t('apps.publishedState', 'Estado publicado'), App._esc(statusText))}
+          ${row(t('apps.uninstallMode', 'Modo de desinstalacion'), App._esc(uninstallSummary))}
+          ${row(t('apps.detailVersion'), App._esc(app.version || '1.0.0'))}
           ${row(t('apps.detailNotifyUser'), app.notifyUser ? '&#10003;' : '&#10007;')}
         </div>
 
         <!-- Paths -->
         <div class="card" style="padding:12px 16px; margin:0;">
           <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionPaths')}</div>
-          ${(app.template !== 'winget' && app.template !== 'odt') ? row(t('apps.detailInstaller'), displayInstallerPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(displayInstallerPath) + '</span>' : '-') : ''}
-          ${app.configXmlPath ? row(t('apps.detailConfigXml'), '<span style="font-family:monospace; font-size:12px;">' + this.esc(app.configXmlPath) + '</span>') : ''}
-          ${row(t('apps.detailDeployPath'), app.deployedPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(app.deployedPath) + '</span>' : '-')}
-          ${row(this.tr('apps.uninstallDeployPath', 'Ruta uninstall'), app.uninstallDeployedPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(app.uninstallDeployedPath) + '</span>' : '-')}
-          ${app.lastDeployHash ? row(t('apps.detailHash'), '<span style="font-family:monospace; font-size:11px;">' + this.esc(app.lastDeployHash.substring(0, 16)) + '...</span>') : ''}
+          ${(app.template !== 'winget' && app.template !== 'odt') ? row(t('apps.detailInstaller'), displayInstallerPath ? '<span style="font-family:monospace; font-size:12px;">' + App._esc(displayInstallerPath) + '</span>' : '-') : ''}
+          ${app.configXmlPath ? row(t('apps.detailConfigXml'), '<span style="font-family:monospace; font-size:12px;">' + App._esc(app.configXmlPath) + '</span>') : ''}
+          ${row(t('apps.detailDeployPath'), app.deployedPath ? '<span style="font-family:monospace; font-size:12px;">' + App._esc(app.deployedPath) + '</span>' : '-')}
+          ${row(t('apps.uninstallDeployPath', 'Ruta uninstall'), app.uninstallDeployedPath ? '<span style="font-family:monospace; font-size:12px;">' + App._esc(app.uninstallDeployedPath) + '</span>' : '-')}
+          ${app.lastDeployHash ? row(t('apps.detailHash'), '<span style="font-family:monospace; font-size:11px;">' + App._esc(app.lastDeployHash.substring(0, 16)) + '...</span>') : ''}
         </div>
 
         <!-- GPO & OUs -->
         <div class="card" style="padding:12px 16px; margin:0;">
           <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionTargeting')}</div>
-          ${row(t('apps.detailGpo'), app.gpoName ? this.esc(app.gpoName) : '-')}
+          ${row(t('apps.detailGpo'), app.gpoName ? App._esc(app.gpoName) : '-')}
           <div style="padding:10px 0; border-bottom:1px solid var(--border-color);">
             <span style="color:var(--text-muted); font-size:13px;">${t('apps.detailAssignedOUs')}</span>
             <div style="margin-top:6px;">${ousHtml}</div>
@@ -927,8 +928,8 @@ const AppsPage = {
             ${app.versionHistory.slice().reverse().map(h => `
               <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:var(--bg-tertiary); border-radius:6px; font-size:12px;">
                 <div style="display:flex; flex-direction:column; gap:2px;">
-                  <span style="color:var(--text-primary); font-weight:600;">v${this.esc(h.version || '?')}</span>
-                  ${h.hash ? `<span style="font-family:monospace; font-size:10px; color:var(--text-muted);">${this.esc(h.hash.substring(0, 16))}...</span>` : ''}
+                  <span style="color:var(--text-primary); font-weight:600;">v${App._esc(h.version || '?')}</span>
+                  ${h.hash ? `<span style="font-family:monospace; font-size:10px; color:var(--text-muted);">${App._esc(h.hash.substring(0, 16))}...</span>` : ''}
                 </div>
                 <span style="color:var(--text-muted); font-size:11px;">${h.replacedAt ? new Date(h.replacedAt).toLocaleString() : ''}</span>
               </div>
@@ -947,7 +948,7 @@ const AppsPage = {
 
     App.openModal(t('apps.detailTitle'), body, `
       <button class="btn btn-secondary" onclick="App.closeModal()">${t('common.close')}</button>
-      ${canPublishUninstall && canUninstall ? `<button class="btn btn-warning" onclick="App.closeModal(); AppsPage.uninstallApp('${app.id}')">${this.tr('apps.uninstallAction', 'Desinstalar')}</button>` : ''}
+      ${canPublishUninstall && canUninstall ? `<button class="btn btn-warning" onclick="App.closeModal(); AppsPage.uninstallApp('${app.id}')">${t('apps.uninstallAction', 'Desinstalar')}</button>` : ''}
       ${(!isDeployed || publishedAction === 'uninstall') ? `<button class="btn btn-success" onclick="App.closeModal(); AppsPage.deployApp('${app.id}')">${this.getInstallActionLabel(app)}</button>` : ''}
       <button class="btn btn-secondary" onclick="App.closeModal(); AppsPage.editApp('${app.id}')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -1004,8 +1005,8 @@ const AppsPage = {
               ${this.templateIcon(app.template)}
             </div>
             <div>
-              <div style="font-size:17px; font-weight:700; color:var(--text-primary);">${this.esc(app.name)}</div>
-              <div style="font-size:12px; color:var(--text-muted);">${this.esc(templateInfo.name)}</div>
+              <div style="font-size:17px; font-weight:700; color:var(--text-primary);">${App._esc(app.name)}</div>
+              <div style="font-size:12px; color:var(--text-muted);">${App._esc(templateInfo.name)}</div>
             </div>
           </div>
 
@@ -1014,16 +1015,16 @@ const AppsPage = {
             <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:8px;">${t('apps.quickUpdateCurrent')}</div>
             <div style="display:flex; justify-content:space-between; padding:6px 0; font-size:13px;">
               <span style="color:var(--text-muted);">${t('apps.detailVersion')}</span>
-              <span style="color:var(--text-primary); font-weight:500;">v${this.esc(app.version || '1.0.0')}</span>
+              <span style="color:var(--text-primary); font-weight:500;">v${App._esc(app.version || '1.0.0')}</span>
             </div>
             <div style="display:flex; justify-content:space-between; padding:6px 0; font-size:13px;">
               <span style="color:var(--text-muted);">${t('apps.detailInstaller')}</span>
-              <span style="font-family:monospace; font-size:11px; color:var(--text-primary); max-width:60%; text-align:right; word-break:break-all;">${this.esc(app.installerPath || '-')}</span>
+              <span style="font-family:monospace; font-size:11px; color:var(--text-primary); max-width:60%; text-align:right; word-break:break-all;">${App._esc(app.installerPath || '-')}</span>
             </div>
             ${app.lastDeployHash ? `
             <div style="display:flex; justify-content:space-between; padding:6px 0; font-size:13px;">
               <span style="color:var(--text-muted);">SHA-256</span>
-              <span style="font-family:monospace; font-size:11px; color:var(--text-muted);">${this.esc(app.lastDeployHash.substring(0, 16))}...</span>
+              <span style="font-family:monospace; font-size:11px; color:var(--text-muted);">${App._esc(app.lastDeployHash.substring(0, 16))}...</span>
             </div>
             ` : ''}
           </div>
@@ -1032,7 +1033,7 @@ const AppsPage = {
           <div>
             <label class="form-label">${t('apps.quickUpdatePickNew')}</label>
             <div class="flex gap-sm">
-              <input class="form-input" id="qu-installer-path" value="${this.esc(state.newInstallerPath)}" placeholder="${t('apps.quickUpdatePickPlaceholder')}" readonly style="flex:1">
+              <input class="form-input" id="qu-installer-path" value="${App._esc(state.newInstallerPath)}" placeholder="${t('apps.quickUpdatePickPlaceholder')}" readonly style="flex:1">
               <button class="btn btn-secondary" id="qu-pick-btn">${t('apps.browse')}</button>
             </div>
           </div>
@@ -1044,19 +1045,19 @@ const AppsPage = {
               <div style="display:flex; align-items:center; justify-content:center; gap:16px; padding:10px; background:var(--bg-tertiary); border-radius:6px;">
                 <div style="text-align:center;">
                   <div style="font-size:11px; color:var(--text-muted); margin-bottom:2px;">${t('apps.quickUpdateOldLabel')}</div>
-                  <div style="font-weight:700; color:var(--text-primary);">v${this.esc(app.version || '1.0.0')}</div>
+                  <div style="font-weight:700; color:var(--text-primary);">v${App._esc(app.version || '1.0.0')}</div>
                 </div>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
                 <div style="text-align:center;">
                   <div style="font-size:11px; color:var(--text-muted); margin-bottom:2px;">${t('apps.quickUpdateNewLabel')}</div>
-                  <div style="font-weight:700; color:${state.isDowngrade ? 'var(--warning-color)' : 'var(--success-color, #10b981)'};">v${this.esc(state.newVersion || '?')}</div>
+                  <div style="font-weight:700; color:${state.isDowngrade ? 'var(--warning-color)' : 'var(--success-color, #10b981)'};">v${App._esc(state.newVersion || '?')}</div>
                 </div>
               </div>
               ${state.newHash ? `
                 <div style="display:flex; justify-content:space-between; padding:8px 0 0 0; font-size:11px; font-family:monospace; color:var(--text-muted);">
-                  <span>${this.esc((app.lastDeployHash || '').substring(0, 16))}...</span>
+                  <span>${App._esc((app.lastDeployHash || '').substring(0, 16))}...</span>
                   <span>&#8594;</span>
-                  <span>${this.esc(state.newHash.substring(0, 16))}...</span>
+                  <span>${App._esc(state.newHash.substring(0, 16))}...</span>
                 </div>
               ` : ''}
             </div>
@@ -1212,13 +1213,13 @@ const AppsPage = {
         <div style="display:flex;align-items:center;gap:12px;">
           <div style="width:44px;height:44px;border-radius:10px;background:var(--accent-primary-dim);display:flex;align-items:center;justify-content:center;font-size:24px;">&#128230;</div>
           <div>
-            <div style="font-size:17px;font-weight:700;color:var(--text-primary);">${this.esc(app.name)}</div>
-            <div style="font-size:12px;color:var(--text-muted);font-family:monospace;">${this.esc(app.wingetId)}</div>
+            <div style="font-size:17px;font-weight:700;color:var(--text-primary);">${App._esc(app.name)}</div>
+            <div style="font-size:12px;color:var(--text-muted);font-family:monospace;">${App._esc(app.wingetId)}</div>
           </div>
         </div>
         <div style="padding:10px 14px;background:var(--bg-input);border-radius:8px;display:flex;justify-content:space-between;font-size:13px;">
           <span style="color:var(--text-muted);">VersiÃ³n actual</span>
-          <span style="font-weight:600;">v${this.esc(app.version || '1.0.0')}</span>
+          <span style="font-weight:600;">v${App._esc(app.version || '1.0.0')}</span>
         </div>
         <div id="wud-status" style="text-align:center;padding:16px;">
           <span class="spinner" style="width:18px;height:18px;display:inline-block;border-width:2px;margin-right:8px;"></span>
@@ -1250,12 +1251,12 @@ const AppsPage = {
         <div style="display:flex;align-items:center;justify-content:center;gap:12px;padding:10px;background:var(--bg-tertiary);border-radius:8px;">
           <div style="text-align:center;">
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">Actual</div>
-            <div style="font-weight:700;color:var(--text-primary);">v${this.esc(app.version || '1.0.0')}</div>
+            <div style="font-weight:700;color:var(--text-primary);">v${App._esc(app.version || '1.0.0')}</div>
           </div>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
           <div style="text-align:center;">
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">Disponible</div>
-            <div style="font-weight:700;color:var(--accent-secondary);">v${this.esc(latestVersion)}</div>
+            <div style="font-weight:700;color:var(--accent-secondary);">v${App._esc(latestVersion)}</div>
           </div>
         </div>`;
 
@@ -1268,7 +1269,7 @@ const AppsPage = {
       }
     } catch (e) {
       const statusEl = document.getElementById('wud-status');
-      if (statusEl) statusEl.innerHTML = `<span style="color:var(--danger-color);font-size:13px;">Error: ${this.esc(e.message)}</span>`;
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--danger-color);font-size:13px;">Error: ${App._esc(e.message)}</span>`;
     }
   },
 
@@ -1350,13 +1351,13 @@ const AppsPage = {
     const rows = results.map((r, i) => `
       <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--bg-input);border-radius:var(--radius-sm);">
         <div style="flex:1;min-width:0;">
-          <div style="font-weight:600;color:var(--text-primary);font-size:var(--font-sm);">${this.esc(r.appName)}</div>
-          <div style="font-size:var(--font-xs);color:var(--text-muted);font-family:monospace;">${this.esc(r.wingetId)}</div>
+          <div style="font-weight:600;color:var(--text-primary);font-size:var(--font-sm);">${App._esc(r.appName)}</div>
+          <div style="font-size:var(--font-xs);color:var(--text-muted);font-family:monospace;">${App._esc(r.wingetId)}</div>
         </div>
         <div style="font-size:var(--font-sm);white-space:nowrap;">
-          <span style="color:var(--text-muted);">v${this.esc(r.currentVersion)}</span>
+          <span style="color:var(--text-muted);">v${App._esc(r.currentVersion)}</span>
           <span style="color:var(--accent-primary);margin:0 6px;">&#8594;</span>
-          <span style="color:var(--accent-secondary);font-weight:600;">v${this.esc(r.latestVersion)}</span>
+          <span style="color:var(--accent-secondary);font-weight:600;">v${App._esc(r.latestVersion)}</span>
         </div>
         <button class="btn btn-primary btn-sm update-app-btn" data-idx="${i}" style="white-space:nowrap;min-width:90px;">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><polyline points="21 4 21 10 15 10"/></svg>
@@ -1641,8 +1642,8 @@ const AppsPage = {
       <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-tertiary);border-radius:6px;">
         <span style="font-size:18px;">${this.templateIcon(a.template)}</span>
         <div style="flex:1;min-width:0;">
-          <div style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.esc(a.name)}</div>
-          ${a.gpoName ? `<div style="font-size:11px;color:var(--text-muted);">GPO: ${this.esc(a.gpoName)}</div>` : ''}
+          <div style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${App._esc(a.name)}</div>
+          ${a.gpoName ? `<div style="font-size:11px;color:var(--text-muted);">GPO: ${App._esc(a.gpoName)}</div>` : ''}
         </div>
       </div>`).join('');
 
@@ -1668,7 +1669,7 @@ const AppsPage = {
             <input type="checkbox" id="_bulk-del-gpo" style="margin-top:2px;flex-shrink:0;" checked>
             <div>
               <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${t('apps.bulkDeleteCleanGpo')}</div>
-              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${appsWithGPO.map(a => this.esc(a.gpoName)).join(', ')}</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${appsWithGPO.map(a => App._esc(a.gpoName)).join(', ')}</div>
             </div>
           </label>` : ''}
         </div>`,
@@ -1727,7 +1728,7 @@ const AppsPage = {
     try {
       const [templates, catalogData, config, existingApps] = await Promise.all([
         window.api.scripts.getTemplates(),
-        window.api.winget.getCatalog().catch(() => ({ catalog: [], odtProducts: [], odtApps: [], odtLanguages: [], odtChannels: [] })),
+        window.api.catalog.getCatalog().catch(() => ({ catalog: [], odtProducts: [], odtApps: [], odtLanguages: [], odtChannels: [] })),
         window.api.config.get().catch(() => ({})),
         window.api.apps.getAll().catch(() => [])
       ]);
@@ -1899,10 +1900,10 @@ const AppsPage = {
             <div style="display:flex;gap:8px;margin-bottom:var(--space-sm);align-items:center;flex-wrap:wrap;">
               <div style="position:relative;flex:1;min-width:160px;">
                 <svg style="position:absolute;left:8px;top:50%;transform:translateY(-50%);opacity:.4;pointer-events:none;" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input type="text" class="form-input" id="catalog-search" value="${this.esc(state.catalogSearch||'')}" placeholder="Buscar app..." style="padding-left:28px;padding-top:5px;padding-bottom:5px;font-size:13px;" autocomplete="off">
+                <input type="text" class="form-input" id="catalog-search" value="${App._esc(state.catalogSearch||'')}" placeholder="Buscar app..." style="padding-left:28px;padding-top:5px;padding-bottom:5px;font-size:13px;" autocomplete="off">
               </div>
               <div style="display:flex;gap:4px;flex-wrap:wrap;">
-                ${cats.map(cat => `<button class="catalog-cat-btn" data-cat="${this.esc(cat)}" style="${catBtnStyle(activeCat===cat)}">${this.esc(cat)}</button>`).join('')}
+                ${cats.map(cat => `<button class="catalog-cat-btn" data-cat="${App._esc(cat)}" style="${catBtnStyle(activeCat===cat)}">${App._esc(cat)}</button>`).join('')}
               </div>
             </div>
             <div id="wiz-catalog-results" style="max-height:330px;overflow-y:auto;padding-right:2px;">
@@ -1946,7 +1947,7 @@ const AppsPage = {
             if (!grouped2[cat]) return;
             body += `
               <div style="margin-bottom:var(--space-sm);">
-                <h5 style="font-size:10px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;letter-spacing:.05em;">${this.esc(cat)}</h5>
+                <h5 style="font-size:10px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;letter-spacing:.05em;">${App._esc(cat)}</h5>
                 <div class="template-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));">
                   ${grouped2[cat].map(item => {
                     const isSel = state.template === 'winget'
@@ -1954,13 +1955,13 @@ const AppsPage = {
                       && (state.wingetSource || 'winget') === (item.wingetSource || 'winget');
                     return `
                       <div class="template-card catalog-item ${isSel ? 'selected' : ''}"
-                           data-catalog-type="winget" data-winget-id="${this.esc(item.wingetId)}"
-                           data-winget-source="${this.esc(item.wingetSource || 'winget')}"
-                           data-app-name="${this.esc(item.name)}" data-app-version="${this.esc(item.defaultVersion)}"
+                           data-catalog-type="winget" data-winget-id="${App._esc(item.wingetId)}"
+                           data-winget-source="${App._esc(item.wingetSource || 'winget')}"
+                           data-app-name="${App._esc(item.name)}" data-app-version="${App._esc(item.defaultVersion)}"
                            style="cursor:pointer;">
                         <div class="template-card-icon" style="font-size:22px;">${item.icon}</div>
-                        <div class="template-card-name" style="font-size:11px;">${this.esc(item.name)}</div>
-                        <div class="template-card-desc" style="font-size:10px;">v${this.esc(item.defaultVersion)}</div>
+                        <div class="template-card-name" style="font-size:11px;">${App._esc(item.name)}</div>
+                        <div class="template-card-desc" style="font-size:10px;">v${App._esc(item.defaultVersion)}</div>
                       </div>`;
                   }).join('')}
                 </div>
@@ -1987,13 +1988,13 @@ const AppsPage = {
                     && state.wingetId === item.wingetId
                     && (state.wingetSource || 'winget') === (item.wingetSource || 'winget');
                   return `<div class="template-card catalog-item ${isSel ? 'selected' : ''}"
-                       data-catalog-type="winget" data-winget-id="${this.esc(item.wingetId)}"
-                       data-winget-source="${this.esc(item.wingetSource || 'winget')}"
-                       data-app-name="${this.esc(item.name)}" data-app-version="${this.esc(item.version||'')}"
+                       data-catalog-type="winget" data-winget-id="${App._esc(item.wingetId)}"
+                       data-winget-source="${App._esc(item.wingetSource || 'winget')}"
+                       data-app-name="${App._esc(item.name)}" data-app-version="${App._esc(item.version||'')}"
                        style="cursor:pointer;">
                     <div class="template-card-icon" style="font-size:22px;">&#128230;</div>
-                    <div class="template-card-name" style="font-size:11px;">${this.esc(item.name)}</div>
-                    ${item.version ? `<div class="template-card-desc" style="font-size:10px;">v${this.esc(item.version)}</div>` : ''}
+                    <div class="template-card-name" style="font-size:11px;">${App._esc(item.name)}</div>
+                    ${item.version ? `<div class="template-card-desc" style="font-size:10px;">v${App._esc(item.version)}</div>` : ''}
                   </div>`;
                 }).join('')}
               </div>
@@ -2020,9 +2021,9 @@ const AppsPage = {
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:var(--space-sm);flex-wrap:wrap;">
               <div style="position:relative;max-width:360px;flex:1;min-width:260px;">
                 <svg style="position:absolute;left:8px;top:50%;transform:translateY(-50%);opacity:.4;pointer-events:none;" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input type="text" class="form-input" id="plantilla-search" value="${this.esc(state.plantillaSearch||'')}" placeholder="Buscar plantilla..." style="padding-left:28px;padding-top:6px;padding-bottom:6px;font-size:13px;" autocomplete="off">
+                <input type="text" class="form-input" id="plantilla-search" value="${App._esc(state.plantillaSearch||'')}" placeholder="Buscar plantilla..." style="padding-left:28px;padding-top:6px;padding-bottom:6px;font-size:13px;" autocomplete="off">
               </div>
-              <button class="btn btn-secondary btn-sm" type="button" id="btn-open-template-manager">${this.tr('apps.newCustomTemplate', 'Nueva plantilla')}</button>
+              <button class="btn btn-secondary btn-sm" type="button" id="btn-open-template-manager">${t('apps.newCustomTemplate', 'Nueva plantilla')}</button>
             </div>
           `;
 
@@ -2041,8 +2042,8 @@ const AppsPage = {
                   <div class="template-grid">
                     <div class="template-card ${state.template === 'office' ? 'selected' : ''}" data-template="office">
                       <div class="template-card-icon">${this.templateIcon('office')}</div>
-                      <div class="template-card-name">${this.esc(officeTmpl.name)}</div>
-                      <div class="template-card-desc">${this.esc(officeTmpl.description)}</div>
+                      <div class="template-card-name">${App._esc(officeTmpl.name)}</div>
+                      <div class="template-card-desc">${App._esc(officeTmpl.description)}</div>
                     </div>
                   </div>
                 </div>`;
@@ -2059,19 +2060,19 @@ const AppsPage = {
             hasVisibleTemplates = true;
             body += `
               <div class="template-category-group" style="margin-bottom:var(--space-md);">
-                <h5 style="margin-bottom:var(--space-sm);color:var(--text-primary);border-bottom:1px solid var(--border-color);padding-bottom:4px;">${cat === 'Custom' ? this.tr('apps.customTemplatesTitle', 'Plantillas personalizadas') : cat}</h5>
+                <h5 style="margin-bottom:var(--space-sm);color:var(--text-primary);border-bottom:1px solid var(--border-color);padding-bottom:4px;">${cat === 'Custom' ? t('apps.customTemplatesTitle', 'Plantillas personalizadas') : cat}</h5>
                 <div class="template-grid">
                   ${catTmpls.map(tmpl => `
                     <div class="template-card ${state.template === tmpl.id ? 'selected' : ''}" data-template="${tmpl.id}">
                       <div class="template-card-icon">${this.templateIcon(tmpl.id)}</div>
-                      <div class="template-card-name">${this.esc(tmpl.name)}</div>
-                      <div class="template-card-desc">${this.esc(tmpl.description)}</div>
+                      <div class="template-card-name">${App._esc(tmpl.name)}</div>
+                      <div class="template-card-desc">${App._esc(tmpl.description)}</div>
                     </div>`).join('')}
                 </div>
               </div>`;
           });
           if (!hasVisibleTemplates) {
-            body += `<div style="padding:16px;border:1px dashed var(--border-color);border-radius:8px;color:var(--text-muted);font-size:12px;">${this.tr('apps.templatesSearchEmpty', 'No se han encontrado plantillas para esa busqueda.')}</div>`;
+            body += `<div style="padding:16px;border:1px dashed var(--border-color);border-radius:8px;color:var(--text-muted);font-size:12px;">${t('apps.templatesSearchEmpty', 'No se han encontrado plantillas para esa busqueda.')}</div>`;
           }
           body += `</div>`;
 
@@ -2082,16 +2083,16 @@ const AppsPage = {
             <div id="wiz-manual-results" style="max-height:360px;overflow-y:auto;padding-right:2px;">
               <div style="margin-bottom:var(--space-sm);">
                 <div>
-                  <div style="font-size:12px;font-weight:700;color:var(--text-primary);">${this.tr('apps.manualTemplatesTitle', 'Plantillas manuales')}</div>
-                  <div style="font-size:11px;color:var(--text-muted);">${this.tr('apps.manualTemplatesHint', 'Usa una app generica o un script manual cuando no quieras una plantilla reutilizable.')}</div>
+                  <div style="font-size:12px;font-weight:700;color:var(--text-primary);">${t('apps.manualTemplatesTitle', 'Plantillas manuales')}</div>
+                  <div style="font-size:11px;color:var(--text-muted);">${t('apps.manualTemplatesHint', 'Usa una app generica o un script manual cuando no quieras una plantilla reutilizable.')}</div>
                 </div>
               </div>
               <div class="template-grid">
                 ${manualTmpls.map(tmpl => `
                   <div class="template-card ${state.template === tmpl.id ? 'selected' : ''}" data-template="${tmpl.id}">
                     <div class="template-card-icon">${this.templateIcon(tmpl.id)}</div>
-                    <div class="template-card-name">${this.esc(tmpl.name)}</div>
-                  <div class="template-card-desc">${this.esc(tmpl.description)}</div>
+                    <div class="template-card-name">${App._esc(tmpl.name)}</div>
+                  <div class="template-card-desc">${App._esc(tmpl.description)}</div>
                   </div>`).join('')}
               </div>
             </div>`;
@@ -2109,12 +2110,12 @@ const AppsPage = {
         body += `
           <div class="form-group">
             <label class="form-label">${t('apps.appName')}</label>
-            <input class="form-input" id="wiz-name" value="${this.esc(state.name)}" placeholder="Ej: Google Chrome">
+            <input class="form-input" id="wiz-name" value="${App._esc(state.name)}" placeholder="Ej: Google Chrome">
             <p class="form-hint">${t('apps.nameHint')}</p>
           </div>
           ${state.simpleModeFlow ? `
             <div style="padding:12px 14px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.18);border-radius:8px;margin-bottom:14px;font-size:12px;color:var(--text-secondary);">
-              ${this.tr('apps.simpleModeHint', 'Modo sencillo: solo necesitas nombre, instalador y argumentos. Cambia a avanzado desde Configuracion para ver desinstalacion, deteccion y opciones adicionales.')}
+              ${t('apps.simpleModeHint', 'Modo sencillo: solo necesitas nombre, instalador y argumentos. Cambia a avanzado desde Configuracion para ver desinstalacion, deteccion y opciones adicionales.')}
             </div>
           ` : ''}`;
 
@@ -2127,14 +2128,14 @@ const AppsPage = {
                 <div style="display:flex;align-items:flex-start;gap:10px;">
                   <span style="font-size:28px;line-height:1;">${this.templateIcon(state.template)}</span>
                   <div>
-                    <div style="font-size:15px;font-weight:700;color:var(--text-primary);">${this.esc(tmpl.name)}</div>
-                    <p style="margin:6px 0 0 0;font-size:13px;line-height:1.5;color:var(--text-secondary);">${this.esc(tmpl.description || this.tr('apps.customTemplateDefaultDescLong', 'Plantilla reutilizable. Completa solo los valores que cambian en cada despliegue.'))}</p>
+                    <div style="font-size:15px;font-weight:700;color:var(--text-primary);">${App._esc(tmpl.name)}</div>
+                    <p style="margin:6px 0 0 0;font-size:13px;line-height:1.5;color:var(--text-secondary);">${App._esc(tmpl.description || t('apps.customTemplateDefaultDescLong', 'Plantilla reutilizable. Completa solo los valores que cambian en cada despliegue.'))}</p>
                   </div>
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                  <span class="badge badge-info">${fieldCount} ${this.tr('apps.customTemplateArgsBadge', 'campos')}</span>
-                  <span class="badge badge-neutral">${fileCount} ${this.tr('apps.customTemplateFilesBadge', 'archivos')}</span>
-                  ${tmpl?.hasCustomScript ? `<span class="badge badge-primary">${this.tr('apps.customTemplateScriptBadge', 'script opcional')}</span>` : ''}
+                  <span class="badge badge-info">${fieldCount} ${t('apps.customTemplateArgsBadge', 'campos')}</span>
+                  <span class="badge badge-neutral">${fileCount} ${t('apps.customTemplateFilesBadge', 'archivos')}</span>
+                  ${tmpl?.hasCustomScript ? `<span class="badge badge-primary">${t('apps.customTemplateScriptBadge', 'script opcional')}</span>` : ''}
                 </div>
               </div>
             </div>`;
@@ -2145,8 +2146,8 @@ const AppsPage = {
               <div style="display:flex;align-items:center;gap:10px;">
                 <span style="font-size:28px;line-height:1;">${this.templateIcon(state.template)}</span>
                 <div>
-                  <div style="font-size:14px;font-weight:700;color:var(--text-primary);">${this.esc(tmpl.name)}</div>
-                  ${tmpl.description ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${this.esc(tmpl.description)}</div>` : ''}
+                  <div style="font-size:14px;font-weight:700;color:var(--text-primary);">${App._esc(tmpl.name)}</div>
+                  ${tmpl.description ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${App._esc(tmpl.description)}</div>` : ''}
                 </div>
                 <span class="badge badge-neutral" style="margin-left:auto;flex-shrink:0;">Sistema</span>
               </div>
@@ -2161,11 +2162,11 @@ const AppsPage = {
             <p style="margin:0 0 8px 0;font-size:12px;color:var(--text-secondary);">Se instalará automáticamente usando winget. No es necesario descargar ningún instalador.</p>
             <div class="form-group" style="margin-bottom:0;">
               <label class="form-label">Winget ID</label>
-              <input type="text" class="form-input" value="${this.esc(state.wingetId)}" readonly style="background:var(--bg-tertiary);cursor:default;font-family:monospace;font-size:12px;">
+              <input type="text" class="form-input" value="${App._esc(state.wingetId)}" readonly style="background:var(--bg-tertiary);cursor:default;font-family:monospace;font-size:12px;">
             </div>
             <div class="form-group" style="margin-bottom:0;margin-top:8px;">
               <label class="form-label">Fuente</label>
-              <input type="text" class="form-input" value="${this.esc(state.wingetSource || 'winget')}" readonly style="background:var(--bg-tertiary);cursor:default;font-family:monospace;font-size:12px;">
+              <input type="text" class="form-input" value="${App._esc(state.wingetSource || 'winget')}" readonly style="background:var(--bg-tertiary);cursor:default;font-family:monospace;font-size:12px;">
             </div>
           </div>`;
 
@@ -2195,8 +2196,8 @@ const AppsPage = {
               <div class="odt-product-grid">
                 ${odtProds.map(p => `
                   <label class="odt-product-card ${cfg.product === p.id ? 'active' : ''}">
-                    <input type="radio" name="odt-product-radio" value="${this.esc(p.id)}" ${cfg.product === p.id ? 'checked' : ''}>
-                    <div class="odt-product-name">${this.esc(p.label)}</div>
+                    <input type="radio" name="odt-product-radio" value="${App._esc(p.id)}" ${cfg.product === p.id ? 'checked' : ''}>
+                    <div class="odt-product-name">${App._esc(p.label)}</div>
                     <div class="odt-product-badge">${p.type === 'subscription' ? 'Suscripción' : 'Licencia perpetua'}</div>
                   </label>`).join('')}
               </div>
@@ -2207,8 +2208,8 @@ const AppsPage = {
               <div class="odt-apps-grid">
                 ${odtApps2.map(a => `
                   <label class="odt-app-chip ${cfg.apps.includes(a.id) ? 'active' : ''}">
-                    <input type="checkbox" name="odt-app" value="${this.esc(a.id)}" ${cfg.apps.includes(a.id) ? 'checked' : ''}>
-                    ${this.esc(a.label)}
+                    <input type="checkbox" name="odt-app" value="${App._esc(a.id)}" ${cfg.apps.includes(a.id) ? 'checked' : ''}>
+                    ${App._esc(a.label)}
                   </label>`).join('')}
               </div>
             </div>
@@ -2218,13 +2219,13 @@ const AppsPage = {
                 <div class="odt-option">
                   <label class="odt-option-label">Idioma</label>
                   <select class="form-select" id="odt-language">
-                    ${odtLangs.map(l => `<option value="${this.esc(l.id)}" ${cfg.language === l.id ? 'selected' : ''}>${this.esc(l.label)}</option>`).join('')}
+                    ${odtLangs.map(l => `<option value="${App._esc(l.id)}" ${cfg.language === l.id ? 'selected' : ''}>${App._esc(l.label)}</option>`).join('')}
                   </select>
                 </div>
                 <div class="odt-option">
                   <label class="odt-option-label">Canal</label>
                   <select class="form-select" id="odt-channel">
-                    ${odtChans.map(c => `<option value="${this.esc(c.id)}" ${cfg.channel === c.id ? 'selected' : ''}>${this.esc(c.label)}</option>`).join('')}
+                    ${odtChans.map(c => `<option value="${App._esc(c.id)}" ${cfg.channel === c.id ? 'selected' : ''}>${App._esc(c.label)}</option>`).join('')}
                   </select>
                 </div>
                 <div class="odt-option odt-option-sm">
@@ -2240,15 +2241,15 @@ const AppsPage = {
             <div class="odt-summary" id="odt-summary">
               <div class="odt-summary-row">
                 <span class="odt-summary-key">Producto</span>
-                <span class="odt-summary-val" id="odt-sum-product">${this.esc(curProd?.label || cfg.product)}</span>
+                <span class="odt-summary-val" id="odt-sum-product">${App._esc(curProd?.label || cfg.product)}</span>
               </div>
               <div class="odt-summary-row">
                 <span class="odt-summary-key">Apps</span>
-                <span class="odt-summary-val" id="odt-sum-apps">${cfg.apps.length > 0 ? cfg.apps.map(id => { const a = odtApps2.find(x => x.id === id); return this.esc(a?.label || id); }).join(', ') : 'Ninguna seleccionada'}</span>
+                <span class="odt-summary-val" id="odt-sum-apps">${cfg.apps.length > 0 ? cfg.apps.map(id => { const a = odtApps2.find(x => x.id === id); return App._esc(a?.label || id); }).join(', ') : 'Ninguna seleccionada'}</span>
               </div>
               <div class="odt-summary-row">
                 <span class="odt-summary-key">Canal · Idioma · Arq</span>
-                <span class="odt-summary-val" id="odt-sum-opts">${this.esc(curChan?.label || cfg.channel)} · ${this.esc(curLang?.label || cfg.language)} · ${cfg.arch} bits</span>
+                <span class="odt-summary-val" id="odt-sum-opts">${App._esc(curChan?.label || cfg.channel)} · ${App._esc(curLang?.label || cfg.language)} · ${cfg.arch} bits</span>
               </div>
               <div class="odt-summary-warning">
                 â± La instalaciÃ³n puede tardar entre 20 y 60 minutos en los equipos cliente
@@ -2263,7 +2264,7 @@ const AppsPage = {
             <div class="form-group">
               <label class="form-label">${t('apps.installer')}</label>
               <div class="flex gap-sm">
-                <input class="form-input" id="wiz-installer" value="${this.esc(state.installerPath)}" placeholder="C:\\Descargas\\app.exe" readonly style="flex:1">
+                <input class="form-input" id="wiz-installer" value="${App._esc(state.installerPath)}" placeholder="C:\\Descargas\\app.exe" readonly style="flex:1">
                 <button class="btn btn-secondary" id="btn-pick-installer">${t('apps.browse')}</button>
               </div>
               <p class="form-hint">${t('apps.installerHint')}</p>
@@ -2274,7 +2275,7 @@ const AppsPage = {
             <div class="form-group">
               <label class="form-label">${t('apps.xmlConfig')}${requiresConfigXml ? ' *' : ''}</label>
               <div class="flex gap-sm">
-                <input class="form-input" id="wiz-xml" value="${this.esc(state.configXmlPath)}" placeholder="${this.esc(t('apps.xmlHint'))}" readonly style="flex:1">
+                <input class="form-input" id="wiz-xml" value="${App._esc(state.configXmlPath)}" placeholder="${App._esc(t('apps.xmlHint'))}" readonly style="flex:1">
                 <button class="btn btn-secondary" id="btn-pick-xml">${t('apps.browse')}</button>
               </div>
             </div>
@@ -2285,13 +2286,13 @@ const AppsPage = {
               <div class="form-group">
                 <label class="form-label">${t('apps.silentArgs')}</label>
                 <div style="display:flex;gap:8px;">
-                  <input class="form-input" id="wiz-silentArgs" value="${this.esc(state.silentArgs)}" placeholder="/S, /qn, /norestart" style="flex:1;">
+                  <input class="form-input" id="wiz-silentArgs" value="${App._esc(state.silentArgs)}" placeholder="/S, /qn, /norestart" style="flex:1;">
                   <button class="btn btn-secondary btn-sm" type="button" id="btn-show-args-help" style="white-space:nowrap;align-self:center;">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                     ${t('apps.commonArgs')}
                   </button>
                 </div>
-                ${isUserTemplate ? `<p class="form-hint">${this.tr('apps.customTemplateSilentHint', 'Estos argumentos base se añaden antes de los argumentos definidos en la plantilla.')}</p>` : ''}
+                ${isUserTemplate ? `<p class="form-hint">${t('apps.customTemplateSilentHint', 'Estos argumentos base se añaden antes de los argumentos definidos en la plantilla.')}</p>` : ''}
               </div>
             </div>
           ` : ''}`;
@@ -2302,70 +2303,70 @@ const AppsPage = {
             const installerType = this.getInstallerTypeFromPath(state.installerPath, state.template);
             const options = [];
             if (state.template === 'winget') {
-              options.push(['winget', this.tr('apps.uninstallModeWinget', 'Winget')]);
-              options.push(['none', this.tr('apps.uninstallModeNone', 'Sin desinstalacion')]);
+              options.push(['winget', t('apps.uninstallModeWinget', 'Winget')]);
+              options.push(['none', t('apps.uninstallModeNone', 'Sin desinstalacion')]);
             } else if (installerType === 'msi') {
-              options.push(['auto-msi', this.tr('apps.uninstallModeMsi', 'MSI automatico')]);
-              options.push(['auto-registry', this.tr('apps.uninstallModeRegistry', 'Auto por registro')]);
-              options.push(['manual', this.tr('apps.uninstallModeManual', 'Comando manual')]);
-              options.push(['none', this.tr('apps.uninstallModeNone', 'Sin desinstalacion')]);
+              options.push(['auto-msi', t('apps.uninstallModeMsi', 'MSI automatico')]);
+              options.push(['auto-registry', t('apps.uninstallModeRegistry', 'Auto por registro')]);
+              options.push(['manual', t('apps.uninstallModeManual', 'Comando manual')]);
+              options.push(['none', t('apps.uninstallModeNone', 'Sin desinstalacion')]);
             } else if (state.template === 'custom' || state.template === 'odt') {
-              options.push(['manual', this.tr('apps.uninstallModeManual', 'Comando manual')]);
-              options.push(['none', this.tr('apps.uninstallModeNone', 'Sin desinstalacion')]);
+              options.push(['manual', t('apps.uninstallModeManual', 'Comando manual')]);
+              options.push(['none', t('apps.uninstallModeNone', 'Sin desinstalacion')]);
             } else {
-              options.push(['auto-registry', this.tr('apps.uninstallModeRegistry', 'Auto por registro')]);
-              options.push(['manual', this.tr('apps.uninstallModeManual', 'Comando manual')]);
-              options.push(['none', this.tr('apps.uninstallModeNone', 'Sin desinstalacion')]);
+              options.push(['auto-registry', t('apps.uninstallModeRegistry', 'Auto por registro')]);
+              options.push(['manual', t('apps.uninstallModeManual', 'Comando manual')]);
+              options.push(['none', t('apps.uninstallModeNone', 'Sin desinstalacion')]);
             }
 
             const selectedMode = state.uninstallMode || this.getDefaultUninstallMode(state.template, state.installerPath, installerType);
             return `
               <div class="card" style="padding:14px 16px; margin:0 0 14px 0;">
-                <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:10px;">${this.tr('apps.uninstallSection', 'Desinstalacion')}</div>
+                <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:10px;">${t('apps.uninstallSection', 'Desinstalacion')}</div>
                 <div class="form-group">
-                  <label class="form-label">${this.tr('apps.uninstallMode', 'Modo de desinstalacion')}</label>
+                  <label class="form-label">${t('apps.uninstallMode', 'Modo de desinstalacion')}</label>
                   <select class="form-select" id="wiz-uninstall-mode">
-                    ${options.map(([value, label]) => `<option value="${value}" ${selectedMode === value ? 'selected' : ''}>${this.esc(label)}</option>`).join('')}
+                    ${options.map(([value, label]) => `<option value="${value}" ${selectedMode === value ? 'selected' : ''}>${App._esc(label)}</option>`).join('')}
                   </select>
-                  <p class="form-hint">${this.tr('apps.uninstallHint', 'Define como se va a preparar el script uninstall.ps1 para esta app.')}</p>
+                  <p class="form-hint">${t('apps.uninstallHint', 'Define como se va a preparar el script uninstall.ps1 para esta app.')}</p>
                 </div>
                 ${selectedMode === 'auto-msi' ? `
                   <div class="form-group" style="margin-bottom:0;">
-                    <label class="form-label">${this.tr('apps.uninstallProductCode', 'ProductCode MSI')}</label>
-                    <input class="form-input" id="wiz-uninstall-product-code" value="${this.esc(state.uninstallProductCode || '')}" placeholder="{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}">
-                    <p class="form-hint">${this.tr('apps.uninstallProductCodeHint', 'Opcional. Si lo dejas vacio, se intentara resolver automaticamente desde el MSI o el registro del equipo cliente.')}</p>
+                    <label class="form-label">${t('apps.uninstallProductCode', 'ProductCode MSI')}</label>
+                    <input class="form-input" id="wiz-uninstall-product-code" value="${App._esc(state.uninstallProductCode || '')}" placeholder="{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}">
+                    <p class="form-hint">${t('apps.uninstallProductCodeHint', 'Opcional. Si lo dejas vacio, se intentara resolver automaticamente desde el MSI o el registro del equipo cliente.')}</p>
                   </div>
                 ` : ''}
                 ${selectedMode === 'auto-registry' ? `
                   <div class="form-group">
-                    <label class="form-label">${this.tr('apps.uninstallRegistryName', 'Nombre a buscar en registro')}</label>
-                    <input class="form-input" id="wiz-uninstall-reg-name" value="${this.esc(state.uninstallRegistryName || state.name || '')}" placeholder="Nombre del programa instalado">
+                    <label class="form-label">${t('apps.uninstallRegistryName', 'Nombre a buscar en registro')}</label>
+                    <input class="form-input" id="wiz-uninstall-reg-name" value="${App._esc(state.uninstallRegistryName || state.name || '')}" placeholder="Nombre del programa instalado">
                   </div>
                   <div class="form-group" style="margin-bottom:0;">
-                    <label class="form-label">${this.tr('apps.uninstallRegistryPublisher', 'Publisher opcional')}</label>
-                    <input class="form-input" id="wiz-uninstall-reg-publisher" value="${this.esc(state.uninstallRegistryPublisher || '')}" placeholder="Fabricante / Publisher">
-                    <p class="form-hint">${this.tr('apps.uninstallRegistryHint', 'Se usara QuietUninstallString o UninstallString de la app detectada en el registro de Windows.')}</p>
+                    <label class="form-label">${t('apps.uninstallRegistryPublisher', 'Publisher opcional')}</label>
+                    <input class="form-input" id="wiz-uninstall-reg-publisher" value="${App._esc(state.uninstallRegistryPublisher || '')}" placeholder="Fabricante / Publisher">
+                    <p class="form-hint">${t('apps.uninstallRegistryHint', 'Se usara QuietUninstallString o UninstallString de la app detectada en el registro de Windows.')}</p>
                   </div>
                 ` : ''}
                 ${selectedMode === 'manual' ? `
                   <div class="form-group">
-                    <label class="form-label">${this.tr('apps.uninstallCommand', 'Ruta o comando')}</label>
-                    <input class="form-input" id="wiz-uninstall-command" value="${this.esc(state.uninstallCommand || '')}" placeholder="C:\\Program Files\\App\\uninstall.exe">
+                    <label class="form-label">${t('apps.uninstallCommand', 'Ruta o comando')}</label>
+                    <input class="form-input" id="wiz-uninstall-command" value="${App._esc(state.uninstallCommand || '')}" placeholder="C:\\Program Files\\App\\uninstall.exe">
                   </div>
                   <div class="form-group" style="margin-bottom:0;">
-                    <label class="form-label">${this.tr('apps.uninstallArgs', 'Argumentos')}</label>
-                    <input class="form-input" id="wiz-uninstall-args" value="${this.esc(state.uninstallArgs || '')}" placeholder="/S /quiet">
-                    <p class="form-hint">${this.tr('apps.uninstallManualHint', 'Usa esta opcion para EXE, scripts personalizados u otros instaladores que requieran un comando especifico.')}</p>
+                    <label class="form-label">${t('apps.uninstallArgs', 'Argumentos')}</label>
+                    <input class="form-input" id="wiz-uninstall-args" value="${App._esc(state.uninstallArgs || '')}" placeholder="/S /quiet">
+                    <p class="form-hint">${t('apps.uninstallManualHint', 'Usa esta opcion para EXE, scripts personalizados u otros instaladores que requieran un comando especifico.')}</p>
                   </div>
                 ` : ''}
                 ${selectedMode === 'winget' ? `
                   <div style="padding:10px 12px; border-radius:8px; background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.18); font-size:12px; color:var(--text-secondary);">
-                    ${this.tr('apps.uninstallWingetHint', 'Se generara automaticamente winget uninstall con el paquete seleccionado.')} <code>${this.esc(state.wingetId || '-')}</code>
+                    ${t('apps.uninstallWingetHint', 'Se generara automaticamente winget uninstall con el paquete seleccionado.')} <code>${App._esc(state.wingetId || '-')}</code>
                   </div>
                 ` : ''}
                 ${selectedMode === 'none' ? `
                   <div style="padding:10px 12px; border-radius:8px; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.18); font-size:12px; color:var(--text-secondary);">
-                    ${this.tr('apps.uninstallNoneHint', 'Esta app se desplegara sin script de desinstalacion. Podras cambiarlo mas tarde desde Editar app.')}
+                    ${t('apps.uninstallNoneHint', 'Esta app se desplegara sin script de desinstalacion. Podras cambiarlo mas tarde desde Editar app.')}
                   </div>
                 ` : ''}
               </div>
@@ -2380,62 +2381,62 @@ const AppsPage = {
             const opOptions = ['>=','=','>','<','<=','!='];
             return `
               <div class="card" style="padding:14px 16px; margin:0 0 14px 0;">
-                <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:10px;">${this.tr('apps.detectionSection', 'Deteccion de instalacion')}</div>
+                <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:10px;">${t('apps.detectionSection', 'Deteccion de instalacion')}</div>
                 <div class="form-group">
-                  <label class="form-label">${this.tr('apps.detectionType', 'Metodo de deteccion')}</label>
+                  <label class="form-label">${t('apps.detectionType', 'Metodo de deteccion')}</label>
                   <select class="form-select" id="wiz-detection-type">
-                    <option value="tracker" ${detType === 'tracker' ? 'selected' : ''}>${this.tr('apps.detectionTypeTracker', 'Tracker (predeterminado)')}</option>
-                    <option value="file" ${detType === 'file' ? 'selected' : ''}>${this.tr('apps.detectionTypeFile', 'Archivo/ruta en disco')}</option>
-                    <option value="registry" ${detType === 'registry' ? 'selected' : ''}>${this.tr('apps.detectionTypeRegistry', 'Clave o valor de registro')}</option>
+                    <option value="tracker" ${detType === 'tracker' ? 'selected' : ''}>${t('apps.detectionTypeTracker', 'Tracker (predeterminado)')}</option>
+                    <option value="file" ${detType === 'file' ? 'selected' : ''}>${t('apps.detectionTypeFile', 'Archivo/ruta en disco')}</option>
+                    <option value="registry" ${detType === 'registry' ? 'selected' : ''}>${t('apps.detectionTypeRegistry', 'Clave o valor de registro')}</option>
                   </select>
-                  <p class="form-hint">${this.tr('apps.detectionHint', 'Al estilo Intune: si se cumple la regla, la app se considera instalada y el script no la reinstala.')}</p>
+                  <p class="form-hint">${t('apps.detectionHint', 'Al estilo Intune: si se cumple la regla, la app se considera instalada y el script no la reinstala.')}</p>
                 </div>
                 ${detType === 'file' ? `
                   <div class="form-group">
-                    <label class="form-label">${this.tr('apps.detectionFilePath', 'Ruta del archivo')}</label>
-                    <input class="form-input" id="wiz-detection-file-path" value="${this.esc(det.filePath || '')}" placeholder="C:\\Program Files\\App\\app.exe">
+                    <label class="form-label">${t('apps.detectionFilePath', 'Ruta del archivo')}</label>
+                    <input class="form-input" id="wiz-detection-file-path" value="${App._esc(det.filePath || '')}" placeholder="C:\\Program Files\\App\\app.exe">
                   </div>
                   <div class="form-group" style="margin-bottom:0;">
-                    <label class="form-label">${this.tr('apps.detectionFileCheck', 'Que verificar')}</label>
+                    <label class="form-label">${t('apps.detectionFileCheck', 'Que verificar')}</label>
                     <div style="display:flex;gap:8px;">
                       <select class="form-select" id="wiz-detection-file-check" style="flex:0 0 220px;">
-                        <option value="exists" ${fileCheck === 'exists' ? 'selected' : ''}>${this.tr('apps.detectionFileCheckExists', 'Existe el archivo')}</option>
-                        <option value="version" ${fileCheck === 'version' ? 'selected' : ''}>${this.tr('apps.detectionFileCheckVersion', 'Comparar version')}</option>
-                        <option value="date" ${fileCheck === 'date' ? 'selected' : ''}>${this.tr('apps.detectionFileCheckDate', 'Existe (fecha)')}</option>
+                        <option value="exists" ${fileCheck === 'exists' ? 'selected' : ''}>${t('apps.detectionFileCheckExists', 'Existe el archivo')}</option>
+                        <option value="version" ${fileCheck === 'version' ? 'selected' : ''}>${t('apps.detectionFileCheckVersion', 'Comparar version')}</option>
+                        <option value="date" ${fileCheck === 'date' ? 'selected' : ''}>${t('apps.detectionFileCheckDate', 'Existe (fecha)')}</option>
                       </select>
                       ${fileCheck === 'version' ? `
                         <select class="form-select" id="wiz-detection-file-op" style="flex:0 0 90px;">
                           ${opOptions.map(op => `<option value="${op}" ${(det.fileVersionOp || '>=') === op ? 'selected' : ''}>${op}</option>`).join('')}
                         </select>
-                        <input class="form-input" id="wiz-detection-file-version" value="${this.esc(det.fileVersionValue || '')}" placeholder="1.0.0" style="flex:1;">
+                        <input class="form-input" id="wiz-detection-file-version" value="${App._esc(det.fileVersionValue || '')}" placeholder="1.0.0" style="flex:1;">
                       ` : ''}
                     </div>
                   </div>
                 ` : ''}
                 ${detType === 'registry' ? `
                   <div class="form-group">
-                    <label class="form-label">${this.tr('apps.detectionRegistryHive', 'Hive')}</label>
+                    <label class="form-label">${t('apps.detectionRegistryHive', 'Hive')}</label>
                     <select class="form-select" id="wiz-detection-reg-hive" style="max-width:220px;">
                       <option value="HKLM" ${(det.registryHive || 'HKLM') === 'HKLM' ? 'selected' : ''}>HKLM</option>
                       <option value="HKCU" ${det.registryHive === 'HKCU' ? 'selected' : ''}>HKCU</option>
                     </select>
                   </div>
                   <div class="form-group">
-                    <label class="form-label">${this.tr('apps.detectionRegistryKey', 'Clave de registro')}</label>
-                    <input class="form-input" id="wiz-detection-reg-key" value="${this.esc(det.registryKey || '')}" placeholder="SOFTWARE\\MyCompany\\App">
+                    <label class="form-label">${t('apps.detectionRegistryKey', 'Clave de registro')}</label>
+                    <input class="form-input" id="wiz-detection-reg-key" value="${App._esc(det.registryKey || '')}" placeholder="SOFTWARE\\MyCompany\\App">
                   </div>
                   <div class="form-group">
-                    <label class="form-label">${this.tr('apps.detectionRegistryValueName', 'Nombre del valor (opcional)')}</label>
-                    <input class="form-input" id="wiz-detection-reg-value-name" value="${this.esc(det.registryValueName || '')}" placeholder="Version">
+                    <label class="form-label">${t('apps.detectionRegistryValueName', 'Nombre del valor (opcional)')}</label>
+                    <input class="form-input" id="wiz-detection-reg-value-name" value="${App._esc(det.registryValueName || '')}" placeholder="Version">
                   </div>
                   <div class="form-group" style="margin-bottom:0;">
-                    <label class="form-label">${this.tr('apps.detectionRegistryCheck', 'Comprobacion')}</label>
+                    <label class="form-label">${t('apps.detectionRegistryCheck', 'Comprobacion')}</label>
                     <div style="display:flex;gap:8px;">
                       <select class="form-select" id="wiz-detection-reg-check" style="flex:0 0 220px;">
-                        <option value="exists" ${regCheck === 'exists' ? 'selected' : ''}>${this.tr('apps.detectionRegistryCheckExists', 'Existe la clave/valor')}</option>
-                        <option value="equals" ${regCheck === 'equals' ? 'selected' : ''}>${this.tr('apps.detectionRegistryCheckEquals', 'Igual a')}</option>
-                        <option value="contains" ${regCheck === 'contains' ? 'selected' : ''}>${this.tr('apps.detectionRegistryCheckContains', 'Contiene')}</option>
-                        <option value="version" ${regCheck === 'version' ? 'selected' : ''}>${this.tr('apps.detectionRegistryCheckVersion', 'Comparar version')}</option>
+                        <option value="exists" ${regCheck === 'exists' ? 'selected' : ''}>${t('apps.detectionRegistryCheckExists', 'Existe la clave/valor')}</option>
+                        <option value="equals" ${regCheck === 'equals' ? 'selected' : ''}>${t('apps.detectionRegistryCheckEquals', 'Igual a')}</option>
+                        <option value="contains" ${regCheck === 'contains' ? 'selected' : ''}>${t('apps.detectionRegistryCheckContains', 'Contiene')}</option>
+                        <option value="version" ${regCheck === 'version' ? 'selected' : ''}>${t('apps.detectionRegistryCheckVersion', 'Comparar version')}</option>
                       </select>
                       ${regCheck === 'version' ? `
                         <select class="form-select" id="wiz-detection-reg-op" style="flex:0 0 90px;">
@@ -2443,14 +2444,14 @@ const AppsPage = {
                         </select>
                       ` : ''}
                       ${regCheck !== 'exists' ? `
-                        <input class="form-input" id="wiz-detection-reg-expected" value="${this.esc(det.registryExpectedValue || '')}" placeholder="${regCheck === 'version' ? '1.0.0' : this.tr('apps.detectionRegistryExpectedPlaceholder', 'Valor esperado')}" style="flex:1;">
+                        <input class="form-input" id="wiz-detection-reg-expected" value="${App._esc(det.registryExpectedValue || '')}" placeholder="${regCheck === 'version' ? '1.0.0' : t('apps.detectionRegistryExpectedPlaceholder', 'Valor esperado')}" style="flex:1;">
                       ` : ''}
                     </div>
                   </div>
                 ` : ''}
                 ${detType === 'tracker' ? `
                   <div style="padding:10px 12px; border-radius:8px; background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.18); font-size:12px; color:var(--text-secondary);">
-                    ${this.tr('apps.detectionTrackerHint', 'Se usara el archivo Tracker_<App>.json generado en el log local para evitar reinstalaciones.')}
+                    ${t('apps.detectionTrackerHint', 'Se usara el archivo Tracker_<App>.json generado en el log local para evitar reinstalaciones.')}
                   </div>
                 ` : ''}
               </div>
@@ -2462,26 +2463,26 @@ const AppsPage = {
             const apps = Array.isArray(state.availableApps) ? state.availableApps : [];
             return `
               <div class="card" style="padding:14px 16px; margin:0 0 14px 0;">
-                <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:10px;">${this.tr('apps.dependsOnSection', 'Dependencia de otra app')}</div>
+                <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:10px;">${t('apps.dependsOnSection', 'Dependencia de otra app')}</div>
                 <div class="form-group">
-                  <label class="form-label">${this.tr('apps.dependsOnApp', 'Esperar a que termine')}</label>
+                  <label class="form-label">${t('apps.dependsOnApp', 'Esperar a que termine')}</label>
                   <select class="form-select" id="wiz-dep-app-id">
-                    <option value="">${this.tr('apps.dependsOnNone', 'Sin dependencia')}</option>
-                    ${apps.map(a => `<option value="${this.esc(a.id)}" data-name="${this.esc(a.name || '')}" ${dep.appId === a.id ? 'selected' : ''}>${this.esc(a.name || a.id)}</option>`).join('')}
+                    <option value="">${t('apps.dependsOnNone', 'Sin dependencia')}</option>
+                    ${apps.map(a => `<option value="${App._esc(a.id)}" data-name="${App._esc(a.name || '')}" ${dep.appId === a.id ? 'selected' : ''}>${App._esc(a.name || a.id)}</option>`).join('')}
                   </select>
-                  <p class="form-hint">${this.tr('apps.dependsOnHint', 'Si eliges una app, este instalador esperara a que termine correctamente antes de ejecutarse.')}</p>
+                  <p class="form-hint">${t('apps.dependsOnHint', 'Si eliges una app, este instalador esperara a que termine correctamente antes de ejecutarse.')}</p>
                 </div>
                 ${dep.appId ? `
                   <div style="display:flex;gap:12px;">
                     <div class="form-group" style="flex:0 0 200px;">
-                      <label class="form-label">${this.tr('apps.dependsOnTimeout', 'Timeout (minutos)')}</label>
+                      <label class="form-label">${t('apps.dependsOnTimeout', 'Timeout (minutos)')}</label>
                       <input type="number" min="1" max="1440" step="1" class="form-input" id="wiz-dep-timeout" value="${Number(dep.timeoutMinutes) || 30}">
                     </div>
                     <div class="form-group" style="flex:1;">
-                      <label class="form-label">${this.tr('apps.dependsOnBehavior', 'Si expira el tiempo')}</label>
+                      <label class="form-label">${t('apps.dependsOnBehavior', 'Si expira el tiempo')}</label>
                       <select class="form-select" id="wiz-dep-behavior">
-                        <option value="skip" ${dep.behavior !== 'fail' ? 'selected' : ''}>${this.tr('apps.dependsOnBehaviorSkip', 'Continuar de todos modos')}</option>
-                        <option value="fail" ${dep.behavior === 'fail' ? 'selected' : ''}>${this.tr('apps.dependsOnBehaviorFail', 'Fallar la instalacion')}</option>
+                        <option value="skip" ${dep.behavior !== 'fail' ? 'selected' : ''}>${t('apps.dependsOnBehaviorSkip', 'Continuar de todos modos')}</option>
+                        <option value="fail" ${dep.behavior === 'fail' ? 'selected' : ''}>${t('apps.dependsOnBehaviorFail', 'Fallar la instalacion')}</option>
                       </select>
                     </div>
                   </div>
@@ -2499,7 +2500,7 @@ const AppsPage = {
                   <div id="wiz-version-suggestion" style="margin-top:6px; display:inline-flex; align-items:center; gap:6px; padding:4px 10px; background:rgba(108,99,255,0.12); border:1px solid rgba(108,99,255,0.3); border-radius:20px; font-size:11px; cursor:pointer;" title="${t('apps.applySuggestedVersion')}">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" stroke-width="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
                     <span style="color:var(--text-secondary);">${t('apps.suggestedVersion')}:</span>
-                    <strong style="color:var(--primary-color); font-family:monospace;">${this.esc(state.suggestedVersion)}</strong>
+                    <strong style="color:var(--primary-color); font-family:monospace;">${App._esc(state.suggestedVersion)}</strong>
                   </div>
                 ` : ''}
               </div>
@@ -2519,46 +2520,46 @@ const AppsPage = {
                 (f.options || []).map(opt => '<option value="' + opt.value + '" ' + (state.customParams[f.key] === opt.value || (!state.customParams[f.key] && f.default === opt.value) ? 'selected' : '') + '>' + opt.label + '</option>').join('') +
               '\n</select>';
             } else if (f.type === 'textarea') {
-              inputHtml = '<textarea class="form-input" id="wiz-param-' + f.key + '" rows="8" style="font-family: monospace;">' + this.esc(state.customParams[f.key] || f.default) + '</textarea>';
+              inputHtml = '<textarea class="form-input" id="wiz-param-' + f.key + '" rows="8" style="font-family: monospace;">' + App._esc(state.customParams[f.key] || f.default) + '</textarea>';
             } else if (f.type === 'checkbox') {
               return `
                 <div class="form-group">
                   <label class="checkbox-wrapper">
                     <input type="checkbox" id="wiz-param-${f.key}" ${state.customParams[f.key] === true || (state.customParams[f.key] === undefined && f.default) ? 'checked' : ''}>
-                    <span class="form-label mb-0" style="margin: 0; display: inline;">${this.esc(f.label)}</span>
+                    <span class="form-label mb-0" style="margin: 0; display: inline;">${App._esc(f.label)}</span>
                   </label>
-                  ${f.hint ? '<p class="form-hint" style="margin-left: 26px;">' + this.esc(f.hint) + '</p>' : ''}
+                  ${f.hint ? '<p class="form-hint" style="margin-left: 26px;">' + App._esc(f.hint) + '</p>' : ''}
                 </div>
               `;
             } else {
               let val = state.customParams[f.key];
               if (val === undefined) val = f.default;
-              inputHtml = '<input class="form-input" id="wiz-param-' + f.key + '" value="' + this.esc(val) + '" placeholder="' + this.esc(f.hint || '') + '">';
+              inputHtml = '<input class="form-input" id="wiz-param-' + f.key + '" value="' + App._esc(val) + '" placeholder="' + App._esc(f.hint || '') + '">';
             }
             return `
               <div class="form-group">
-                <label class="form-label">${this.esc(f.label)}${f.required ? ' *' : ''}</label>
+                <label class="form-label">${App._esc(f.label)}${f.required ? ' *' : ''}</label>
                 ${inputHtml}
-                ${f.hint ? '<p class="form-hint">' + this.esc(f.hint) + '</p>' : ''}
+                ${f.hint ? '<p class="form-hint">' + App._esc(f.hint) + '</p>' : ''}
               </div>
             `;
           }).join('') : ''}
 
           ${(showWizardAdvancedSections && !isWinget && !isODT && isUserTemplate) ? (tmpl?.fileFields || []).map(fileField => `
             <div class="form-group">
-              <label class="form-label">${this.esc(fileField.label)}${fileField.required ? ' *' : ''}</label>
+              <label class="form-label">${App._esc(fileField.label)}${fileField.required ? ' *' : ''}</label>
               <div class="flex gap-sm">
-                <input class="form-input" id="wiz-file-${fileField.key}" value="${this.esc(state.templateFiles[fileField.key]?.sourcePath || state.templateFiles[fileField.key] || '')}" placeholder="${this.esc(this.describeTemplateFile(fileField))}" readonly style="flex:1">
-                <button class="btn btn-secondary btn-template-file" type="button" data-file-key="${this.esc(fileField.key)}">${t('apps.browse')}</button>
+                <input class="form-input" id="wiz-file-${fileField.key}" value="${App._esc(state.templateFiles[fileField.key]?.sourcePath || state.templateFiles[fileField.key] || '')}" placeholder="${App._esc(this.describeTemplateFile(fileField))}" readonly style="flex:1">
+                <button class="btn btn-secondary btn-template-file" type="button" data-file-key="${App._esc(fileField.key)}">${t('apps.browse')}</button>
               </div>
-              <p class="form-hint">${this.esc(this.describeTemplateFile(fileField))}</p>
+              <p class="form-hint">${App._esc(this.describeTemplateFile(fileField))}</p>
             </div>
           `).join('') : ''}
 
           ${showWizardAdvancedSections && isUserTemplate && tmpl?.hasCustomScript ? `
             <div style="padding:12px 14px;background:rgba(30,144,255,0.08);border:1px solid rgba(30,144,255,0.2);border-radius:8px;margin-top:8px;">
-              <div style="font-weight:600;font-size:13px;color:var(--text-primary);margin-bottom:4px;">${this.tr('apps.customTemplatePostScriptTitle', 'Script adicional')}</div>
-              <p style="margin:0;font-size:12px;color:var(--text-secondary);">${this.tr('apps.customTemplatePostScriptHint', 'La plantilla incluye un script opcional que se ejecutará después del instalador con acceso a los valores y archivos auxiliares definidos.')}</p>
+              <div style="font-weight:600;font-size:13px;color:var(--text-primary);margin-bottom:4px;">${t('apps.customTemplatePostScriptTitle', 'Script adicional')}</div>
+              <p style="margin:0;font-size:12px;color:var(--text-secondary);">${t('apps.customTemplatePostScriptHint', 'La plantilla incluye un script opcional que se ejecutará después del instalador con acceso a los valores y archivos auxiliares definidos.')}</p>
             </div>
           ` : ''}
         `;
@@ -2597,9 +2598,9 @@ const AppsPage = {
         body += `
           <div class="mb-md">
             <div class="flex items-center gap-md mb-md">
-              <span class="badge badge-primary">${this.esc(state.template)}</span>
-              <span style="font-weight:600; font-size:1.1rem">${this.esc(state.name)}</span>
-              ${state.gpoName ? `<span class="badge badge-info">${this.esc(state.gpoName)}</span>` : ''}
+              <span class="badge badge-primary">${App._esc(state.template)}</span>
+              <span style="font-weight:600; font-size:1.1rem">${App._esc(state.name)}</span>
+              ${state.gpoName ? `<span class="badge badge-info">${App._esc(state.gpoName)}</span>` : ''}
             </div>
           </div>
           <div class="code-header">
@@ -2840,7 +2841,7 @@ const AppsPage = {
             field.required && !String(state.customParams[field.key] ?? field.default ?? '').trim()
           );
           if (missingRequiredArg) {
-            App.toast(this.tr('apps.customTemplateRequiredArg', 'Completa todos los argumentos obligatorios de la plantilla.'), 'warning');
+            App.toast(t('apps.customTemplateRequiredArg', 'Completa todos los argumentos obligatorios de la plantilla.'), 'warning');
             document.getElementById(`wiz-param-${missingRequiredArg.key}`)?.focus();
             return;
           }
@@ -2848,22 +2849,22 @@ const AppsPage = {
             field.required && !String(state.templateFiles[field.key]?.sourcePath || state.templateFiles[field.key] || '').trim()
           );
           if (missingRequiredFile) {
-            App.toast(this.tr('apps.customTemplateRequiredFile', 'Selecciona todos los archivos obligatorios de la plantilla.'), 'warning');
+            App.toast(t('apps.customTemplateRequiredFile', 'Selecciona todos los archivos obligatorios de la plantilla.'), 'warning');
             return;
           }
           if (requiresAdvancedValidation && state.uninstallMode === 'manual' && !String(state.uninstallCommand || '').trim()) {
-            App.toast(this.tr('apps.uninstallCommandRequired', 'Define el comando de desinstalacion manual.'), 'warning');
+            App.toast(t('apps.uninstallCommandRequired', 'Define el comando de desinstalacion manual.'), 'warning');
             document.getElementById('wiz-uninstall-command')?.focus();
             return;
           }
           if (requiresAdvancedValidation && state.uninstallMode === 'auto-registry' && !String(state.uninstallRegistryName || state.name || '').trim()) {
-            App.toast(this.tr('apps.uninstallRegistryRequired', 'Indica el nombre a buscar en el registro para desinstalar.'), 'warning');
+            App.toast(t('apps.uninstallRegistryRequired', 'Indica el nombre a buscar en el registro para desinstalar.'), 'warning');
             document.getElementById('wiz-uninstall-reg-name')?.focus();
             return;
           }
           const requiresConfigXml = ['office', 'sap-gui'].includes(state.template);
           if (requiresAdvancedValidation && requiresConfigXml && !String(state.configXmlPath || '').trim()) {
-            App.toast(this.tr('apps.customTemplateRequiredXml', 'Selecciona el XML requerido para esta plantilla.'), 'warning');
+            App.toast(t('apps.customTemplateRequiredXml', 'Selecciona el XML requerido para esta plantilla.'), 'warning');
             return;
           }
         }
@@ -2981,7 +2982,7 @@ const AppsPage = {
           ? ['exe', 'msi', 'ps1']
           : extensions;
         const file = await window.api.config.selectFile([{
-          name: fileField.label || this.tr(
+          name: fileField.label || t(
             this.isInstallerTemplateFile(fileField) ? 'apps.customTemplateInstallerFile' : 'apps.customTemplateConfigFile',
             this.isInstallerTemplateFile(fileField) ? 'Instalador adjunto' : 'Archivo de configuración'
           ),
@@ -3275,13 +3276,13 @@ const AppsPage = {
         <div class="template-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));">
           ${state.wizardWingetResults.map(item => `
             <div class="template-card catalog-item"
-                 data-catalog-type="winget" data-winget-id="${this.esc(item.wingetId)}"
-                 data-winget-source="${this.esc(item.wingetSource || 'winget')}"
-                 data-app-name="${this.esc(item.name)}" data-app-version="${this.esc(item.version || '')}"
+                 data-catalog-type="winget" data-winget-id="${App._esc(item.wingetId)}"
+                 data-winget-source="${App._esc(item.wingetSource || 'winget')}"
+                 data-app-name="${App._esc(item.name)}" data-app-version="${App._esc(item.version || '')}"
                  style="cursor:pointer;">
               <div class="template-card-icon" style="font-size:22px;">ðŸ“¦</div>
-              <div class="template-card-name" style="font-size:11px;">${this.esc(item.name)}</div>
-              ${item.version ? `<div class="template-card-desc" style="font-size:10px;">v${this.esc(item.version)}</div>` : ''}
+              <div class="template-card-name" style="font-size:11px;">${App._esc(item.name)}</div>
+              ${item.version ? `<div class="template-card-desc" style="font-size:10px;">v${App._esc(item.version)}</div>` : ''}
             </div>`).join('')}
         </div>
       </div>`;
@@ -3379,8 +3380,8 @@ const AppsPage = {
           ? (this.ousCache.find(o => o.dn === dn) || {}).name || dn
           : dn;
         return `<span style="display:inline-flex;align-items:center;gap:6px;background:rgba(30,144,255,0.15);color:var(--primary-color);padding:2px 10px;border-radius:4px;font-size:12px;">
-          &#128193; ${this.esc(name)}
-          <button class="btn btn-ghost btn-sm btn-remove-ou" data-dn="${this.esc(dn)}" style="font-size:11px;padding:0 4px;min-height:auto;">&times;</button>
+          &#128193; ${App._esc(name)}
+          <button class="btn btn-ghost btn-sm btn-remove-ou" data-dn="${App._esc(dn)}" style="font-size:11px;padding:0 4px;min-height:auto;">&times;</button>
         </span>`;
       }).join('') + `<button class="btn btn-ghost btn-sm" id="btn-clear-ou" style="font-size:11px;margin-left:4px;opacity:.7;">${t('common.clear') || 'Borrar selecciÃ³n'}</button>`;
 
@@ -3543,18 +3544,18 @@ const AppsPage = {
           : ''))
       : '';
     const gpoDisplay = state.createGPO
-      ? `<span style="color:var(--primary-color);">&#10024; ${t('apps.confirmAutoGpo')}: Deploy_${this.esc(state.name.trim().replace(/\s/g, '_'))}</span>`
-      : (state.gpoName ? this.esc(state.gpoName) : `<span style="color:var(--text-muted);">${t('apps.confirmNoGpo')}</span>`);
+      ? `<span style="color:var(--primary-color);">&#10024; ${t('apps.confirmAutoGpo')}: Deploy_${App._esc(state.name.trim().replace(/\s/g, '_'))}</span>`
+      : (state.gpoName ? App._esc(state.gpoName) : `<span style="color:var(--text-muted);">${t('apps.confirmNoGpo')}</span>`);
 
     const paramsHtml = state.customParams && Object.keys(state.customParams).length > 0
       ? Object.entries(state.customParams)
           .filter(([, v]) => v !== '' && v !== undefined && v !== null)
-          .map(([k, v]) => row(this.esc(k), this.esc(String(v)))).join('')
+          .map(([k, v]) => row(App._esc(k), App._esc(String(v)))).join('')
       : '';
     const templateFilesHtml = state.templateFiles && Object.keys(state.templateFiles).length > 0
       ? Object.entries(state.templateFiles)
           .filter(([, v]) => (v?.sourcePath || v))
-          .map(([k, v]) => row(this.esc(k), '<span style="font-family:monospace; font-size:12px;">' + this.esc(v?.sourcePath || v) + '</span>')).join('')
+          .map(([k, v]) => row(App._esc(k), '<span style="font-family:monospace; font-size:12px;">' + App._esc(v?.sourcePath || v) + '</span>')).join('')
       : '';
     const showAdvancedConfirmation = !state.simpleModeFlow;
 
@@ -3572,23 +3573,23 @@ const AppsPage = {
             ${this.templateIcon(state.template)}
           </div>
           <div>
-            <div style="font-size:17px; font-weight:700; color:var(--text-primary);">${this.esc(state.name.trim())}</div>
-            <div style="font-size:12px; color:var(--text-muted);">${this.esc(templateInfo.name)}</div>
+            <div style="font-size:17px; font-weight:700; color:var(--text-primary);">${App._esc(state.name.trim())}</div>
+            <div style="font-size:12px; color:var(--text-muted);">${App._esc(templateInfo.name)}</div>
           </div>
         </div>
 
         <!-- General -->
         <div class="card" style="padding:12px 16px; margin:0;">
           <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionGeneral')}</div>
-          ${row(t('apps.detailTemplate'), this.esc(templateInfo.name))}
+          ${row(t('apps.detailTemplate'), App._esc(templateInfo.name))}
           ${state.template === 'winget'
-            ? row('Winget ID', `<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">${this.esc(state.wingetId || '-')}</code>`)
+            ? row('Winget ID', `<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">${App._esc(state.wingetId || '-')}</code>`)
             : state.template === 'odt'
-              ? row('Producto ODT', `<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">${this.esc((state.odtConfig?.product || 'O365BusinessRetail') + ' · ' + (state.odtConfig?.channel || 'MonthlyEnterprise'))}</code>`)
+              ? row('Producto ODT', `<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">${App._esc((state.odtConfig?.product || 'O365BusinessRetail') + ' · ' + (state.odtConfig?.channel || 'MonthlyEnterprise'))}</code>`)
               : row(t('apps.detailInstallerType'), installerType)
           }
-          ${(state.template !== 'winget' && state.template !== 'odt') ? row(t('apps.detailSilentArgs'), state.silentArgs ? '<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">' + this.esc(state.silentArgs) + '</code>' : '-') : ''}
-          ${showAdvancedConfirmation ? row(this.tr('apps.uninstallMode', 'Modo de desinstalacion'), this.esc(this.getUninstallSummary({
+          ${(state.template !== 'winget' && state.template !== 'odt') ? row(t('apps.detailSilentArgs'), state.silentArgs ? '<code style="background:var(--bg-tertiary); padding:2px 6px; border-radius:4px; font-size:12px;">' + App._esc(state.silentArgs) + '</code>' : '-') : ''}
+          ${showAdvancedConfirmation ? row(t('apps.uninstallMode', 'Modo de desinstalacion'), App._esc(this.getUninstallSummary({
             ...state,
             installerType: this.getInstallerTypeFromPath(state.installerPath, state.template),
             uninstall: {
@@ -3600,7 +3601,7 @@ const AppsPage = {
               productCode: state.uninstallProductCode
             }
           }))) : ''}
-          ${showAdvancedConfirmation ? row(t('apps.detailVersion'), this.esc(state.version || '1.0.0')) : ''}
+          ${showAdvancedConfirmation ? row(t('apps.detailVersion'), App._esc(state.version || '1.0.0')) : ''}
           ${showAdvancedConfirmation ? row(t('apps.detailNotifyUser'), state.notifyUser ? '&#10003;' : '&#10007;') : ''}
         </div>
 
@@ -3608,9 +3609,9 @@ const AppsPage = {
         <div class="card" style="padding:12px 16px; margin:0;">
           <div style="font-weight:600; font-size:13px; color:var(--text-secondary); margin-bottom:4px;">${t('apps.detailSectionPaths')}</div>
           ${state.template === 'winget'
-            ? row(t('apps.script'), wingetScriptPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(wingetScriptPath) + '</span>' : '')
-            : row(t('apps.detailInstaller'), state.installerPath ? '<span style="font-family:monospace; font-size:12px;">' + this.esc(state.installerPath) + '</span>' : '-')}
-          ${state.configXmlPath ? row(t('apps.detailConfigXml'), '<span style="font-family:monospace; font-size:12px;">' + this.esc(state.configXmlPath) + '</span>') : ''}
+            ? row(t('apps.script'), wingetScriptPath ? '<span style="font-family:monospace; font-size:12px;">' + App._esc(wingetScriptPath) + '</span>' : '')
+            : row(t('apps.detailInstaller'), state.installerPath ? '<span style="font-family:monospace; font-size:12px;">' + App._esc(state.installerPath) + '</span>' : '-')}
+          ${state.configXmlPath ? row(t('apps.detailConfigXml'), '<span style="font-family:monospace; font-size:12px;">' + App._esc(state.configXmlPath) + '</span>') : ''}
           ${templateFilesHtml}
         </div>
 
@@ -3621,7 +3622,7 @@ const AppsPage = {
           ${row(
             t('apps.detailAssignedOUs'),
             (state.selectedOUs && state.selectedOUs.length > 0)
-              ? state.selectedOUs.map(dn => '<div title="' + this.esc(dn) + '" style="margin:2px 0;">' + this.esc(ouNameFromDN(dn)) + '</div>').join('')
+              ? state.selectedOUs.map(dn => '<div title="' + App._esc(dn) + '" style="margin:2px 0;">' + App._esc(ouNameFromDN(dn)) + '</div>').join('')
               : '<span style="color:var(--text-muted);">' + t('apps.detailNoOUs') + '</span>'
           )}
         </div>
@@ -3830,7 +3831,7 @@ const AppsPage = {
             t('apps.gpoConflictTitle') || 'GPO ya existe',
             `<div style="display:flex;flex-direction:column;gap:12px;">
               <div style="padding:12px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;font-size:13px;color:var(--text-secondary);">
-                <strong style="color:var(--accent-warning);">&#9888;&#65039; ${this.esc(gpoName)}</strong><br>
+                <strong style="color:var(--accent-warning);">&#9888;&#65039; ${App._esc(gpoName)}</strong><br>
                 ${t('apps.gpoConflictBody') || 'Esta GPO ya existe en Active Directory. Fue creada por este programa.'}
               </div>
               <p style="font-size:13px;color:var(--text-muted);margin:0;">${t('apps.gpoConflictQuestion') || '¿Qué deseas hacer?'}</p>
@@ -3886,7 +3887,7 @@ const AppsPage = {
         <span>&#128196; install.ps1</span>
         <button class="btn btn-ghost btn-sm" onclick="AppsPage.copyScript()">${t('apps.copyBtn')}</button>
       </div>
-      <pre class="code-preview" id="script-preview">${this.esc(script)}</pre>
+      <pre class="code-preview" id="script-preview">${App._esc(script)}</pre>
     `);
   },
 
@@ -3894,17 +3895,17 @@ const AppsPage = {
     const app = await window.api.apps.get(id);
     if (!app) return;
     if (!this.canGenerateUninstall(app)) {
-      App.toast(this.tr('apps.uninstallNotConfigured', 'Esta app no tiene una desinstalacion configurada.'), 'warning');
+      App.toast(t('apps.uninstallNotConfigured', 'Esta app no tiene una desinstalacion configurada.'), 'warning');
       return;
     }
 
     const script = await window.api.scripts.generateUninstall(app);
-    App.openModal(`${this.tr('apps.uninstallScript', 'Script uninstall')}: ${app.name}`, `
+    App.openModal(`${t('apps.uninstallScript', 'Script uninstall')}: ${app.name}`, `
       <div class="code-header">
         <span>&#128196; uninstall.ps1</span>
         <button class="btn btn-ghost btn-sm" onclick="AppsPage.copyScript()">${t('apps.copyBtn')}</button>
       </div>
-      <pre class="code-preview" id="script-preview">${this.esc(script)}</pre>
+      <pre class="code-preview" id="script-preview">${App._esc(script)}</pre>
     `);
   },
 
@@ -3945,7 +3946,7 @@ const AppsPage = {
       const result = await window.api.scripts.regenerate(app);
       if (!result?.success) {
         if (App.isShareError(result?.error)) { App.handleShareError(); return; }
-        throw new Error(result?.error || this.tr('apps.regenerateScriptsError', 'No se pudieron regenerar los scripts.'));
+        throw new Error(result?.error || t('apps.regenerateScriptsError', 'No se pudieron regenerar los scripts.'));
       }
 
       const nextPublishedAction = String(result.publishedAction || app.publishedAction || '').trim().toLowerCase() === 'uninstall'
@@ -3963,11 +3964,11 @@ const AppsPage = {
         appName: app.name,
         publishedAction: nextPublishedAction
       });
-      App.toast(this.tr('apps.regenerateScriptsSuccess', 'Scripts regenerados correctamente para {app}.').replace('{app}', app.name), 'success');
+      App.toast(t('apps.regenerateScriptsSuccess', 'Scripts regenerados correctamente para {app}.').replace('{app}', app.name), 'success');
       this._pendingFocusAppId = id;
       App.navigate('apps');
     } catch (err) {
-      App.toast(`${this.tr('apps.regenerateScriptsError', 'No se pudieron regenerar los scripts.')}: ${err.message}`, 'error');
+      App.toast(`${t('apps.regenerateScriptsError', 'No se pudieron regenerar los scripts.')}: ${err.message}`, 'error');
     } finally {
       this._regeneratingScriptIds.delete(id);
     }
@@ -3977,7 +3978,7 @@ const AppsPage = {
     const app = await window.api.apps.get(id);
     if (!app) return;
     if (!this.canGenerateUninstall(app)) {
-      App.toast(this.tr('apps.uninstallNotConfigured', 'Esta app no tiene una desinstalacion configurada.'), 'warning');
+      App.toast(t('apps.uninstallNotConfigured', 'Esta app no tiene una desinstalacion configurada.'), 'warning');
       return;
     }
 
@@ -3986,22 +3987,22 @@ const AppsPage = {
       ? app.assignedOUs
       : (app.ouDN ? [app.ouDN] : []);
 
-    App.openModal(this.tr('apps.uninstallAction', 'Desinstalar'), `
-      <p>${this.tr('apps.uninstallPrepareMsg', 'Se preparará el script de desinstalacion para')} <strong>${this.esc(app.name)}</strong>.</p>
+    App.openModal(t('apps.uninstallAction', 'Desinstalar'), `
+      <p>${t('apps.uninstallPrepareMsg', 'Se preparará el script de desinstalacion para')} <strong>${App._esc(app.name)}</strong>.</p>
       <div class="card" style="padding:12px 14px; margin:12px 0 0 0;">
-        <div style="font-size:12px; color:var(--text-secondary); margin-bottom:6px;">${this.tr('apps.uninstallMode', 'Modo de desinstalacion')}</div>
-        <div style="font-weight:600; color:var(--text-primary);">${this.esc(this.getUninstallSummary(app))}</div>
+        <div style="font-size:12px; color:var(--text-secondary); margin-bottom:6px;">${t('apps.uninstallMode', 'Modo de desinstalacion')}</div>
+        <div style="font-weight:600; color:var(--text-primary);">${App._esc(this.getUninstallSummary(app))}</div>
       </div>
       ${hasGPO ? `
         <label class="checkbox-wrapper checkbox-panel" style="margin-top:12px;">
           <input type="checkbox" class="checkbox-select" id="chk-switch-uninstall-gpo" checked>
-          <span>${this.tr('apps.uninstallSwitchGpo', 'Reapuntar la GPO al uninstall.ps1')}</span>
+          <span>${t('apps.uninstallSwitchGpo', 'Reapuntar la GPO al uninstall.ps1')}</span>
         </label>
-        <p class="form-hint">${this.tr('apps.uninstallSwitchGpoHint', 'La GPO conservará sus enlaces OU y ejecutará ahora el script de desinstalacion.')}</p>
+        <p class="form-hint">${t('apps.uninstallSwitchGpoHint', 'La GPO conservará sus enlaces OU y ejecutará ahora el script de desinstalacion.')}</p>
       ` : ''}
     `, `
       <button class="btn btn-secondary" onclick="App.closeModal()">${t('common.cancel')}</button>
-      <button class="btn btn-warning" id="btn-confirm-uninstall-app">${this.tr('apps.uninstallAction', 'Desinstalar')}</button>
+      <button class="btn btn-warning" id="btn-confirm-uninstall-app">${t('apps.uninstallAction', 'Desinstalar')}</button>
     `);
 
     document.getElementById('btn-confirm-uninstall-app').addEventListener('click', async () => {
@@ -4028,11 +4029,11 @@ const AppsPage = {
         const switchGPO = document.getElementById('chk-switch-uninstall-gpo')?.checked ?? false;
         if (hasGPO && switchGPO && uninstallPath) {
           if (!App.rsatAvailable) {
-            App.toast(this.tr('apps.uninstallGpoSkipped', 'La GPO no se pudo actualizar porque RSAT/GPMC no está disponible.'), 'warning');
+            App.toast(t('apps.uninstallGpoSkipped', 'La GPO no se pudo actualizar porque RSAT/GPMC no está disponible.'), 'warning');
           } else {
             const gpoResult = await window.api.ad.createGPO(app.gpoName, uninstallPath, targetOUs);
             if (!gpoResult.success) {
-              App.toast(`${this.tr('apps.uninstallGpoWarn', 'El script uninstall se generó, pero no se pudo reapuntar la GPO.')}: ${gpoResult.error}`, 'warning');
+              App.toast(`${t('apps.uninstallGpoWarn', 'El script uninstall se generó, pero no se pudo reapuntar la GPO.')}: ${gpoResult.error}`, 'warning');
             }
           }
         }
@@ -4041,14 +4042,14 @@ const AppsPage = {
           appName: app.name,
           mode: this.normalizeUninstallState(app, app).mode
         });
-        App.toast(this.tr('apps.uninstallPrepared', 'Script de desinstalacion preparado correctamente.'), 'success');
+        App.toast(t('apps.uninstallPrepared', 'Script de desinstalacion preparado correctamente.'), 'success');
         App.closeModal();
         this._pendingFocusAppId = id;
         App.navigate('apps');
       } catch (err) {
         App.toast(`${t('common.error')}: ${err.message}`, 'error');
         btn.disabled = false;
-        btn.textContent = this.tr('apps.uninstallAction', 'Desinstalar');
+        btn.textContent = t('apps.uninstallAction', 'Desinstalar');
       }
     });
   },
@@ -4061,10 +4062,10 @@ const AppsPage = {
     const hasOUs = app.assignedOUs && app.assignedOUs.length > 0;
 
     App.openModal(t('apps.disableConfirm'), `
-      <p>${t('apps.disableMsg').replace('{app}', `<strong>${this.esc(app.name)}</strong>`)}</p>
+      <p>${t('apps.disableMsg').replace('{app}', `<strong>${App._esc(app.name)}</strong>`)}</p>
       ${hasGPO ? `
         <div class="form-group mt-md" style="background: rgba(255,165,0,0.08); border: 1px solid rgba(255,165,0,0.25); border-radius:8px; padding:12px;">
-          <p style="margin:0 0 8px 0; color:var(--warning-color); font-weight:600;">&#9888;&#65039; Esta app tiene la GPO "${this.esc(app.gpoName)}" asignada</p>
+          <p style="margin:0 0 8px 0; color:var(--warning-color); font-weight:600;">&#9888;&#65039; Esta app tiene la GPO "${App._esc(app.gpoName)}" asignada</p>
           ${hasOUs ? `
             <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
               <input type="checkbox" id="chk-unlink-gpo" checked style="width:auto; cursor:pointer;">
@@ -4186,37 +4187,37 @@ const AppsPage = {
         <div style="padding:10px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;">
           <div style="font-size:13px;font-weight:700;color:var(--accent-danger);">${t('apps.deleteConfirm')}</div>
           <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">
-            ${t('apps.deleteMsg').replace('{app}', `<strong>${this.esc(app.name)}</strong>`)}
+            ${t('apps.deleteMsg').replace('{app}', `<strong>${App._esc(app.name)}</strong>`)}
           </div>
         </div>
         ${this.renderDeleteTargetCard({
           icon: this.templateIcon(app.template),
           title: app.name,
-          subtitle: app.gpoName ? `GPO: ${this.esc(app.gpoName)}` : ''
+          subtitle: app.gpoName ? `GPO: ${App._esc(app.gpoName)}` : ''
         })}
         ${hasGPO && hasOUs ? this.renderDeleteOptionCard({
           id: 'chk-del-unlink-gpo',
           checked: true,
           title: t('apps.cleanGpoOption'),
-          hint: this.tr('apps.cleanGpoOptionHint', 'Quita la vinculacion de la GPO en las OUs asignadas')
+          hint: t('apps.cleanGpoOptionHint', 'Quita la vinculacion de la GPO en las OUs asignadas')
         }) : ''}
         ${hasGPO ? this.renderDeleteOptionCard({
           id: 'chk-del-clean-script',
           checked: true,
           title: t('apps.cleanSysvolOption'),
-          hint: this.tr('apps.cleanSysvolOptionHint', 'Elimina el script de inicio asociado en SYSVOL')
+          hint: t('apps.cleanSysvolOptionHint', 'Elimina el script de inicio asociado en SYSVOL')
         }) : ''}
         ${hasGPO ? this.renderDeleteOptionCard({
           id: 'chk-del-delete-gpo',
           checked: true,
           title: t('apps.deleteGpoOption'),
-          hint: this.tr('apps.deleteGpoOptionHint', 'Borra la GPO de Active Directory si ya no se necesita')
+          hint: t('apps.deleteGpoOptionHint', 'Borra la GPO de Active Directory si ya no se necesita')
         }) : ''}
         ${this.renderDeleteOptionCard({
           id: 'chk-delete-files',
           checked: true,
           title: t('apps.keepFilesOption'),
-          hint: this.tr('apps.keepFilesOptionHint', 'Desmarca esta opcion si tambien quieres borrar la carpeta del share')
+          hint: t('apps.keepFilesOptionHint', 'Desmarca esta opcion si tambien quieres borrar la carpeta del share')
         })}
       </div>
     `;
@@ -4265,11 +4266,6 @@ const AppsPage = {
     });
   },
 
-  tr(key, fallback) {
-    const value = t(key);
-    return value === key ? fallback : value;
-  },
-
   async resolveCatalogPackageSelection(state, renderWizard, reference) {
     if (!reference?.wingetId) return;
 
@@ -4312,19 +4308,19 @@ const AppsPage = {
   describeTemplateFile(fileField) {
     const parts = [];
     if (this.isInstallerTemplateFile(fileField)) {
-      parts.push(this.tr('apps.customTemplateFileTypeInstaller', 'Instalador adjunto'));
+      parts.push(t('apps.customTemplateFileTypeInstaller', 'Instalador adjunto'));
     }
     const extensions = Array.isArray(fileField?.extensions) ? fileField.extensions : [];
     if (extensions.length > 0) {
-      parts.push(this.tr('apps.customTemplateExtensions', 'Extensiones') + ': ' + extensions.join(', '));
+      parts.push(t('apps.customTemplateExtensions', 'Extensiones') + ': ' + extensions.join(', '));
     }
     if (fileField?.argumentName) {
-      parts.push(this.tr('apps.customTemplateArgLabel', 'Argumento') + ': ' + fileField.argumentName);
+      parts.push(t('apps.customTemplateArgLabel', 'Argumento') + ': ' + fileField.argumentName);
     }
     if (fileField?.destinationName) {
-      parts.push(this.tr('apps.customTemplateTargetName', 'Destino') + ': ' + fileField.destinationName);
+      parts.push(t('apps.customTemplateTargetName', 'Destino') + ': ' + fileField.destinationName);
     }
-    return parts.join(' | ') || this.tr('apps.customTemplateConfigFile', 'Archivo de configuración auxiliar');
+    return parts.join(' | ') || t('apps.customTemplateConfigFile', 'Archivo de configuración auxiliar');
   },
 
   isXmlTemplateFile(fileField) {
@@ -4360,8 +4356,8 @@ const AppsPage = {
       }
       fileFields.push({
         key,
-        label: this.tr('apps.customTemplateXmlLabel', 'Archivo XML'),
-        hint: this.tr('apps.customTemplateXmlHint', 'XML solicitado por la plantilla. Se copiará al caché del equipo cliente y el script podrá usar $ConfigXmlPath.'),
+        label: t('apps.customTemplateXmlLabel', 'Archivo XML'),
+        hint: t('apps.customTemplateXmlHint', 'XML solicitado por la plantilla. Se copiará al caché del equipo cliente y el script podrá usar $ConfigXmlPath.'),
         storageKind: 'file',
         required: true,
         extensions: ['xml'],
@@ -4418,7 +4414,7 @@ const AppsPage = {
       id: templateId || definition.id,
       category: definition.category || 'Custom',
       name: definition.name,
-      description: definition.description || this.tr('apps.customTemplateDefaultDesc', 'Plantilla definida por el administrador'),
+      description: definition.description || t('apps.customTemplateDefaultDesc', 'Plantilla definida por el administrador'),
       noInstaller: false,
       source: 'user',
       isUserDefined: true,
@@ -4677,10 +4673,10 @@ const AppsPage = {
       const hasInstaller = !!templateInstallers[tmpl.id];
       const isActive = state.selectedBuiltIn === tmpl.id;
       return `
-        <button class="template-manager-item ${isActive ? 'active' : ''}" type="button" data-builtin-id="${this.esc(tmpl.id)}">
+        <button class="template-manager-item ${isActive ? 'active' : ''}" type="button" data-builtin-id="${App._esc(tmpl.id)}">
           <div style="display:flex;align-items:center;gap:6px;">
             <span style="font-size:14px;">${this.templateIcon(tmpl.id)}</span>
-            <div style="font-weight:600;color:var(--text-primary);font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${this.esc(tmpl.name)}</div>
+            <div style="font-weight:600;color:var(--text-primary);font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${App._esc(tmpl.name)}</div>
             ${hasInstaller ? `<span style="font-size:9px;background:rgba(34,197,94,.15);color:var(--accent-success,#22c55e);padding:1px 5px;border-radius:3px;flex-shrink:0;">&#10003;</span>` : ''}
           </div>
         </button>`;
@@ -4690,55 +4686,55 @@ const AppsPage = {
       ? templates.map(template => {
           const hasInstaller = !!templateInstallers[template.id];
           return `
-          <button class="template-manager-item ${state.selectedId === template.id ? 'active' : ''}" type="button" data-template-id="${this.esc(template.id)}">
+          <button class="template-manager-item ${state.selectedId === template.id ? 'active' : ''}" type="button" data-template-id="${App._esc(template.id)}">
             <div style="display:flex;align-items:center;gap:6px;">
-              <div style="font-weight:600;color:var(--text-primary);font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${this.esc(template.name)}</div>
+              <div style="font-weight:600;color:var(--text-primary);font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${App._esc(template.name)}</div>
               ${hasInstaller ? `<span style="font-size:9px;background:rgba(34,197,94,.15);color:var(--accent-success,#22c55e);padding:1px 5px;border-radius:3px;flex-shrink:0;">&#10003;</span>` : ''}
             </div>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">${this.esc(template.description || this.tr('apps.customTemplateDefaultDesc', 'Plantilla definida por el administrador'))}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">${App._esc(template.description || t('apps.customTemplateDefaultDesc', 'Plantilla definida por el administrador'))}</div>
           </button>`;
         }).join('')
-      : `<div style="padding:14px;border:1px dashed var(--border-color);border-radius:8px;color:var(--text-muted);font-size:12px;">${this.tr('apps.customTemplatesEmpty', 'Todavía no hay plantillas personalizadas.')}</div>`;
+      : `<div style="padding:14px;border:1px dashed var(--border-color);border-radius:8px;color:var(--text-muted);font-size:12px;">${t('apps.customTemplatesEmpty', 'Todavía no hay plantillas personalizadas.')}</div>`;
 
     const argumentRows = draft.arguments.map((arg, index) => `
       <div class="tmpl-arg-row" data-index="${index}" style="border:1px solid var(--border-color);border-radius:8px;padding:12px;margin-bottom:10px;background:var(--bg-secondary);">
         <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
           <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label">${this.tr('apps.customTemplateFieldLabel', 'Etiqueta')}</label>
-            <input class="form-input" data-field="label" value="${this.esc(arg.label)}" placeholder="Valor de configuración">
+            <label class="form-label">${t('apps.customTemplateFieldLabel', 'Etiqueta')}</label>
+            <input class="form-input" data-field="label" value="${App._esc(arg.label)}" placeholder="Valor de configuración">
           </div>
           <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label">${this.tr('apps.customTemplateArgLabel', 'Argumento')}</label>
-            <input class="form-input" data-field="token" value="${this.esc(arg.token)}" placeholder="CONFIG_ID">
+            <label class="form-label">${t('apps.customTemplateArgLabel', 'Argumento')}</label>
+            <input class="form-input" data-field="token" value="${App._esc(arg.token)}" placeholder="CONFIG_ID">
           </div>
           <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label">${this.tr('apps.customTemplateHintLabel', 'Ayuda')}</label>
-            <input class="form-input" data-field="hint" value="${this.esc(arg.hint)}" placeholder="${this.esc(this.tr('apps.customTemplateHintPlaceholder', 'Texto mostrado al operador'))}">
+            <label class="form-label">${t('apps.customTemplateHintLabel', 'Ayuda')}</label>
+            <input class="form-input" data-field="hint" value="${App._esc(arg.hint)}" placeholder="${App._esc(t('apps.customTemplateHintPlaceholder', 'Texto mostrado al operador'))}">
           </div>
           <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label">${this.tr('apps.customTemplateDefaultValue', 'Valor por defecto')}</label>
-            <input class="form-input" data-field="default" value="${this.esc(arg.defaultValue)}" placeholder="">
+            <label class="form-label">${t('apps.customTemplateDefaultValue', 'Valor por defecto')}</label>
+            <input class="form-input" data-field="default" value="${App._esc(arg.defaultValue)}" placeholder="">
           </div>
         </div>
         <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:10px;">
           <label class="checkbox-wrapper" style="margin:0;">
             <input type="checkbox" class="checkbox-select" data-field="quote" ${arg.quoteValue !== false ? 'checked' : ''}>
-            <span>${this.tr('apps.customTemplateQuoteValue', 'Entrecomillar valor')}</span>
+            <span>${t('apps.customTemplateQuoteValue', 'Entrecomillar valor')}</span>
           </label>
           <label class="checkbox-wrapper" style="margin:0;">
             <input type="checkbox" class="checkbox-select" data-field="required" ${arg.required ? 'checked' : ''}>
-            <span>${this.tr('apps.customTemplateRequired', 'Obligatorio')}</span>
+            <span>${t('apps.customTemplateRequired', 'Obligatorio')}</span>
           </label>
           <label style="display:flex;align-items:center;gap:8px;color:var(--text-secondary);font-size:12px;">
-            <span>${this.tr('apps.customTemplateJoiner', 'Separador')}</span>
+            <span>${t('apps.customTemplateJoiner', 'Separador')}</span>
             <select class="form-select" data-field="joiner" style="width:auto;min-width:110px;">
               <option value="=" ${arg.joiner !== 'space' ? 'selected' : ''}>=</option>
               <option value="space" ${arg.joiner === 'space' ? 'selected' : ''}>espacio</option>
             </select>
           </label>
-          <button class="btn btn-ghost btn-sm btn-remove-template-arg" type="button" data-index="${index}">${this.tr('common.delete', 'Borrar')}</button>
+          <button class="btn btn-ghost btn-sm btn-remove-template-arg" type="button" data-index="${index}">${t('common.delete', 'Borrar')}</button>
         </div>
-        <div style="margin-top:8px;font-size:11px;color:var(--text-muted);">${this.tr('apps.customTemplateArgExample', 'Resultado')}: <code class="tmpl-arg-preview">${this.esc(this.getTemplateArgPreview(arg))}</code></div>
+        <div style="margin-top:8px;font-size:11px;color:var(--text-muted);">${t('apps.customTemplateArgExample', 'Resultado')}: <code class="tmpl-arg-preview">${App._esc(this.getTemplateArgPreview(arg))}</code></div>
       </div>
     `).join('');
 
@@ -4746,68 +4742,68 @@ const AppsPage = {
       <div class="tmpl-file-row" data-index="${index}" style="border:1px solid var(--border-color);border-radius:8px;padding:12px;margin-bottom:10px;background:var(--bg-secondary);">
         <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
           <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label">${this.tr('apps.customTemplateFieldLabel', 'Etiqueta')}</label>
-            <input class="form-input" data-field="label" value="${this.esc(file.label)}" placeholder="${this.esc(this.isInstallerTemplateFile(file) ? 'Instalador adicional' : 'Archivo de configuración')}">
+            <label class="form-label">${t('apps.customTemplateFieldLabel', 'Etiqueta')}</label>
+            <input class="form-input" data-field="label" value="${App._esc(file.label)}" placeholder="${App._esc(this.isInstallerTemplateFile(file) ? 'Instalador adicional' : 'Archivo de configuración')}">
           </div>
           <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label">${this.tr('apps.customTemplateExtensions', 'Extensiones')}</label>
-            <input class="form-input" data-field="extensions" value="${this.esc(file.extensions)}" placeholder="${this.esc(this.isInstallerTemplateFile(file) ? 'exe,msi,ps1' : 'xml,json')}">
+            <label class="form-label">${t('apps.customTemplateExtensions', 'Extensiones')}</label>
+            <input class="form-input" data-field="extensions" value="${App._esc(file.extensions)}" placeholder="${App._esc(this.isInstallerTemplateFile(file) ? 'exe,msi,ps1' : 'xml,json')}">
           </div>
           <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label">${this.tr('apps.customTemplateFileType', 'Tipo')}</label>
+            <label class="form-label">${t('apps.customTemplateFileType', 'Tipo')}</label>
             <select class="form-select" data-field="storageKind">
-              <option value="file" selected>${this.tr('apps.customTemplateFileTypeFile', 'Archivo auxiliar')}</option>
+              <option value="file" selected>${t('apps.customTemplateFileTypeFile', 'Archivo auxiliar')}</option>
             </select>
           </div>
           <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label">${this.tr('apps.customTemplateInstallArg', 'Argumento de instalación')}</label>
-            <input class="form-input" data-field="argument" value="${this.esc(file.argumentName)}" placeholder="/configure">
+            <label class="form-label">${t('apps.customTemplateInstallArg', 'Argumento de instalación')}</label>
+            <input class="form-input" data-field="argument" value="${App._esc(file.argumentName)}" placeholder="/configure">
           </div>
           <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label">${this.tr('apps.customTemplateTargetName', 'Nombre destino')}</label>
-            <input class="form-input" data-field="destination" value="${this.esc(file.destinationName)}" placeholder="${this.esc(this.isInstallerTemplateFile(file) ? 'helper_setup.exe' : 'config_app.xml')}">
+            <label class="form-label">${t('apps.customTemplateTargetName', 'Nombre destino')}</label>
+            <input class="form-input" data-field="destination" value="${App._esc(file.destinationName)}" placeholder="${App._esc(this.isInstallerTemplateFile(file) ? 'helper_setup.exe' : 'config_app.xml')}">
           </div>
           <div class="form-group" style="margin-bottom:0;grid-column:1 / -1;">
-            <label class="form-label">${this.tr('apps.customTemplateHintLabel', 'Ayuda')}</label>
-            <input class="form-input" data-field="hint" value="${this.esc(file.hint)}" placeholder="${this.esc(this.isInstallerTemplateFile(file)
-              ? this.tr('apps.customTemplateInstallerHintPlaceholder', 'Ejemplo: instalador auxiliar que se copiará al share sin sustituir al principal')
-              : this.tr('apps.customTemplateFileHintPlaceholder', 'Ejemplo: XML o CFG exportado desde la herramienta original'))}">
+            <label class="form-label">${t('apps.customTemplateHintLabel', 'Ayuda')}</label>
+            <input class="form-input" data-field="hint" value="${App._esc(file.hint)}" placeholder="${App._esc(this.isInstallerTemplateFile(file)
+              ? t('apps.customTemplateInstallerHintPlaceholder', 'Ejemplo: instalador auxiliar que se copiará al share sin sustituir al principal')
+              : t('apps.customTemplateFileHintPlaceholder', 'Ejemplo: XML o CFG exportado desde la herramienta original'))}">
           </div>
         </div>
         <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:10px;">
           <label class="checkbox-wrapper" style="margin:0;">
             <input type="checkbox" class="checkbox-select" data-field="quote" ${file.quoteValue !== false ? 'checked' : ''}>
-            <span>${this.tr('apps.customTemplateQuotePath', 'Entrecomillar ruta')}</span>
+            <span>${t('apps.customTemplateQuotePath', 'Entrecomillar ruta')}</span>
           </label>
           <label class="checkbox-wrapper" style="margin:0;">
             <input type="checkbox" class="checkbox-select" data-field="required" ${file.required ? 'checked' : ''}>
-            <span>${this.tr('apps.customTemplateRequired', 'Obligatorio')}</span>
+            <span>${t('apps.customTemplateRequired', 'Obligatorio')}</span>
           </label>
           <label style="display:flex;align-items:center;gap:8px;color:var(--text-secondary);font-size:12px;">
-            <span>${this.tr('apps.customTemplateJoiner', 'Separador')}</span>
+            <span>${t('apps.customTemplateJoiner', 'Separador')}</span>
             <select class="form-select" data-field="joiner" style="width:auto;min-width:110px;">
               <option value="=" ${file.joiner !== 'space' ? 'selected' : ''}>=</option>
               <option value="space" ${file.joiner === 'space' ? 'selected' : ''}>espacio</option>
             </select>
           </label>
-          <button class="btn btn-ghost btn-sm btn-remove-template-file" type="button" data-index="${index}">${this.tr('common.delete', 'Borrar')}</button>
+          <button class="btn btn-ghost btn-sm btn-remove-template-file" type="button" data-index="${index}">${t('common.delete', 'Borrar')}</button>
         </div>
         <div style="margin-top:8px;font-size:11px;color:var(--text-muted);">${this.isInstallerTemplateFile(file)
-          ? this.tr('apps.customTemplateInstallerExample', 'El instalador adjunto se copiará al share en una carpeta separada y el script recibirá su ruta en caché en el equipo cliente.')
-          : this.tr('apps.customTemplateFileExample', 'Si defines un argumento, recibirá la ruta en caché del archivo en el equipo cliente.')}: <code class="tmpl-file-preview">${this.esc(this.getTemplateFilePreview(file))}</code></div>
+          ? t('apps.customTemplateInstallerExample', 'El instalador adjunto se copiará al share en una carpeta separada y el script recibirá su ruta en caché en el equipo cliente.')
+          : t('apps.customTemplateFileExample', 'Si defines un argumento, recibirá la ruta en caché del archivo en el equipo cliente.')}: <code class="tmpl-file-preview">${App._esc(this.getTemplateFilePreview(file))}</code></div>
       </div>
     `).join('');
 
     const deletePanel = state.deleteConfirm && state.selectedId ? `
       <div class="card template-builder-section" style="border-color:rgba(220,38,38,0.28);background:rgba(220,38,38,0.08);">
-        <div style="font-weight:700;color:var(--text-primary);margin-bottom:8px;">${this.tr('apps.customTemplateDeleteTitle', 'Borrar plantilla')}</div>
+        <div style="font-weight:700;color:var(--text-primary);margin-bottom:8px;">${t('apps.customTemplateDeleteTitle', 'Borrar plantilla')}</div>
         <p class="form-hint" style="margin:0 0 10px 0;color:var(--text-secondary);">
-          ${this.tr('apps.customTemplateDeleteConfirm', '¿Seguro que quieres borrar esta plantilla personalizada?')}
+          ${t('apps.customTemplateDeleteConfirm', '¿Seguro que quieres borrar esta plantilla personalizada?')}
         </p>
-        ${deleteUsageCount > 0 ? `<p class="form-hint" style="margin:0 0 12px 0;color:var(--accent-warning);">${this.tr('apps.customTemplateDeleteWarning', 'Hay apps usando esta plantilla:')} ${deleteUsageCount}. ${this.tr('apps.customTemplateDeleteSnapshotHint', 'Las apps ya creadas conservarán su configuración guardada, pero la plantilla dejará de estar disponible para nuevas apps.')}</p>` : ''}
+        ${deleteUsageCount > 0 ? `<p class="form-hint" style="margin:0 0 12px 0;color:var(--accent-warning);">${t('apps.customTemplateDeleteWarning', 'Hay apps usando esta plantilla:')} ${deleteUsageCount}. ${t('apps.customTemplateDeleteSnapshotHint', 'Las apps ya creadas conservarán su configuración guardada, pero la plantilla dejará de estar disponible para nuevas apps.')}</p>` : ''}
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn btn-secondary" type="button" id="btn-cancel-delete-template">${this.tr('common.cancel', 'Cancelar')}</button>
-          <button class="btn btn-danger" type="button" id="btn-confirm-delete-template">${this.tr('apps.customTemplateDeleteAction', 'Eliminar plantilla')}</button>
+          <button class="btn btn-secondary" type="button" id="btn-cancel-delete-template">${t('common.cancel', 'Cancelar')}</button>
+          <button class="btn btn-danger" type="button" id="btn-confirm-delete-template">${t('apps.customTemplateDeleteAction', 'Eliminar plantilla')}</button>
         </div>
       </div>
     ` : '';
@@ -4819,14 +4815,14 @@ const AppsPage = {
         <p class="form-hint" style="margin:0 0 10px 0;">Si adjuntas el instalador aquí, se completará automáticamente cada vez que alguien cree una app con esta plantilla.</p>
         ${currentInstallerPath ? `<div style="display:inline-flex;align-items:center;gap:6px;${installerBadgeTone}border-radius:6px;padding:4px 10px;margin-bottom:10px;font-size:12px;max-width:100%;overflow:hidden;">
           <span style="flex-shrink:0;">${hasPendingInstaller ? '&#8599;' : '&#10003;'}</span>
-          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:monospace;" title="${this.esc(currentInstallerPath)}">${this.esc(installerFileName)}</span>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:monospace;" title="${App._esc(currentInstallerPath)}">${App._esc(installerFileName)}</span>
         </div>` : ''}
         <div style="display:flex;gap:8px;align-items:center;">
-          <input class="form-input" id="tmpl-installer-path" value="${this.esc(currentInstallerPath)}" placeholder="Sin instalador preconfigurado" readonly style="flex:1;font-family:monospace;font-size:12px;">
+          <input class="form-input" id="tmpl-installer-path" value="${App._esc(currentInstallerPath)}" placeholder="Sin instalador preconfigurado" readonly style="flex:1;font-family:monospace;font-size:12px;">
           <button class="btn btn-secondary btn-sm" type="button" id="btn-browse-tmpl-installer" ${isSavingTemplate ? 'disabled' : ''}>Seleccionar</button>
           ${currentInstallerPath ? `<button class="btn btn-ghost btn-sm" type="button" id="btn-clear-tmpl-installer" ${isSavingTemplate ? 'disabled' : ''}>&times;</button>` : ''}
         </div>
-        <div id="tmpl-installer-status" style="display:${installerStatus ? 'block' : 'none'};margin-top:10px;padding:8px 12px;border-radius:6px;font-size:13px;${installerStatusTone}">${installerStatus ? this.esc(installerStatus.message) : ''}</div>
+        <div id="tmpl-installer-status" style="display:${installerStatus ? 'block' : 'none'};margin-top:10px;padding:8px 12px;border-radius:6px;font-size:13px;${installerStatusTone}">${installerStatus ? App._esc(installerStatus.message) : ''}</div>
       </div>`;
 
     // Built-in template view (read-only, just installer config)
@@ -4835,8 +4831,8 @@ const AppsPage = {
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:12px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border-color);">
         <span style="font-size:32px;">${this.templateIcon(selectedBuiltInInfo.id)}</span>
         <div>
-          <div style="font-size:16px;font-weight:700;color:var(--text-primary);">${this.esc(selectedBuiltInInfo.name)}</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${this.esc(selectedBuiltInInfo.description || '')}</div>
+          <div style="font-size:16px;font-weight:700;color:var(--text-primary);">${App._esc(selectedBuiltInInfo.name)}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${App._esc(selectedBuiltInInfo.description || '')}</div>
           <div style="font-size:11px;color:var(--text-muted);margin-top:4px;opacity:.7;">Plantilla del sistema - Solo lectura</div>
         </div>
       </div>
@@ -4857,41 +4853,41 @@ const AppsPage = {
             <div style="height:1px;background:var(--border-color);margin:8px 0;"></div>
           ` : ''}
           <div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);letter-spacing:.06em;padding:4px 4px 6px;font-weight:600;">Personalizadas</div>
-          <button class="btn btn-primary" type="button" id="btn-new-template" style="width:100%;margin-bottom:8px;" ${isSavingTemplate ? 'disabled' : ''}>${this.tr('apps.newCustomTemplate', 'Nueva plantilla')}</button>
+          <button class="btn btn-primary" type="button" id="btn-new-template" style="width:100%;margin-bottom:8px;" ${isSavingTemplate ? 'disabled' : ''}>${t('apps.newCustomTemplate', 'Nueva plantilla')}</button>
           ${userListHtml}
         </div>
         <div class="template-manager-main">
           ${state.selectedBuiltIn ? builtInView : `
           ${deletePanel}
           <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label">${this.tr('apps.customTemplateName', 'Nombre de la plantilla')}</label>
-            <input class="form-input" id="tmpl-name" value="${this.esc(draft.name)}" placeholder="Plantilla personalizada">
+            <label class="form-label">${t('apps.customTemplateName', 'Nombre de la plantilla')}</label>
+            <input class="form-input" id="tmpl-name" value="${App._esc(draft.name)}" placeholder="Plantilla personalizada">
           </div>
           <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label">${this.tr('apps.customTemplateDescription', 'Descripción')}</label>
-            <textarea class="form-input" id="tmpl-description" rows="2" placeholder="${this.esc(this.tr('apps.customTemplateDescriptionPlaceholder', 'Explica qué hace esta plantilla y qué espera del operador.'))}">${this.esc(draft.description)}</textarea>
+            <label class="form-label">${t('apps.customTemplateDescription', 'Descripción')}</label>
+            <textarea class="form-input" id="tmpl-description" rows="2" placeholder="${App._esc(t('apps.customTemplateDescriptionPlaceholder', 'Explica qué hace esta plantilla y qué espera del operador.'))}">${App._esc(draft.description)}</textarea>
           </div>
           ${installerPanel}
           <div class="card template-builder-section">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;">
-              <div style="font-weight:700;color:var(--text-primary);">${this.tr('apps.customTemplateArgsTitle', 'Argumentos')}</div>
-              <button class="btn btn-secondary btn-sm" type="button" id="btn-add-template-arg" ${isSavingTemplate ? 'disabled' : ''}>${this.tr('apps.customTemplateAddArg', 'Añadir argumento')}</button>
+              <div style="font-weight:700;color:var(--text-primary);">${t('apps.customTemplateArgsTitle', 'Argumentos')}</div>
+              <button class="btn btn-secondary btn-sm" type="button" id="btn-add-template-arg" ${isSavingTemplate ? 'disabled' : ''}>${t('apps.customTemplateAddArg', 'Añadir argumento')}</button>
             </div>
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">${this.tr('apps.customTemplateArgsHint', 'Cada argumento crea un campo de texto en la app y se traduce a `ARGUMENTO=\"valor\"` o `ARGUMENTO valor`.')}</div>
-            ${argumentRows || `<div style="color:var(--text-muted);font-size:12px;">${this.tr('apps.customTemplateArgsEmpty', 'No hay argumentos definidos.')}</div>`}
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">${t('apps.customTemplateArgsHint', 'Cada argumento crea un campo de texto en la app y se traduce a `ARGUMENTO=\"valor\"` o `ARGUMENTO valor`.')}</div>
+            ${argumentRows || `<div style="color:var(--text-muted);font-size:12px;">${t('apps.customTemplateArgsEmpty', 'No hay argumentos definidos.')}</div>`}
           </div>
           <div class="card template-builder-section">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;">
-              <div style="font-weight:700;color:var(--text-primary);">${this.tr('apps.customTemplateFilesTitle', 'Archivos auxiliares')}</div>
-              <button class="btn btn-secondary btn-sm" type="button" id="btn-add-template-file" ${isSavingTemplate ? 'disabled' : ''}>${this.tr('apps.customTemplateAddFile', 'Añadir archivo')}</button>
+              <div style="font-weight:700;color:var(--text-primary);">${t('apps.customTemplateFilesTitle', 'Archivos auxiliares')}</div>
+              <button class="btn btn-secondary btn-sm" type="button" id="btn-add-template-file" ${isSavingTemplate ? 'disabled' : ''}>${t('apps.customTemplateAddFile', 'Añadir archivo')}</button>
             </div>
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">${this.tr('apps.customTemplateFilesHint', 'Sirve para XML, CFG, JSON o instaladores adjuntos. Si añades aquí un XML, se pedirá al crear la app y el script podrá usar $ConfigXmlPath. Los instaladores adjuntos se guardan en el share sin sustituir al instalador principal. Si defines un argumento de instalación, se pasará la ruta del archivo copiado al caché de despliegue.')}</div>
-            ${fileRows || `<div style="color:var(--text-muted);font-size:12px;">${this.tr('apps.customTemplateFilesEmpty', 'No hay archivos definidos.')}</div>`}
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">${t('apps.customTemplateFilesHint', 'Sirve para XML, CFG, JSON o instaladores adjuntos. Si añades aquí un XML, se pedirá al crear la app y el script podrá usar $ConfigXmlPath. Los instaladores adjuntos se guardan en el share sin sustituir al instalador principal. Si defines un argumento de instalación, se pasará la ruta del archivo copiado al caché de despliegue.')}</div>
+            ${fileRows || `<div style="color:var(--text-muted);font-size:12px;">${t('apps.customTemplateFilesEmpty', 'No hay archivos definidos.')}</div>`}
           </div>
           <div class="card template-builder-section">
-            <div style="font-weight:700;color:var(--text-primary);margin-bottom:10px;">${this.tr('apps.customTemplateScriptTitle', 'Script opcional post-instalación')}</div>
-            <textarea class="form-input" id="tmpl-script" rows="8" style="font-family:monospace;" placeholder="${this.esc(this.tr('apps.customTemplateScriptPlaceholder', 'Ejemplo:\nWrite-Host "Configuración adicional aplicada"'))}">${this.esc(draft.script)}</textarea>
-            <p class="form-hint" style="margin-top:8px;">${this.tr('apps.customTemplateScriptHint', 'Variables disponibles: $TemplateValues.<clave>, $TemplateFiles.<clave>, $TemplateFileNames.<clave>, $ConfigXmlPath (si la plantilla incluye un XML), $Instalador y $CacheDir. Este script se ejecuta después del instalador.')}</p>
+            <div style="font-weight:700;color:var(--text-primary);margin-bottom:10px;">${t('apps.customTemplateScriptTitle', 'Script opcional post-instalación')}</div>
+            <textarea class="form-input" id="tmpl-script" rows="8" style="font-family:monospace;" placeholder="${App._esc(t('apps.customTemplateScriptPlaceholder', 'Ejemplo:\nWrite-Host "Configuración adicional aplicada"'))}">${App._esc(draft.script)}</textarea>
+            <p class="form-hint" style="margin-top:8px;">${t('apps.customTemplateScriptHint', 'Variables disponibles: $TemplateValues.<clave>, $TemplateFiles.<clave>, $TemplateFileNames.<clave>, $ConfigXmlPath (si la plantilla incluye un XML), $Instalador y $CacheDir. Este script se ejecuta después del instalador.')}</p>
           </div>
           `}
         </div>
@@ -4899,14 +4895,14 @@ const AppsPage = {
     `;
 
     const footer = `
-      <button class="btn btn-secondary" type="button" id="btn-close-template-manager" ${isSavingTemplate ? 'disabled' : ''}>${this.tr('common.close', 'Cerrar')}</button>
+      <button class="btn btn-secondary" type="button" id="btn-close-template-manager" ${isSavingTemplate ? 'disabled' : ''}>${t('common.close', 'Cerrar')}</button>
       <div style="flex:1"></div>
-      ${!state.selectedBuiltIn && state.selectedId ? `<button class="btn btn-danger" type="button" id="btn-delete-template" ${isSavingTemplate ? 'disabled' : ''}>${this.tr('common.delete', 'Borrar')}</button>` : ''}
-      ${!state.selectedBuiltIn ? `<button class="btn btn-success" type="button" id="btn-save-template" ${isSavingTemplate ? 'disabled' : ''}>${isSavingTemplate ? 'Guardando...' : this.tr('common.save', 'Guardar')}</button>` : ''}
-      ${state.selectedBuiltIn ? `<button class="btn ${state.installerSaved ? 'btn-secondary' : 'btn-success'}" type="button" id="btn-save-tmpl-installer" ${isSavingTemplate ? 'disabled' : ''}>${isSavingTemplate ? 'Guardando...' : (state.installerSaved ? this.tr('common.close', 'Cerrar') : 'Guardar instalador')}</button>` : ''}
+      ${!state.selectedBuiltIn && state.selectedId ? `<button class="btn btn-danger" type="button" id="btn-delete-template" ${isSavingTemplate ? 'disabled' : ''}>${t('common.delete', 'Borrar')}</button>` : ''}
+      ${!state.selectedBuiltIn ? `<button class="btn btn-success" type="button" id="btn-save-template" ${isSavingTemplate ? 'disabled' : ''}>${isSavingTemplate ? 'Guardando...' : t('common.save', 'Guardar')}</button>` : ''}
+      ${state.selectedBuiltIn ? `<button class="btn ${state.installerSaved ? 'btn-secondary' : 'btn-success'}" type="button" id="btn-save-tmpl-installer" ${isSavingTemplate ? 'disabled' : ''}>${isSavingTemplate ? 'Guardando...' : (state.installerSaved ? t('common.close', 'Cerrar') : 'Guardar instalador')}</button>` : ''}
     `;
 
-    App.openModal(this.tr('apps.manageTemplates', 'Plantillas'), body, footer, { size: 'full' });
+    App.openModal(t('apps.manageTemplates', 'Plantillas'), body, footer, { size: 'full' });
     App._modalLocked = isSavingTemplate;
     this.bindTemplateManagerEvents(state, onClose);
     this.restoreTemplateManagerAfterRender(state);
@@ -5218,7 +5214,7 @@ const AppsPage = {
       if (!state.selectedId) return;
       const result = await window.api.templates.delete(state.selectedId);
       if (!result?.success) {
-        App.toast((result?.error || this.tr('common.error', 'Error')), 'error');
+        App.toast((result?.error || t('common.error', 'Error')), 'error');
         return;
       }
 
@@ -5228,7 +5224,7 @@ const AppsPage = {
       state.deleteConfirm = false;
       state.deleteUsageCount = 0;
       state.focusTemplateNameOnRender = true;
-      App.toast(this.tr('apps.customTemplateDeleted', 'Plantilla borrada correctamente'), 'success');
+      App.toast(t('apps.customTemplateDeleted', 'Plantilla borrada correctamente'), 'success');
       this.renderTemplateManager(state, onClose);
     });
 
@@ -5237,7 +5233,7 @@ const AppsPage = {
       state.draft = this.readTemplateDraftFromDom(state);
       state.deleteConfirm = false;
       if (!state.draft.name.trim()) {
-        App.toast(this.tr('apps.customTemplateNameRequired', 'Indica un nombre para la plantilla.'), 'warning');
+        App.toast(t('apps.customTemplateNameRequired', 'Indica un nombre para la plantilla.'), 'warning');
         document.getElementById('tmpl-name')?.focus();
         return;
       }
@@ -5273,7 +5269,7 @@ const AppsPage = {
           type: 'error',
           message: `No se pudo guardar la plantilla: ${err?.message || 'Error desconocido'}`
         };
-        App.toast(this.tr('apps.customTemplateSaveError', 'No se pudo guardar la plantilla.'), 'error');
+        App.toast(t('apps.customTemplateSaveError', 'No se pudo guardar la plantilla.'), 'error');
         this.rerenderTemplateManager(state, onClose);
         return;
       }
@@ -5284,7 +5280,7 @@ const AppsPage = {
           type: 'error',
           message: 'No se pudo guardar la plantilla.'
         };
-        App.toast(this.tr('apps.customTemplateSaveError', 'No se pudo guardar la plantilla.'), 'error');
+        App.toast(t('apps.customTemplateSaveError', 'No se pudo guardar la plantilla.'), 'error');
         this.rerenderTemplateManager(state, onClose);
         return;
       }
@@ -5344,7 +5340,7 @@ const AppsPage = {
             ? 'Plantilla guardada e instalador subido al share.'
             : 'Plantilla guardada correctamente.'
         };
-        App.toast(this.tr('apps.customTemplateSaved', 'Plantilla guardada correctamente'), 'success');
+        App.toast(t('apps.customTemplateSaved', 'Plantilla guardada correctamente'), 'success');
       }
 
       this.rerenderTemplateManager(state, onClose);
@@ -5354,7 +5350,7 @@ const AppsPage = {
   async openTemplateManager(onClose = null) {
     const config = await window.api.config.get().catch(() => ({}));
     if (String(config?.uiMode || '').trim().toLowerCase() !== 'advanced') {
-      App.toast(this.tr('apps.manageTemplatesAdvancedOnly', 'Cambia al modo avanzado para gestionar plantillas.'), 'info');
+      App.toast(t('apps.manageTemplatesAdvancedOnly', 'Cambia al modo avanzado para gestionar plantillas.'), 'info');
       return;
     }
     const [templates, allTemplates] = await Promise.all([
@@ -5412,12 +5408,6 @@ const AppsPage = {
     return icons[key] || '&#128230;';
   },
 
-  esc(str) {
-    const div = document.createElement('div');
-    div.textContent = str || '';
-    return div.innerHTML;
-  },
-
   showSilentArgsHelper(state, renderWizard) {
     const args = [
       { category: t('apps.argsCatMsi'), items: [
@@ -5457,7 +5447,7 @@ const AppsPage = {
           <div style="display:flex;flex-direction:column;gap:4px;">
             ${cat.items.map(item => `
               <div class="args-helper-row" onclick="document.getElementById('_args_selected').value = '${item.arg.replace(/'/g, "\\'").replace(/"/g, '&quot;')}'; document.querySelectorAll('.args-helper-row').forEach(r=>r.style.background=''); this.style.background='var(--accent-primary-dim)';" style="display:flex;align-items:center;gap:12px;padding:8px 12px;border-radius:var(--radius-sm);cursor:pointer;transition:background 0.15s;">
-                <code style="background:var(--bg-input);padding:4px 10px;border-radius:4px;font-size:var(--font-sm);color:var(--accent-secondary);white-space:nowrap;border:1px solid var(--border-color);">${this.esc(item.arg)}</code>
+                <code style="background:var(--bg-input);padding:4px 10px;border-radius:4px;font-size:var(--font-sm);color:var(--accent-secondary);white-space:nowrap;border:1px solid var(--border-color);">${App._esc(item.arg)}</code>
                 <span style="font-size:var(--font-sm);color:var(--text-muted);">${item.desc}</span>
               </div>
             `).join('')}

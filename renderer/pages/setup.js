@@ -27,17 +27,17 @@ const SetupPage = {
         </div>
 
         <div class="form-group">
-          <label class="form-label">${this.tr('setup.uiModeLabel', 'Modo de interfaz')}</label>
+          <label class="form-label">${t('setup.uiModeLabel', 'Modo de interfaz')}</label>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <label style="flex:1;cursor:pointer;border:1px solid var(--border-color);border-radius:6px;padding:10px;min-width:220px;">
               <input type="radio" name="setup-ui-mode" value="simple" ${(config.uiMode || 'simple') !== 'advanced' ? 'checked' : ''}>
-              <strong style="margin-left:6px;">${this.tr('setup.uiModeSimple', 'Sencillo')}</strong>
-              <p class="form-hint" style="margin:4px 0 0 22px;">${this.tr('setup.uiModeSimpleHint', 'Oculta opciones avanzadas y deja solo el flujo básico para subir instaladores.')}</p>
+              <strong style="margin-left:6px;">${t('setup.uiModeSimple', 'Sencillo')}</strong>
+              <p class="form-hint" style="margin:4px 0 0 22px;">${t('setup.uiModeSimpleHint', 'Oculta opciones avanzadas y deja solo el flujo básico para subir instaladores.')}</p>
             </label>
             <label style="flex:1;cursor:pointer;border:1px solid var(--border-color);border-radius:6px;padding:10px;min-width:220px;">
               <input type="radio" name="setup-ui-mode" value="advanced" ${(config.uiMode || '') === 'advanced' ? 'checked' : ''}>
-              <strong style="margin-left:6px;">${this.tr('setup.uiModeAdvanced', 'Avanzado')}</strong>
-              <p class="form-hint" style="margin:4px 0 0 22px;">${this.tr('setup.uiModeAdvancedHint', 'Muestra plantillas, detección, desinstalación y el resto de opciones técnicas.')}</p>
+              <strong style="margin-left:6px;">${t('setup.uiModeAdvanced', 'Avanzado')}</strong>
+              <p class="form-hint" style="margin:4px 0 0 22px;">${t('setup.uiModeAdvancedHint', 'Muestra plantillas, detección, desinstalación y el resto de opciones técnicas.')}</p>
             </label>
           </div>
         </div>
@@ -45,7 +45,7 @@ const SetupPage = {
         <div class="form-group">
           <label class="form-label">${t('setup.networkShare')}</label>
           <div class="flex gap-sm">
-            <input class="form-input" id="setup-network" value="${this.esc(config.networkSharePath)}" placeholder="\\\\server\\share" style="flex:1;">
+            <input class="form-input" id="setup-network" value="${App._esc(config.networkSharePath)}" placeholder="\\\\server\\share" style="flex:1;">
             <button class="btn btn-secondary" id="btn-browse-network">${t('setup.browse')}</button>
           </div>
           <p class="form-hint">${t('setup.networkShareHint')}</p>
@@ -53,13 +53,13 @@ const SetupPage = {
 
         <div class="form-group">
           <label class="form-label">${t('setup.defaultGpo')}</label>
-          <input class="form-input" id="setup-gpo" value="${this.esc(config.defaultGPO || '')}" placeholder="SoftwareDeployment">
+          <input class="form-input" id="setup-gpo" value="${App._esc(config.defaultGPO || '')}" placeholder="SoftwareDeployment">
           <p class="form-hint">${t('setup.defaultGpoHint')}</p>
         </div>
 
         <div class="form-group">
           <label class="form-label">${t('setup.preferredDC')}</label>
-          <input class="form-input" id="setup-dc" value="${this.esc(config.preferredDC || '')}" placeholder="dc1.empresa.local">
+          <input class="form-input" id="setup-dc" value="${App._esc(config.preferredDC || '')}" placeholder="dc1.empresa.local">
           <p class="form-hint">${t('setup.preferredDCHint')}</p>
         </div>
 
@@ -100,7 +100,7 @@ const SetupPage = {
             <div class="form-group" style="margin-bottom:0;">
               <label class="form-label">${t('setup.logsDir') || 'Carpeta de logs locales'}</label>
               <div class="flex gap-sm">
-                <input class="form-input" id="setup-logs" value="${this.esc(config.logDirectory || '')}" placeholder="C:\\ProgramData\\AppDeploy_Logs" style="flex:1;">
+                <input class="form-input" id="setup-logs" value="${App._esc(config.logDirectory || '')}" placeholder="C:\\ProgramData\\AppDeploy_Logs" style="flex:1;">
                 <button class="btn btn-secondary" id="btn-browse-logs" type="button">${t('setup.browse') || 'Examinar'}</button>
               </div>
               <p class="form-hint">${t('setup.logsDirHint') || 'Vacío = carpeta de usuario por defecto.'}</p>
@@ -110,7 +110,7 @@ const SetupPage = {
           <div id="setup-dedicated-block" style="display:${config.logMode === 'dedicated' ? 'block' : 'none'};margin-top:12px;padding:12px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-secondary);">
             <div class="form-group" style="margin-bottom:10px;">
               <label class="form-label">${t('setup.dedBaseUrl') || 'URL del servidor'}</label>
-              <input class="form-input" id="setup-ded-baseurl" placeholder="https://logs.example.local" value="${this.esc((config.remoteLogging && config.remoteLogging.apiBaseUrl) || '')}">
+              <input class="form-input" id="setup-ded-baseurl" placeholder="https://logs.example.local" value="${App._esc((config.remoteLogging && config.remoteLogging.apiBaseUrl) || '')}">
             </div>
             <div class="form-group" style="margin-bottom:10px;">
               <label class="form-label">${t('setup.dedAdminKey') || 'Admin API Key'}</label>
@@ -119,7 +119,7 @@ const SetupPage = {
             </div>
             <div class="form-group" style="margin-bottom:10px;">
               <label class="form-label">${t('setup.dedTlsFp') || 'TLS Fingerprint (opcional)'}</label>
-              <input class="form-input" id="setup-ded-tlsfp" placeholder="sha256//..." value="${this.esc((config.remoteLogging && config.remoteLogging.tlsFingerprint) || '')}">
+              <input class="form-input" id="setup-ded-tlsfp" placeholder="sha256//..." value="${App._esc((config.remoteLogging && config.remoteLogging.tlsFingerprint) || '')}">
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
               <button class="btn btn-secondary btn-sm" id="btn-trust-cert" type="button">
@@ -342,17 +342,6 @@ const SetupPage = {
     }
   },
 
-  esc(str) {
-    const div = document.createElement('div');
-    div.textContent = str || '';
-    return div.innerHTML;
-  },
-
-  tr(key, fallback) {
-    const value = t(key);
-    return value === key ? fallback : value;
-  },
-
   getSelectedDNs() {
     try {
       const raw = document.getElementById('setup-baseou')?.value || '[]';
@@ -429,8 +418,8 @@ const SetupPage = {
     selectedEl.innerHTML = selectedDNs.map(dn => {
       const selectedName = this.findOUName(this.ousTreeCache, dn) || dn;
       return `<span style="display:inline-flex;align-items:center;gap:6px;background:rgba(30,144,255,0.15);color:var(--primary-color);padding:2px 10px;border-radius:4px;font-size:12px;">
-        📁 ${this.esc(selectedName)}
-        <button type="button" class="btn btn-ghost btn-sm setup-baseou-remove" data-dn="${this.esc(dn)}" style="font-size:11px;padding:0 4px;min-height:auto;">✕</button>
+        📁 ${App._esc(selectedName)}
+        <button type="button" class="btn btn-ghost btn-sm setup-baseou-remove" data-dn="${App._esc(dn)}" style="font-size:11px;padding:0 4px;min-height:auto;">✕</button>
       </span>`;
     }).join('') + `<button type="button" class="btn btn-ghost btn-sm" id="setup-baseou-clear" style="font-size:11px;margin-left:4px;opacity:.7;">${t('common.clear') || 'Borrar selección'}</button>`;
 
