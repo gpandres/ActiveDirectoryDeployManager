@@ -2014,15 +2014,16 @@ const AppsWizardModule = {
   },
 
   async performWizardCreate(state, isEdit, existingApp) {
+    let createdAppId = null;
+    const deployBtn = document.getElementById('btn-confirm-create');
+    const backBtn   = document.getElementById('btn-confirm-back');
     try {
-      const deployBtn = document.getElementById('btn-confirm-create');
       if (deployBtn) {
         deployBtn.style.width = deployBtn.offsetWidth + 'px';
         deployBtn.style.height = deployBtn.offsetHeight + 'px';
         deployBtn.disabled = true;
         deployBtn.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border-width:2px;"></span>';
       }
-      const backBtn = document.getElementById('btn-confirm-back');
       if (backBtn) backBtn.disabled = true;
 
       const templateDefinition = await AppsPage.fetchTemplateDefinition(state.template);
@@ -2100,6 +2101,7 @@ const AppsWizardModule = {
         app = await window.api.apps.update(existingApp.id, appData);
       } else {
         app = await window.api.apps.create(appData);
+        if (app?.id) createdAppId = app.id;
       }
 
       if (!app || !app.id) {
@@ -2153,6 +2155,16 @@ const AppsWizardModule = {
       AppsListModule.setPendingFocus(app.id);
       App.navigate('apps');
     } catch (err) {
+      if (deployBtn) {
+        deployBtn.disabled = false;
+        deployBtn.innerHTML = isEdit ? t('apps.saveAndDeploy') : t('apps.create');
+        deployBtn.style.width = '';
+        deployBtn.style.height = '';
+      }
+      if (backBtn) backBtn.disabled = false;
+      if (!isEdit && createdAppId) {
+        window.api.apps.delete(createdAppId, false).catch(() => {});
+      }
       App.toast('Error: ' + err.message, 'error');
     }
   },
