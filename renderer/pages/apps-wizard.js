@@ -769,6 +769,7 @@ const AppsWizardModule = {
                   <label class="form-label">${t('apps.detectionType', 'Metodo de deteccion')}</label>
                   <select class="form-select" id="wiz-detection-type">
                     <option value="tracker" ${detType === 'tracker' ? 'selected' : ''}>${t('apps.detectionTypeTracker', 'Tracker (predeterminado)')}</option>
+                    <option value="msi-productcode" ${detType === 'msi-productcode' ? 'selected' : ''}>${t('apps.detectionTypeMsiProductCode', 'MSI ProductCode (registro)')}</option>
                     <option value="file" ${detType === 'file' ? 'selected' : ''}>${t('apps.detectionTypeFile', 'Archivo/ruta en disco')}</option>
                     <option value="registry" ${detType === 'registry' ? 'selected' : ''}>${t('apps.detectionTypeRegistry', 'Clave o valor de registro')}</option>
                   </select>
@@ -830,6 +831,12 @@ const AppsWizardModule = {
                         <input class="form-input" id="wiz-detection-reg-expected" value="${App._esc(det.registryExpectedValue || '')}" placeholder="${regCheck === 'version' ? '1.0.0' : t('apps.detectionRegistryExpectedPlaceholder', 'Valor esperado')}" style="flex:1;">
                       ` : ''}
                     </div>
+                  </div>
+                ` : ''}
+                ${detType === 'msi-productcode' ? `
+                  <div style="padding:10px 12px; border-radius:8px; background:rgba(34,197,94,0.08); border:1px solid rgba(34,197,94,0.22); font-size:12px; color:var(--text-secondary);">
+                    ${t('apps.detectionMsiProductCodeHint', 'Comprueba HKLM/WOW6432Node/HKCU Uninstall por ProductCode. Sin archivos en el equipo cliente.')}
+                    ${state.msiProductCode ? `<div style="margin-top:6px; font-family:monospace; color:var(--text-primary); font-size:11px;">${App._esc(state.msiProductCode)}</div>` : ''}
                   </div>
                 ` : ''}
                 ${detType === 'tracker' ? `
@@ -1334,8 +1341,13 @@ const AppsWizardModule = {
             if (vr.version && (!state.version || state.version === '1.0.0')) {
               state.version = vr.version;
             }
-            // Store MSI metadata for version.json
-            if (vr.productCode) state.msiProductCode = vr.productCode;
+            // Store MSI metadata for version.json + auto-select ProductCode detection
+            if (vr.productCode) {
+              state.msiProductCode = vr.productCode;
+              if (!state.detection?.type || state.detection.type === 'tracker') {
+                state.detection = { ...(state.detection || {}), type: 'msi-productcode' };
+              }
+            }
             if (vr.publisher && !state.installerSignature?.publisher) {
               if (state.installerSignature) state.installerSignature.publisher = vr.publisher;
             }
