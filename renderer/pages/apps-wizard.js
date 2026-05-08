@@ -622,13 +622,14 @@ const AppsWizardModule = {
         } else {
           // â”€â”€ Standard installer mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
           body += `
-          ${state.template !== 'custom' ? `
+          ${state.template !== 'custom' || true ? `
             <div class="form-group">
-              <label class="form-label">${t('apps.installer')}</label>
+              <label class="form-label">${t('apps.installer')}${state.template === 'custom' ? ` <span style="font-size:11px;font-weight:400;color:var(--text-muted);">(${t('apps.optional', 'opcional')})</span>` : ''}</label>
               <div class="flex gap-sm">
                 <input class="form-input" id="wiz-installer" value="${App._esc(state.installerPath)}" placeholder="C:\\Descargas\\app.exe" readonly style="flex:1">
                 <button class="btn btn-secondary" id="btn-pick-installer">${t('apps.browse')}</button>
               </div>
+              ${state.template === 'custom' ? `<p class="form-hint">${t('apps.customInstallerHint', 'Opcional. Si adjuntas un instalador, el script puede referenciar $Instalador, $CacheDir, $ArgumentosExe y $CurrentVersion.')}</p>` : ''}
               ${state.installerSignature ? (() => {
                 const sig = state.installerSignature;
                 const typeLabels = {

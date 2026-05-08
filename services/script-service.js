@@ -2032,14 +2032,9 @@ function buildDetectionSnippet(cfg) {
   if (useMsiProductCode) {
     return `
 function Test-AppInstalled {
-    # Read ProductCode from version.json manifest (baked at deploy time)
     $pc = if ($Manifest) { [string]($Manifest.productCode) } else { '' }
-    # Fallback: local tracker may have a ProductCode discovered at first install
     if (-not $pc -and $TrackerFile -and (Test-Path -LiteralPath $TrackerFile)) {
-        try {
-            $t = Get-Content -LiteralPath $TrackerFile -Raw | ConvertFrom-Json
-            $pc = [string]($t.detectedProductCode)
-        } catch {}
+        try { $t = Get-Content -LiteralPath $TrackerFile -Raw | ConvertFrom-Json; $pc = [string]($t.detectedProductCode) } catch {}
     }
     if (-not $pc) { return $false }
     $paths = @(
@@ -2047,7 +2042,20 @@ function Test-AppInstalled {
         "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\$pc",
         "HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\$pc"
     )
-    return ($paths | Where-Object { Test-Path $_ } | Measure-Object).Count -gt 0
+    $hit = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $hit) { return $false }
+    # Version gate: if target version known, installed version must be >= target
+    if ($CurrentVersion) {
+        try {
+            $dv = (Get-ItemProperty -LiteralPath $hit -ErrorAction SilentlyContinue).DisplayVersion
+            if ($dv) {
+                $iv = [version]($dv -replace '[^0-9\\.]','')
+                $tv = [version]($CurrentVersion -replace '[^0-9\\.]','')
+                return ($iv -ge $tv)
+            }
+        } catch {}
+    }
+    return $true
 }`;
   }
 
@@ -2744,6 +2752,30 @@ function generateCustom(cfg) {
   const safeName = sanitizeAppName(cfg.name);
   const code = cfg.customParams?.customScript || '';
   const safeCode = String(code).replace(/\r\n/g, '\n');
+  const hasInstaller = !!(cfg.installerPath || cfg.customParams?.installerPath);
+  const silentArgs = sanitizePSForEmbedding(cfg.silentArgs || cfg.customParams?.silentArgs || '');
+
+  if (hasInstaller) {
+    // Include full caching infrastructure so $Instalador/$CacheDir/$CurrentVersion/$ArgumentosExe are available
+    return `# =========================================================================
+# SCRIPT CUSTOM - CON INSTALADOR
+# App: ${safeName}
+# Versión: ${cfg.version || '1.0.0'}
+# Generado: ${new Date().toISOString()}
+# Variables disponibles: $Instalador, $CacheDir, $CurrentVersion, $ArgumentosExe, $NombreApp
+# =========================================================================
+$ArgumentosExe = "${silentArgs}"
+
+If ($ENV:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
+    Try { &"$ENV:WINDIR\\SysNative\\WindowsPowershell\\v1.0\\PowerShell.exe" -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCOMMANDPATH } Catch { } ; Exit
+}
+${getLocalCachingLogic("\\.(exe|msi|ps1)$", cfg.notifyUser || false, safeName)}
+try {
+${safeCode}
+${getTrackerSaveLogic(cfg.notifyUser || false)}
+`;
+  }
+
   return `# =========================================================================
 # SCRIPT CUSTOM RAW
 # App: ${safeName}
