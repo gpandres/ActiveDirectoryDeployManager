@@ -3,8 +3,7 @@
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 const AppsPage = {
-  // State still used by wizard/catalog/quickflow (not yet extracted)
-  gposCache:              null,
+  // Shared state consumed by wizard, catalog and actions modules
   ousCache:               null,
   ousTreeCache:           null,
   wingetCatalogCache:     null,

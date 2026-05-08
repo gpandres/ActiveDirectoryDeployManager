@@ -1,7 +1,7 @@
 ﻿// =============================================================
 // renderer/pages/apps-wizard.js — Wizard (crear/editar app)
 // =============================================================
-// Depende de: AppUtils, WizardState, AppsPage coordinator
+// Depende de: AppUtils, AppsPage coordinator
 // Expone: window.AppsWizardModule
 // =============================================================
 
@@ -2233,7 +2233,6 @@ const AppsWizardModule = {
     if (gpoResult.success) {
       await window.api.apps.update(appId, { gpoName });
       App.toast(t('apps.gpoCreatedSuccess').replace('{gpo}', gpoName), 'success');
-      AppsPage.gposCache = null;
     } else {
       App.toast(`${t('apps.gpoWarningOnlyServer')} ${gpoResult.error}`, 'warning');
     }
