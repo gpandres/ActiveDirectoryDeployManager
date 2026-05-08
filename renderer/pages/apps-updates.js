@@ -35,7 +35,11 @@ const AppsUpdatesModule = {
       const updateBtn = document.getElementById('wud-update-btn');
 
       if (!latestVersion) {
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted);font-size:13px;">No se pudo verificar la versiÃ³n mÃ¡s reciente</span>';
+        const isMsStore = (r?.wingetSource || app.wingetSource || '').toLowerCase() === 'msstore';
+        const msg = isMsStore
+          ? 'MS Store gestiona las actualizaciones automáticamente — versión no disponible via winget'
+          : 'No se pudo verificar la versión más reciente';
+        if (statusEl) statusEl.innerHTML = `<span style="color:var(--text-muted);font-size:13px;">${App._esc(msg)}</span>`;
         return;
       }
 

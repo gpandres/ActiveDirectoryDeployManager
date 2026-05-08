@@ -77,6 +77,9 @@ const CatalogPage = {
         <button class="catalog-filter-pill ${this._activeCategory === 'Winget' ? 'active' : ''}" data-cat="Winget">
           📦 Winget
         </button>
+        <button class="catalog-filter-pill ${this._activeCategory === 'MsStore' ? 'active' : ''}" data-cat="MsStore">
+          🛒 MS Store
+        </button>
       </div>
 
       <!-- Results -->
@@ -177,7 +180,15 @@ const CatalogPage = {
           ${isApi && item.publisher ? `<div class="catalog-card-publisher">${App._esc(item.publisher)}</div>` : ''}
           <div class="catalog-card-meta">
             ${version ? `<span class="badge badge-info" style="font-size:9px;padding:1px 6px;">v${App._esc(version)}</span>` : ''}
-            ${item.wingetId ? `<span class="badge badge-primary" style="font-size:9px;padding:1px 6px;">${App._esc(item.wingetSource || 'winget')}</span>` : ''}
+            ${item.wingetId ? (() => {
+              const src = (item.wingetSource || 'winget').toLowerCase();
+              const isMsStore = src === 'msstore';
+              const badgeStyle = isMsStore
+                ? 'font-size:9px;padding:1px 6px;background:var(--accent-info,#0ea5e9);color:#fff;'
+                : 'font-size:9px;padding:1px 6px;';
+              const label = isMsStore ? '🛒 msstore' : App._esc(src);
+              return `<span class="badge ${isMsStore ? '' : 'badge-primary'}" style="${badgeStyle}">${label}</span>`;
+            })() : ''}
           </div>
         </div>
         ${isSelected ? '<div class="catalog-card-check">✓</div>' : ''}
@@ -260,7 +271,13 @@ const CatalogPage = {
   _getFilteredResults() {
     const cat = this._activeCategory;
     if (cat === 'Todo') return this._results;
-    if (cat === 'Winget') return this._results.filter(r => r.source === 'winget-api' || r.source === 'winget-cli');
+    if (cat === 'Winget') return this._results.filter(r => {
+      const src = (r.wingetSource || 'winget').toLowerCase();
+      return (r.source === 'winget-api' || r.source === 'winget-cli') && src !== 'msstore';
+    });
+    if (cat === 'MsStore') return this._results.filter(r =>
+      (r.wingetSource || '').toLowerCase() === 'msstore'
+    );
     return this._results.filter(r => r.category === cat && r.source !== 'winget-api' && r.source !== 'winget-cli');
   },
 

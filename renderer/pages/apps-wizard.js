@@ -508,17 +508,27 @@ const AppsWizardModule = {
 
         if (isWinget) {
           // â”€â”€ Winget mode: info panel + wingetId display â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          const _isMsStoreWiz = (state.wingetSource || '').toLowerCase() === 'msstore';
           body += `
-          <div style="padding:12px 14px;background:rgba(108,99,255,0.07);border:1px solid rgba(108,99,255,0.25);border-radius:8px;margin-bottom:12px;">
-            <div style="font-weight:600;font-size:13px;margin-bottom:4px;color:var(--primary-color);">&#128230; Windows Package Manager</div>
-            <p style="margin:0 0 8px 0;font-size:12px;color:var(--text-secondary);">Se instalará automáticamente usando winget. No es necesario descargar ningún instalador.</p>
-            <div class="form-group" style="margin-bottom:0;">
-              <label class="form-label">Winget ID</label>
-              <input type="text" class="form-input" value="${App._esc(state.wingetId)}" readonly style="background:var(--bg-tertiary);cursor:default;font-family:monospace;font-size:12px;">
+          <div style=”padding:12px 14px;background:rgba(108,99,255,0.07);border:1px solid rgba(108,99,255,0.25);border-radius:8px;margin-bottom:12px;”>
+            <div style=”font-weight:600;font-size:13px;margin-bottom:4px;color:var(--primary-color);”>&#128230; Windows Package Manager</div>
+            <p style=”margin:0 0 8px 0;font-size:12px;color:var(--text-secondary);”>Se instalará automáticamente usando winget. No es necesario descargar ningún instalador.</p>
+            ${_isMsStoreWiz ? `
+            <div style=”padding:8px 10px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.4);border-radius:6px;margin-bottom:8px;display:flex;gap:8px;align-items:flex-start;”>
+              <span style=”font-size:14px;flex-shrink:0;”>🛒</span>
+              <div style=”font-size:11px;color:var(--text-secondary);line-height:1.5;”>
+                <strong style=”color:var(--text-primary);”>Aplicación de MS Store</strong> — se instala en scope de usuario (no admite scope machine).<br>
+                El script omitirá --scope machine automáticamente. MS Store gestiona las actualizaciones.
+              </div>
+            </div>` : ''}
+            <div class=”form-group” style=”margin-bottom:0;”>
+              <label class=”form-label”>Winget ID</label>
+              <input type=”text” class=”form-input” value=”${App._esc(state.wingetId)}” readonly style=”background:var(--bg-tertiary);cursor:default;font-family:monospace;font-size:12px;”>
             </div>
-            <div class="form-group" style="margin-bottom:0;margin-top:8px;">
-              <label class="form-label">Fuente</label>
-              <input type="text" class="form-input" value="${App._esc(state.wingetSource || 'winget')}" readonly style="background:var(--bg-tertiary);cursor:default;font-family:monospace;font-size:12px;">
+            <div class=”form-group” style=”margin-bottom:0;margin-top:8px;”>
+              <label class=”form-label”>Fuente</label>
+              <input type=”text” class=”form-input” value=”${App._esc(state.wingetSource || 'winget')}” readonly style=”background:var(--bg-tertiary);cursor:default;font-family:monospace;font-size:12px;”
+                style=”${_isMsStoreWiz ? 'border-color:rgba(245,158,11,0.5);' : ''}”>
             </div>
           </div>`;
 

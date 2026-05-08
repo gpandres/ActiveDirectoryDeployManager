@@ -3228,15 +3228,22 @@ try { & $Winget source update --disable-interactivity 2>&1 | Out-Null } catch {}
 $WingetSuccess = @(0, 1618, -1978335212, -1978335189, -1978335140)
 $WingetNoScope = @(-1978335160, -1978335215, -1978335216)  # no machine-scope installer → retry sin scope
 $WingetUserOnly = @(-1978335146, -1978335215, -1978335216) # app solo usuario → instalar via tarea programada
+# MS Store apps are user-scope only — skip machine-scope attempt
+$IsMsStore = ($wingetSource -eq 'msstore')
+if ($IsMsStore) { Write-Host "[$(Get-Date -Format 'HH:mm:ss')] INFO: Fuente MS Store — scope machine no aplicable, instalacion en scope de usuario" }
 try {
     $packageInstalled = $false
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Ejecutando: winget install --id $wingetId --source $wingetSource --scope machine"
-    & $Winget install --id "$wingetId" --source "$wingetSource" --silent --accept-package-agreements --accept-source-agreements --scope machine 2>&1 | Out-Null
-    $ec = $LASTEXITCODE
-    if ($ec -in $WingetNoScope) {
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: --scope machine no soportado (codigo $ec). Reintentando sin --scope..."
-        & $Winget install --id "$wingetId" --source "$wingetSource" --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
+    if (-not $IsMsStore) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Ejecutando: winget install --id $wingetId --source $wingetSource --scope machine"
+        & $Winget install --id "$wingetId" --source "$wingetSource" --silent --accept-package-agreements --accept-source-agreements --scope machine 2>&1 | Out-Null
         $ec = $LASTEXITCODE
+        if ($ec -in $WingetNoScope) {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AVISO: --scope machine no soportado (codigo $ec). Reintentando sin --scope..."
+            & $Winget install --id "$wingetId" --source "$wingetSource" --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
+            $ec = $LASTEXITCODE
+        }
+    } else {
+        $ec = -1
     }
     if ($ec -in $WingetSuccess) {
         $packageInstalled = Wait-WingetPackageInstalled -WingetPath $Winget -PackageId $wingetId -PackageSource $wingetSource
