@@ -41,18 +41,18 @@ const SettingsPage = {
         </div>
 
         <div class="form-group">
-          <label class="form-label">${this.tr('settings.uiModeLabel', 'Modo de interfaz')}</label>
+          <label class="form-label">${t('settings.uiModeLabel', 'Modo de interfaz')}</label>
           <select class="form-select" id="cfg-ui-mode">
-            <option value="simple" ${(config.uiMode || 'simple') !== 'advanced' ? 'selected' : ''}>${this.tr('settings.uiModeSimple', 'Sencillo')}</option>
-            <option value="advanced" ${(config.uiMode || '') === 'advanced' ? 'selected' : ''}>${this.tr('settings.uiModeAdvanced', 'Avanzado')}</option>
+            <option value="simple" ${(config.uiMode || 'simple') !== 'advanced' ? 'selected' : ''}>${t('settings.uiModeSimple', 'Sencillo')}</option>
+            <option value="advanced" ${(config.uiMode || '') === 'advanced' ? 'selected' : ''}>${t('settings.uiModeAdvanced', 'Avanzado')}</option>
           </select>
-          <p class="form-hint">${this.tr('settings.uiModeHint', 'En modo sencillo se ocultan las opciones avanzadas del alta de apps y plantillas.')}</p>
+          <p class="form-hint">${t('settings.uiModeHint', 'En modo sencillo se ocultan las opciones avanzadas del alta de apps y plantillas.')}</p>
         </div>
 
         <div class="form-group">
           <label class="form-label">${t('settings.netShare')}</label>
           <div class="input-with-btn">
-            <input class="form-input" id="cfg-share-path" value="${this.esc(config.networkSharePath)}" placeholder="\\\\servidor\\share\\apps">
+            <input class="form-input" id="cfg-share-path" value="${App._esc(config.networkSharePath)}" placeholder="\\\\servidor\\share\\apps">
             <button class="btn btn-secondary" id="btn-browse-share">${t('settings.browse')}</button>
           </div>
           <p class="form-hint">${t('settings.netShareHint')}</p>
@@ -70,7 +70,7 @@ const SettingsPage = {
 
         <div class="form-group">
           <label class="form-label">${t('settings.preferredDC')}</label>
-          <input class="form-input" id="cfg-preferred-dc" value="${this.esc(config.preferredDC || '')}" placeholder="dc1.empresa.local">
+          <input class="form-input" id="cfg-preferred-dc" value="${App._esc(config.preferredDC || '')}" placeholder="dc1.empresa.local">
           <p class="form-hint">${t('settings.preferredDCHint')}</p>
         </div>
 
@@ -228,7 +228,7 @@ const SettingsPage = {
         <div class="form-group" style="margin-bottom:0;">
           <label class="form-label">${t('settings.logsLocalPath') || 'Carpeta de logs locales'}</label>
           <div class="input-with-btn">
-            <input class="form-input" id="cfg-log-dir" value="${this.esc(config.logDirectory || '')}" placeholder="C:\\ProgramData\\AppDeploy_Logs">
+            <input class="form-input" id="cfg-log-dir" value="${App._esc(config.logDirectory || '')}" placeholder="C:\\ProgramData\\AppDeploy_Logs">
             <button class="btn btn-secondary" id="btn-browse-log" type="button">${t('settings.browse') || 'Examinar'}</button>
           </div>
           <p class="form-hint">${t('settings.logsLocalPathHint') || 'Vacío = carpeta de usuario por defecto.'}</p>
@@ -243,11 +243,11 @@ const SettingsPage = {
         ` : ''}
         <div class="form-group" style="margin-bottom:10px;">
           <label class="form-label">${t('settings.dedBaseUrl') || 'URL del servidor'}</label>
-          <input class="form-input" id="cfg-ded-baseurl" placeholder="https://logs.example.local" value="${this.esc(remote.apiBaseUrl || '')}" ${readonlyFieldAttr}>
+          <input class="form-input" id="cfg-ded-baseurl" placeholder="https://logs.example.local" value="${App._esc(remote.apiBaseUrl || '')}" ${readonlyFieldAttr}>
         </div>
         <div class="form-group" style="margin-bottom:10px;">
           <label class="form-label">${t('settings.dedTlsFp') || 'TLS Fingerprint (opcional)'}</label>
-          <input class="form-input" id="cfg-ded-tlsfp" placeholder="sha256//..." value="${this.esc(remote.tlsFingerprint || '')}" ${readonlyFieldAttr}>
+          <input class="form-input" id="cfg-ded-tlsfp" placeholder="sha256//..." value="${App._esc(remote.tlsFingerprint || '')}" ${readonlyFieldAttr}>
         </div>
         <div style="display:${isReadonlyRemote ? 'none' : 'flex'};gap:8px;flex-wrap:wrap;margin-bottom:10px;">
           <button class="btn btn-secondary btn-sm" id="cfg-btn-inspect" type="button">${t('settings.inspectCert') || 'Obtener Fingerprint (Certificado)'}</button>
@@ -290,7 +290,7 @@ const SettingsPage = {
         </div>
         <p class="form-hint" style="margin:0;">
           ${(t('settings.readonlyConnectedHint') || 'Este equipo usa la clave de lectura publicada por el admin para consultar logs del servidor {server}.')
-            .replace('{server}', this.esc(remote.apiBaseUrl || ''))}
+            .replace('{server}', App._esc(remote.apiBaseUrl || ''))}
         </p>
       </div>
     `;
@@ -301,7 +301,7 @@ const SettingsPage = {
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
         <span style="font-size:13px;color:var(--text-secondary);">
           <span style="color:var(--accent-secondary)">●</span>
-          ${t('settings.adminConnected') || 'Admin conectado'} — ${this.esc(st.baseUrl || '')}
+          ${t('settings.adminConnected') || 'Admin conectado'} — ${App._esc(st.baseUrl || '')}
         </span>
         <button class="btn btn-secondary btn-sm" id="cfg-btn-admin-logout">${t('settings.adminLogout') || 'Salir'}</button>
       </div>
@@ -377,8 +377,8 @@ const SettingsPage = {
       document.getElementById('cfg-ded-tlsfp').value = i.fingerprint || '';
       st.innerHTML = `
         <div style="color:var(--text-primary);">
-          <strong>Sujeto:</strong> ${this.esc(i.subject)}<br>
-          <strong>Emisor:</strong> ${this.esc(i.issuer)}<br>
+          <strong>Sujeto:</strong> ${App._esc(i.subject)}<br>
+          <strong>Emisor:</strong> ${App._esc(i.issuer)}<br>
           <strong>Validez:</strong> ${new Date(i.validFrom).toLocaleDateString()} al ${new Date(i.validTo).toLocaleDateString()}<br>
           <strong style="color:var(--accent-secondary)">Fingerprint SHA-256 extraído correctamente.</strong>
         </div>
@@ -573,10 +573,19 @@ const SettingsPage = {
     const r = await window.api.admin.listKeys();
     const el = document.getElementById('cfg-keys-table');
     if (!el) return;
-    if (!r.success) { el.innerHTML = `<div class="logs-muted">${this.esc(r.error)}</div>`; return; }
+    if (!r.success) { el.innerHTML = `<div class="logs-muted">${App._esc(r.error)}</div>`; return; }
     const rows = r.data || [];
     if (!rows.length) { el.innerHTML = `<div class="logs-muted">${t('settings.empty') || 'Sin entradas'}</div>`; return; }
+
+    const LIMIT = 3;
+    const collapsible = rows.length > LIMIT;
+
     el.innerHTML = `
+      ${collapsible ? `
+      <div style="margin-bottom:6px;">
+        <input class="form-input" id="cfg-keys-search" placeholder="Buscar API key..."
+          style="font-size:12px;padding:4px 8px;height:28px;width:100%;">
+      </div>` : ''}
       <table class="logs-table">
         <thead><tr>
           <th>${t('settings.colName') || 'Nombre'}</th>
@@ -587,9 +596,10 @@ const SettingsPage = {
           <th style="width:90px;"></th>
         </tr></thead>
         <tbody>
-          ${rows.map(k => `
-            <tr>
-              <td>${this.esc(k.name)}</td>
+          ${rows.map((k, i) => `
+            <tr data-key-idx="${i}" data-key-name="${App._esc((k.name || '').toLowerCase())}"
+                ${collapsible && i >= LIMIT ? 'class="cfg-key-extra" style="display:none;"' : ''}>
+              <td>${App._esc(k.name)}</td>
               <td><span class="level-pill level-${k.scope === 'admin' ? 'error' : k.scope === 'read' ? 'info' : 'warn'}">${k.scope}</span></td>
               <td class="mono">${this._fmtTs(k.createdAt)}</td>
               <td class="mono">${this._fmtTs(k.lastUsed)}</td>
@@ -599,7 +609,12 @@ const SettingsPage = {
           `).join('')}
         </tbody>
       </table>
+      ${collapsible ? `
+      <button class="btn btn-ghost btn-sm" id="cfg-keys-toggle" style="margin-top:4px;font-size:12px;">
+        ${t('settings.showAll') || 'Ver todas'} (${rows.length})
+      </button>` : ''}
     `;
+
     el.querySelectorAll('[data-revoke]').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (!confirm(t('settings.confirmRevoke') || '¿Revocar?')) return;
@@ -608,19 +623,44 @@ const SettingsPage = {
         await this._loadKeysTable();
       });
     });
+
+    if (!collapsible) return;
+
+    let expanded = false;
+    const toggleBtn = document.getElementById('cfg-keys-toggle');
+    const searchInput = document.getElementById('cfg-keys-search');
+
+    const applyFilter = (query) => {
+      const q = query.toLowerCase().trim();
+      el.querySelectorAll('tbody tr').forEach((row, i) => {
+        const nameMatch = !q || (row.dataset.keyName || '').includes(q);
+        row.style.display = nameMatch ? '' : 'none';
+      });
+      if (toggleBtn) toggleBtn.style.display = q ? 'none' : '';
+    };
+
+    toggleBtn.addEventListener('click', () => {
+      expanded = !expanded;
+      el.querySelectorAll('.cfg-key-extra').forEach(row => { row.style.display = expanded ? '' : 'none'; });
+      toggleBtn.textContent = expanded
+        ? (t('settings.showLess') || 'Ver menos')
+        : `${t('settings.showAll') || 'Ver todas'} (${rows.length})`;
+    });
+
+    searchInput.addEventListener('input', (e) => applyFilter(e.target.value));
   },
 
   async _loadSecretsTable() {
     const r = await window.api.admin.listShareSecrets();
     const el = document.getElementById('cfg-secrets-table');
     if (!el) return;
-    if (!r.success) { el.innerHTML = `<div class="logs-muted">${this.esc(r.error)}</div>`; return; }
+    if (!r.success) { el.innerHTML = `<div class="logs-muted">${App._esc(r.error)}</div>`; return; }
     const rows = r.data || [];
     if (!rows.length) { el.innerHTML = `<div class="logs-muted">${t('settings.empty') || 'Sin entradas'}</div>`; return; }
     el.innerHTML = `
       <table class="logs-table">
         <thead><tr><th>shareId</th><th style="width:140px;">${t('settings.colCreated') || 'Creada'}</th></tr></thead>
-        <tbody>${rows.map(s => `<tr><td class="mono">${this.esc(s.shareId)}</td><td class="mono">${this._fmtTs(s.createdAt)}</td></tr>`).join('')}</tbody>
+        <tbody>${rows.map(s => `<tr><td class="mono">${App._esc(s.shareId)}</td><td class="mono">${this._fmtTs(s.createdAt)}</td></tr>`).join('')}</tbody>
       </table>
     `;
   },
@@ -629,13 +669,13 @@ const SettingsPage = {
     const r = await window.api.admin.listEnrollTokens();
     const el = document.getElementById('cfg-tokens-table');
     if (!el) return;
-    if (!r.success) { el.innerHTML = `<div class="logs-muted">${this.esc(r.error)}</div>`; return; }
+    if (!r.success) { el.innerHTML = `<div class="logs-muted">${App._esc(r.error)}</div>`; return; }
     const rows = r.data || [];
     if (!rows.length) { el.innerHTML = `<div class="logs-muted">${t('settings.empty') || 'Sin entradas'}</div>`; return; }
     el.innerHTML = `
       <table class="logs-table">
         <thead><tr><th>shareId</th><th style="width:60px;">${t('settings.colUses') || 'Usos'}</th><th style="width:140px;">${t('settings.colExpires') || 'Expira'}</th></tr></thead>
-        <tbody>${rows.map(o => `<tr><td class="mono">${this.esc(o.shareId)}</td><td class="mono">${o.usesLeft == null ? '∞' : o.usesLeft}</td><td class="mono">${o.expiresAt == null ? '∞' : this._fmtTs(o.expiresAt)}</td></tr>`).join('')}</tbody>
+        <tbody>${rows.map(o => `<tr><td class="mono">${App._esc(o.shareId)}</td><td class="mono">${o.usesLeft == null ? '∞' : o.usesLeft}</td><td class="mono">${o.expiresAt == null ? '∞' : this._fmtTs(o.expiresAt)}</td></tr>`).join('')}</tbody>
       </table>
     `;
   },
@@ -911,9 +951,9 @@ document.getElementById('btn-save-config').addEventListener('click', () => this.
   },
 
   getUpdateSectionHTML(currentVersion, result, isChecking) {
-    const safeCurrentVersion = this.esc(currentVersion || result?.currentVersion || '0.0.0');
-    const safeLatestVersion = this.esc(result?.latestVersion || '');
-    const safeReleaseName = this.esc(result?.releaseName || result?.tagName || '');
+    const safeCurrentVersion = App._esc(currentVersion || result?.currentVersion || '0.0.0');
+    const safeLatestVersion = App._esc(result?.latestVersion || '');
+    const safeReleaseName = App._esc(result?.releaseName || result?.tagName || '');
     const checkedAt = result?.checkedAt ? App.formatDate(result.checkedAt) : '—';
     const publishedAt = result?.publishedAt ? App.formatDate(result.publishedAt) : '—';
 
@@ -945,7 +985,7 @@ document.getElementById('btn-save-config').addEventListener('click', () => this.
             <strong style="color:var(--text-secondary);">${t('updates.latestVersion')}:</strong>
             <span style="color:var(--text-primary);">${safeLatestVersion ? `v${safeLatestVersion}` : '—'}</span>
           </span>
-          <span style="font-size:13px;font-weight:700;color:${statusColor};">${this.esc(statusText)}</span>
+          <span style="font-size:13px;font-weight:700;color:${statusColor};">${App._esc(statusText)}</span>
         </div>
 
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
@@ -955,18 +995,18 @@ document.getElementById('btn-save-config').addEventListener('click', () => this.
           </div>
           <div style="padding:12px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-secondary);">
             <div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">${t('updates.checkedAt')}</div>
-            <div style="font-weight:600;color:var(--text-primary);">${this.esc(checkedAt)}</div>
+            <div style="font-weight:600;color:var(--text-primary);">${App._esc(checkedAt)}</div>
           </div>
           <div style="padding:12px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-secondary);">
             <div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">${t('updates.publishedAt')}</div>
-            <div style="font-weight:600;color:var(--text-primary);">${this.esc(publishedAt)}</div>
+            <div style="font-weight:600;color:var(--text-primary);">${App._esc(publishedAt)}</div>
           </div>
         </div>
 
         ${result?.error ? `
           <div style="padding:12px;border-radius:10px;border:1px solid rgba(239,68,68,0.35);background:rgba(239,68,68,0.08);color:var(--text-primary);font-size:13px;">
             <strong style="display:block;color:var(--accent-danger);margin-bottom:4px;">${t('updates.errorLabel')}</strong>
-            ${this.esc(result.error)}
+            ${App._esc(result.error)}
           </div>
         ` : ''}
 
@@ -995,17 +1035,6 @@ document.getElementById('btn-save-config').addEventListener('click', () => this.
         </div>
       </div>
     `;
-  },
-
-  esc(str) {
-    const div = document.createElement('div');
-    div.textContent = str || '';
-    return div.innerHTML;
-  },
-
-  tr(key, fallback) {
-    const value = t(key);
-    return value === key ? fallback : value;
   },
 
   getSelectedDNs() {
@@ -1084,8 +1113,8 @@ document.getElementById('btn-save-config').addEventListener('click', () => this.
     selectedEl.innerHTML = selectedDNs.map(dn => {
       const selectedName = this.findOUName(this.ousTreeCache, dn) || dn;
       return `<span style="display:inline-flex;align-items:center;gap:6px;background:rgba(30,144,255,0.15);color:var(--primary-color);padding:2px 10px;border-radius:4px;font-size:12px;">
-        📁 ${this.esc(selectedName)}
-        <button type="button" class="btn btn-ghost btn-sm cfg-baseou-remove" data-dn="${this.esc(dn)}" style="font-size:11px;padding:0 4px;min-height:auto;">✕</button>
+        📁 ${App._esc(selectedName)}
+        <button type="button" class="btn btn-ghost btn-sm cfg-baseou-remove" data-dn="${App._esc(dn)}" style="font-size:11px;padding:0 4px;min-height:auto;">✕</button>
       </span>`;
     }).join('') + `<button type="button" class="btn btn-ghost btn-sm" id="cfg-baseou-clear" style="font-size:11px;margin-left:4px;opacity:.7;">${t('common.clear') || 'Borrar selección'}</button>`;
 

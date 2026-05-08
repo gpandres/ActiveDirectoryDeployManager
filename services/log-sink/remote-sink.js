@@ -10,11 +10,10 @@
 //     display a banner; we keep retrying in the background.
 // ═══════════════════════════════════════════════════════════
 
-const path = require('path');
-const { RetryQueue } = require('./retry-queue');
 const { request } = require('./http-client');
-const activityLog = require('../activity-log');
 const { sanitize } = require('./log-sanitizer');
+
+const activityLog = { add() {} };
 
 const BATCH_MAX         = 200;
 const FLUSH_DEBOUNCE_MS = 2_000;
@@ -33,6 +32,60 @@ function normalizeLevel(v) {
 
 function getHostname() {
   try { return require('os').hostname(); } catch { return 'unknown'; }
+}
+
+function cleanupLegacyQueueFiles() {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const { app } = require('electron');
+    const queuePath = path.join(app.getPath('userData'), 'pending-logs.ndjson');
+    for (const file of [queuePath, `${queuePath}.compact`]) {
+      try {
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      } catch { /* best effort */ }
+    }
+  } catch { /* no electron context */ }
+}
+
+class MemoryRetryQueue {
+  constructor() {
+    this.queue = [];
+    this.nextSeq = 1;
+  }
+
+  async init() { /* memory-only by design: dedicated mode leaves no local queue file */ }
+
+  push(entry) {
+    if (this.queue.length >= 10_000) {
+      const idx = this.queue.findIndex(e => (e.entry.level ?? 1) < 3);
+      if (idx !== -1) this.queue.splice(idx, 1);
+      else this.queue.shift();
+    }
+    const seq = this.nextSeq++;
+    this.queue.push({ seq, entry });
+    return seq;
+  }
+
+  takeBatch(max) {
+    return this.queue.slice(0, max);
+  }
+
+  async ack(batch) {
+    if (!batch.length) return;
+    const seqs = new Set(batch.map(b => b.seq));
+    this.queue = this.queue.filter(e => !seqs.has(e.seq));
+  }
+
+  nack() { /* entries stay in memory for retry */ }
+
+  size() {
+    return this.queue.length;
+  }
+
+  async close() {
+    this.queue = [];
+  }
 }
 
 class RemoteSink {
@@ -54,13 +107,10 @@ class RemoteSink {
   }
 
   async init(cfg) {
-    const { app } = require('electron');
-    const queuePath = path.join(app.getPath('userData'), 'pending-logs.ndjson');
-    this.queue = new RetryQueue(queuePath);
+    cleanupLegacyQueueFiles();
+    this.queue = new MemoryRetryQueue();
     await this.queue.init();
     this.cfg = cfg;
-    // Try an immediate drain in case entries are pending from last run.
-    this._scheduleFlush(0);
   }
 
   reconfigure(cfg) { this.cfg = cfg; }
@@ -78,9 +128,6 @@ class RemoteSink {
     };
     this.queue.push(entry);
     this.lastQueuedAt = new Date().toISOString();
-    // Mirror into the local activity-log so the user's own
-    // recent-activity widget still works when offline.
-    activityLog.add(action, { ...details, level, mirrored: true });
     this._scheduleFlush();
     return entry;
   }
@@ -92,7 +139,7 @@ class RemoteSink {
   }
 
   async getRecent(count = 10) {
-    if (!this._canRead()) return this._localFallbackRecent(count);
+    if (!this._canRead()) return [];
     try {
       const res = await request({
         baseUrl: this.cfg.apiBaseUrl,
@@ -102,14 +149,13 @@ class RemoteSink {
       });
       return res.body;
     } catch {
-      return this._localFallbackRecent(count);
+      return [];
     }
   }
 
   async query(filters = {}) {
     if (!this._canRead()) {
-      const local = require('./local-sink');
-      return local.query(filters);
+      return { items: [], nextCursor: null };
     }
     const params = new URLSearchParams();
     for (const [k, v] of Object.entries(filters)) {
@@ -126,8 +172,13 @@ class RemoteSink {
 
   async statsSummary(window = '24h') {
     if (!this._canRead()) {
-      const local = require('./local-sink');
-      return local.statsSummary(window);
+      return {
+        window,
+        counts: { debug: 0, info: 0, warn: 0, error: 0, fatal: 0 },
+        activeEquipos: 0,
+        totalEvents: 0,
+        topErrorEquipos: []
+      };
     }
     const res = await request({
       baseUrl: this.cfg.apiBaseUrl,
@@ -152,17 +203,6 @@ class RemoteSink {
 
   _canRead() {
     return !!(this.cfg && this.cfg.apiBaseUrl && (this.cfg.readApiKey || this.cfg.apiKey));
-  }
-
-  _localFallbackRecent(count) {
-    return activityLog.getRecent(count).map(e => ({
-      id: e.id,
-      ts: e.timestamp,
-      hostname: this.hostname,
-      level: e.level ?? 1,
-      source: e.source || e.action || '',
-      message: e.message || e.action
-    }));
   }
 
   // ── Flush pipeline ──

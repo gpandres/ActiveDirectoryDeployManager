@@ -258,6 +258,11 @@ app.whenReady().then(() => {
     catch (e) { return { success: false, error: 'Invalid arguments' }; }
     return appService.getInstallerVersion(filePath);
   });
+  ipcMain.handle('apps:detectInstallerSignature', (_, filePath) => {
+    try { assertString(filePath, 'filePath', 1024); }
+    catch (e) { return { success: false, error: 'Invalid arguments' }; }
+    return appService.detectInstallerSignature(filePath);
+  });
   ipcMain.handle('apps:computeHash', (_, filePath) => {
     try { assertString(filePath, 'filePath', 1024); }
     catch (e) { return { hash: null, error: 'Invalid arguments' }; }
@@ -660,11 +665,8 @@ app.whenReady().then(() => {
       if (!peek.signature) return { success: false, error: 'shared_config_unsigned' };
 
       const configFingerprint = configShare.fingerprint(peek);
-      const remote = cfg.remoteLogging || {};
-      if (remote.configFingerprint && remote.configFingerprint !== configFingerprint) {
-        return { success: false, error: 'shared_config_changed' };
-      }
-
+      // Trust share content unconditionally: re-publishing the config
+      // (e.g. cert rotation) must not block re-enrollment.
       const enroll = await configShare.enrollWithShare(peek, os.hostname());
       if (!enroll || !enroll.apiKey) {
         return { success: false, error: 'enrollment_failed' };

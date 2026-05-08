@@ -70,12 +70,15 @@ const CatalogPage = {
       <!-- Category Filter Pills -->
       <div class="catalog-filters" id="catalog-filters">
         ${categories.map(cat => `
-          <button class="catalog-filter-pill ${this._activeCategory === cat ? 'active' : ''}" data-cat="${this.esc(cat)}">
-            ${this.esc(this._translateCategory(cat))}
+          <button class="catalog-filter-pill ${this._activeCategory === cat ? 'active' : ''}" data-cat="${App._esc(cat)}">
+            ${App._esc(this._translateCategory(cat))}
           </button>
         `).join('')}
         <button class="catalog-filter-pill ${this._activeCategory === 'Winget' ? 'active' : ''}" data-cat="Winget">
           📦 Winget
+        </button>
+        <button class="catalog-filter-pill ${this._activeCategory === 'MsStore' ? 'active' : ''}" data-cat="MsStore">
+          🛒 MS Store
         </button>
       </div>
 
@@ -139,7 +142,7 @@ const CatalogPage = {
     for (const [cat, items] of Object.entries(grouped)) {
       html += `
         <div class="catalog-category-section">
-          <h5 class="catalog-category-title">${this.esc(this._translateCategory(cat))}</h5>
+          <h5 class="catalog-category-title">${App._esc(this._translateCategory(cat))}</h5>
           <div class="catalog-grid">
             ${items.map(item => this._renderCard(item)).join('')}
           </div>
@@ -165,19 +168,27 @@ const CatalogPage = {
 
     return `
       <div class="catalog-card ${isSelected ? 'selected' : ''}"
-           data-item-id="${this.esc(item.id || item.wingetId)}"
-           data-winget-id="${this.esc(item.wingetId || '')}"
-           data-winget-source="${this.esc(item.wingetSource || 'winget')}"
-           data-name="${this.esc(item.name)}"
-           data-version="${this.esc(version)}"
-           data-source="${this.esc(item.source || 'curated')}">
+           data-item-id="${App._esc(item.id || item.wingetId)}"
+           data-winget-id="${App._esc(item.wingetId || '')}"
+           data-winget-source="${App._esc(item.wingetSource || 'winget')}"
+           data-name="${App._esc(item.name)}"
+           data-version="${App._esc(version)}"
+           data-source="${App._esc(item.source || 'curated')}">
         <div class="catalog-card-icon">${item.icon || '📦'}</div>
         <div class="catalog-card-info">
-          <div class="catalog-card-name">${this.esc(item.name)}</div>
-          ${isApi && item.publisher ? `<div class="catalog-card-publisher">${this.esc(item.publisher)}</div>` : ''}
+          <div class="catalog-card-name">${App._esc(item.name)}</div>
+          ${isApi && item.publisher ? `<div class="catalog-card-publisher">${App._esc(item.publisher)}</div>` : ''}
           <div class="catalog-card-meta">
-            ${version ? `<span class="badge badge-info" style="font-size:9px;padding:1px 6px;">v${this.esc(version)}</span>` : ''}
-            ${item.wingetId ? `<span class="badge badge-primary" style="font-size:9px;padding:1px 6px;">${this.esc(item.wingetSource || 'winget')}</span>` : ''}
+            ${version ? `<span class="badge badge-info" style="font-size:9px;padding:1px 6px;">v${App._esc(version)}</span>` : ''}
+            ${item.wingetId ? (() => {
+              const src = (item.wingetSource || 'winget').toLowerCase();
+              const isMsStore = src === 'msstore';
+              const badgeStyle = isMsStore
+                ? 'font-size:9px;padding:1px 6px;background:var(--accent-info,#0ea5e9);color:#fff;'
+                : 'font-size:9px;padding:1px 6px;';
+              const label = isMsStore ? '🛒 msstore' : App._esc(src);
+              return `<span class="badge ${isMsStore ? '' : 'badge-primary'}" style="${badgeStyle}">${label}</span>`;
+            })() : ''}
           </div>
         </div>
         ${isSelected ? '<div class="catalog-card-check">✓</div>' : ''}
@@ -232,14 +243,14 @@ const CatalogPage = {
             <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--bg-input);border-radius:var(--radius-sm);">
               <span style="font-size:22px;">${r.icon || '📦'}</span>
               <div style="flex:1;min-width:0;">
-                <div style="font-weight:600;color:var(--text-primary);font-size:var(--font-sm);">${this.esc(r.name || r.wingetId)}</div>
-                <div style="font-size:var(--font-xs);color:var(--text-muted);">${this.esc(r.wingetId)}</div>
-                ${r.userApp ? `<div style="font-size:var(--font-xs);color:var(--text-secondary);margin-top:1px;">Tu app: v${this.esc(r.userApp.version || '1.0.0')}</div>` : ''}
+                <div style="font-weight:600;color:var(--text-primary);font-size:var(--font-sm);">${App._esc(r.name || r.wingetId)}</div>
+                <div style="font-size:var(--font-xs);color:var(--text-muted);">${App._esc(r.wingetId)}</div>
+                ${r.userApp ? `<div style="font-size:var(--font-xs);color:var(--text-secondary);margin-top:1px;">Tu app: v${App._esc(r.userApp.version || '1.0.0')}</div>` : ''}
               </div>
               <div style="text-align:right;font-size:var(--font-sm);margin-right:8px;">
-                <span style="color:var(--text-muted);">${this.esc(r.catalogVersion || '?')}</span>
+                <span style="color:var(--text-muted);">${App._esc(r.catalogVersion || '?')}</span>
                 <span style="color:var(--accent-primary);margin:0 6px;">→</span>
-                <span style="color:var(--accent-secondary);font-weight:600;">${this.esc(r.latestVersion || '?')}</span>
+                <span style="color:var(--accent-secondary);font-weight:600;">${App._esc(r.latestVersion || '?')}</span>
               </div>
               ${r.userApp ? `
                 <button class="btn btn-primary btn-sm catalog-update-btn" data-idx="${i}" style="white-space:nowrap;min-width:90px;">
@@ -260,7 +271,13 @@ const CatalogPage = {
   _getFilteredResults() {
     const cat = this._activeCategory;
     if (cat === 'Todo') return this._results;
-    if (cat === 'Winget') return this._results.filter(r => r.source === 'winget-api' || r.source === 'winget-cli');
+    if (cat === 'Winget') return this._results.filter(r => {
+      const src = (r.wingetSource || 'winget').toLowerCase();
+      return (r.source === 'winget-api' || r.source === 'winget-cli') && src !== 'msstore';
+    });
+    if (cat === 'MsStore') return this._results.filter(r =>
+      (r.wingetSource || '').toLowerCase() === 'msstore'
+    );
     return this._results.filter(r => r.category === cat && r.source !== 'winget-api' && r.source !== 'winget-cli');
   },
 
@@ -577,11 +594,7 @@ const CatalogPage = {
     }, 200);
   },
 
-  esc(str) {
-    const div = document.createElement('div');
-    div.textContent = str || '';
-    return div.innerHTML;
-  },
+
 
   _translateCategory(cat) {
     const map = {

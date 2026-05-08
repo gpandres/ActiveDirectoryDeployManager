@@ -126,7 +126,7 @@ const CURATED_CATALOG = [
   {
     id: 'whatsapp', name: 'WhatsApp', wingetId: '9NKSQGP7F2NH', wingetSource: 'msstore',
     category: 'Communication', icon: '📱', defaultVersion: '2.2',
-    versionCheck: { method: 'winget' }
+    versionCheck: { method: 'none' }  // MS Store manages versioning internally
   },
 
   // ─── Multimedia ───────────────────────────────────────────
@@ -262,12 +262,19 @@ function normalizePackageLabel(value) {
     .replace(/[^a-z0-9]+/g, '');
 }
 
+function inferWingetSource(wingetId, explicitSource) {
+  const sanitized = sanitizeWingetSource(explicitSource);
+  if (sanitized) return sanitized;
+  if (isLikelyMsStoreId(typeof wingetId === 'string' ? wingetId.trim() : '')) return 'msstore';
+  return DEFAULT_WINGET_SOURCE;
+}
+
 function getVisibleCuratedCatalog() {
   return CURATED_CATALOG
     .filter(item => item?.catalogDisabled !== true)
     .map(item => ({
       ...item,
-      wingetSource: sanitizeWingetSource(item?.wingetSource) || DEFAULT_WINGET_SOURCE
+      wingetSource: inferWingetSource(item?.wingetId, item?.wingetSource)
     }));
 }
 
@@ -307,9 +314,11 @@ function parseWingetShowOutput(stdout) {
 
   const versionMatch = clean.match(/^(?:Version|Versi[oó]n)\s*:\s*([^\n]+)/im);
   const sourceMatch = clean.match(/^(?:Source|Origen)\s*:\s*([^\n]+)/im);
+  const rawVersion = versionMatch?.[1]?.trim() || null;
 
   return {
-    version: versionMatch?.[1]?.trim() || null,
+    // 'Unknown' means Store manages versioning internally — treat as unavailable
+    version: (rawVersion && !/^unknown$/i.test(rawVersion)) ? rawVersion : null,
     source: sanitizeWingetSource(sourceMatch?.[1] || '')
   };
 }
@@ -438,7 +447,7 @@ async function resolvePackageReference(reference) {
   }
 
   const normalizedId = typeof reference?.wingetId === 'string' ? reference.wingetId.trim() : '';
-  const normalizedSource = sanitizeWingetSource(reference?.wingetSource) || DEFAULT_WINGET_SOURCE;
+  const normalizedSource = inferWingetSource(normalizedId, reference?.wingetSource);
   const normalizedName = normalizeWingetQuery(reference?.name || '');
 
   let resolved = {
@@ -450,11 +459,19 @@ async function resolvePackageReference(reference) {
   };
 
   if (isValidWingetId(normalizedId)) {
-    const manifest = await fetchWingetManifest(normalizedId, normalizedSource);
+    let manifest = await fetchWingetManifest(normalizedId, normalizedSource);
+
+    // Source fallback: if not found, try the other source
+    if (!manifest) {
+      const fallbackSource = normalizedSource === 'msstore' ? DEFAULT_WINGET_SOURCE : 'msstore';
+      manifest = await fetchWingetManifest(normalizedId, fallbackSource);
+    }
+
     if (manifest) {
+      const confirmedSource = manifest.source || normalizedSource;
       resolved = {
         wingetId: normalizedId,
-        wingetSource: manifest.source || normalizedSource,
+        wingetSource: confirmedSource,
         latestVersion: manifest.version || null,
         name: reference?.name || '',
         available: true
@@ -502,21 +519,6 @@ async function resolveCuratedCatalog() {
 
 // ─── CLI Winget Search ───────────────────────────────────────
 // Uses the local winget binary — stable, no external API dependency.
-
-function parseWingetShowOutput(stdout) {
-  if (!stdout || !stdout.trim()) return null;
-
-  const clean = stdout.replace(/\x1B\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
-  if (/No package found|No se encontr/i.test(clean)) return null;
-
-  const versionMatch = clean.match(/^(?:Version|Versi.n)\s*:\s*([^\n]+)/im);
-  const sourceMatch = clean.match(/^(?:Source|Origen)\s*:\s*([^\n]+)/im);
-
-  return {
-    version: versionMatch?.[1]?.trim() || null,
-    source: sanitizeWingetSource(sourceMatch?.[1] || '')
-  };
-}
 
 function parseWingetSearchResults(stdout) {
   if (!stdout || !stdout.trim()) return [];
@@ -682,13 +684,15 @@ const catalogService = {
     );
     let latestVersion = null;
     
-    if (item?.versionCheck?.method === 'github') {
+    if (item?.versionCheck?.method === 'none') {
+      // Version managed externally (e.g. MS Store) — skip check, return default
+      latestVersion = null;
+    } else if (item?.versionCheck?.method === 'github') {
       latestVersion = await checkVersionGitHub(item.versionCheck.repo);
     } else if (resolved?.wingetId) {
-      // Not in curated list — use winget CLI directly
       latestVersion = resolved.latestVersion || await checkVersionWinget(resolved.wingetId, resolved.wingetSource);
     } else if (safeId && isValidWingetId(safeId)) {
-      latestVersion = await checkVersionWinget(safeId, wingetSource);
+      latestVersion = await checkVersionWinget(safeId, inferWingetSource(safeId, wingetSource));
     }
 
     return {
@@ -702,7 +706,7 @@ const catalogService = {
     const resolved = await resolvePackageReference(reference || {});
     return {
       wingetId: resolved?.wingetId || '',
-      wingetSource: resolved?.wingetSource || sanitizeWingetSource(reference?.wingetSource) || DEFAULT_WINGET_SOURCE,
+      wingetSource: resolved?.wingetSource || inferWingetSource(reference?.wingetId, reference?.wingetSource),
       latestVersion: resolved?.latestVersion || null,
       name: resolved?.name || reference?.name || '',
       available: !!resolved?.available

@@ -55,8 +55,8 @@ const DeploymentsPage = {
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
             <div>
               <strong>${t('deployments.accessError')}</strong>
-              <p class="mt-sm">${this.esc(result.error)}</p>
-              <p class="mt-sm text-muted">${t('deployments.pathConfigured')}: <code>${this.esc(config.networkSharePath)}</code></p>
+              <p class="mt-sm">${App._esc(result.error)}</p>
+              <p class="mt-sm text-muted">${t('deployments.pathConfigured')}: <code>${App._esc(config.networkSharePath)}</code></p>
               <p class="mt-sm"><a href="#" onclick="App.navigate('settings')" style="color:var(--accent-primary)">${t('deployments.changePath')} →</a></p>
             </div>
           </div>`;
@@ -70,7 +70,7 @@ const DeploymentsPage = {
               <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
             </div>
             <p class="empty-state-title">${t('deployments.emptyFolder')}</p>
-            <p class="empty-state-text">${t('deployments.noAppsInFolder')}<br><code>${this.esc(config.networkSharePath)}</code></p>
+            <p class="empty-state-text">${t('deployments.noAppsInFolder')}<br><code>${App._esc(config.networkSharePath)}</code></p>
           </div>`;
         return;
       }
@@ -80,7 +80,7 @@ const DeploymentsPage = {
       try { apps = await window.api.apps.getAll(); } catch (e) {}
 
       container.innerHTML = `
-        <p class="text-muted text-sm mb-md">📂 ${this.esc(config.networkSharePath)} — ${result.data.length} ${t('deployments.folders')}</p>
+        <p class="text-muted text-sm mb-md">📂 ${App._esc(config.networkSharePath)} — ${result.data.length} ${t('deployments.folders')}</p>
         <div class="table-wrapper">
           <table>
             <thead>
@@ -108,12 +108,12 @@ const DeploymentsPage = {
                     <td style="color:var(--text-primary); font-weight:500;">
                       <div class="flex items-center gap-sm">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-warning)" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                        ${this.esc(app.name)}
+                        ${App._esc(app.name)}
                       </div>
                     </td>
                     <td>
                       ${version
-                        ? `<span class="badge badge-info">v${this.esc(version)}</span>`
+                        ? `<span class="badge badge-info">v${App._esc(version)}</span>`
                         : '<span class="text-muted">—</span>'}
                     </td>
                     <td>
@@ -125,7 +125,7 @@ const DeploymentsPage = {
                       })()}
                     </td>
                     <td>${gpoName
-                      ? `<span class="badge badge-info">${this.esc(gpoName)}</span>`
+                      ? `<span class="badge badge-info">${App._esc(gpoName)}</span>`
                       : configuredApp
                         ? `<span class="badge badge-warning" title="App configurada sin GPO asignada">⚠ Sin GPO</span>`
                         : '<span class="text-muted" style="font-size:11px;">No configurada</span>'
@@ -158,7 +158,7 @@ const DeploymentsPage = {
       container.innerHTML = `
         <div class="rsat-warning">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-          <div><strong>Error</strong><p class="mt-sm">${this.esc(err.message)}</p></div>
+          <div><strong>Error</strong><p class="mt-sm">${App._esc(err.message)}</p></div>
         </div>`;
     }
   },
@@ -199,18 +199,18 @@ const DeploymentsPage = {
       <div style="display:flex;flex-direction:column;gap:16px;">
         <div>
           <div style="font-size:var(--font-xs);color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">${t('deployments.app')}</div>
-          <div style="font-size:var(--font-md);font-weight:600;color:var(--text-primary);">${this.esc(appName)}</div>
+          <div style="font-size:var(--font-md);font-weight:600;color:var(--text-primary);">${App._esc(appName)}</div>
         </div>
         ${version ? `
           <div>
             <div style="font-size:var(--font-xs);color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">${t('deployments.version')}</div>
-            <div><span class="badge badge-info">v${this.esc(version)}</span></div>
+            <div><span class="badge badge-info">v${App._esc(version)}</span></div>
           </div>
         ` : ''}
         ${hash ? `
           <div>
             <div style="font-size:var(--font-xs);color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">${t('deployments.hash')}</div>
-            <div style="background:var(--bg-input);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:10px 14px;font-family:'Cascadia Code','Fira Code','Consolas',monospace;font-size:var(--font-sm);color:var(--accent-secondary);word-break:break-all;cursor:pointer;" onclick="navigator.clipboard.writeText('${this.esc(hash)}'); App.toast('${t('deployments.hashCopied')}','success');" title="Click para copiar">${this.esc(hash)}</div>
+            <div style="background:var(--bg-input);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:10px 14px;font-family:'Cascadia Code','Fira Code','Consolas',monospace;font-size:var(--font-sm);color:var(--accent-secondary);word-break:break-all;cursor:pointer;" onclick="navigator.clipboard.writeText('${App._esc(hash)}'); App.toast('${t('deployments.hashCopied')}','success');" title="Click para copiar">${App._esc(hash)}</div>
             <div style="font-size:var(--font-xs);color:var(--text-muted);margin-top:4px;">${t('deployments.clickToCopy')}</div>
           </div>
         ` : ''}
@@ -242,7 +242,7 @@ const DeploymentsPage = {
                 <span class="file-icon">
                   ${f.extension === '.ps1' ? '📜' : f.extension === '.msi' ? '📀' : f.extension === '.exe' ? '⚙️' : f.extension === '.xml' ? '📋' : f.extension === '.json' ? '📊' : '📄'}
                 </span>
-                <span style="color:var(--text-primary)">${this.esc(f.name)}</span>
+                <span style="color:var(--text-primary)">${App._esc(f.name)}</span>
                 <span class="file-meta">${App.formatBytes(f.size)} · ${App.formatDate(f.modified)}</span>
               </li>`;
           }).join('')}
@@ -254,11 +254,7 @@ const DeploymentsPage = {
     }
   },
 
-  esc(str) {
-    const div = document.createElement('div');
-    div.textContent = str || '';
-    return div.innerHTML;
-  },
+
 
   jsArg(str) {
     return String(str || '')

@@ -21,10 +21,10 @@ Object.assign(OUsPage, {
     }
 
     const header = selected.length === 1
-      ? this.esc(selected[0].split(',')[0].replace(/^OU=/i, ''))
+      ? App._esc(selected[0].split(',')[0].replace(/^OU=/i, ''))
       : `${selected.length} ${t('ous.selectedOUs')}`;
 
-    const selectedDNs = selected.map(dn => `<span class="chip" title="${this.escAttr(dn)}">${this.esc(dn.split(',')[0].replace(/^OU=/i, ''))}</span>`).join('');
+    const selectedDNs = selected.map(dn => `<span class="chip" title="${this.escAttr(dn)}">${App._esc(dn.split(',')[0].replace(/^OU=/i, ''))}</span>`).join('');
 
     // Sync warnings (if any) for single-OU selection — interactive remediation
     let syncBanner = '';
@@ -36,7 +36,7 @@ Object.assign(OUsPage, {
           const isAdNotLocal = w.reason === t('ous.driftInAdNotLocal');
           return `
             <li class="drift-item" style="display:flex;align-items:center;gap:8px;padding:4px 0;flex-wrap:wrap;">
-              <span class="marquee-text-container" style="flex:1;min-width:180px;"><span class="marquee-text">${this.esc(w.gpoName)} — ${this.esc(w.reason)}</span></span>
+              <span class="marquee-text-container" style="flex:1;min-width:180px;"><span class="marquee-text">${App._esc(w.gpoName)} — ${App._esc(w.reason)}</span></span>
               <div class="drift-actions" style="display:flex;gap:4px;flex-shrink:0;">
                 ${isAdNotLocal ? `
                   <button class="btn btn-sm btn-secondary drift-fix-btn" data-ou="${this.escAttr(ouDN)}" data-idx="${idx}" data-action="unlink-ad" title="${t('ous.fixDriftUnlinkAd')}">${t('ous.fixDriftUnlinkAd')}</button>
@@ -99,7 +99,7 @@ Object.assign(OUsPage, {
     return `
       <div class="ous-search-box mt-md">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" class="form-input" id="ous-search-app" placeholder="${t('ous.searchApps')}" value="${this.esc(this.state.appSearch)}">
+        <input type="text" class="form-input" id="ous-search-app" placeholder="${t('ous.searchApps')}" value="${App._esc(this.state.appSearch)}">
       </div>`;
   },
 
@@ -119,11 +119,11 @@ Object.assign(OUsPage, {
           ${state === 'some' ? '<div class="checkbox-dash"></div>' : ''}
         </div>
         <div class="assignment-app-info" style="min-width: 0;">
-          <div class="assignment-app-name marquee-text-container" style="max-width: 100%;"><span class="marquee-text">${this.esc(app.name)}</span></div>
+          <div class="assignment-app-name marquee-text-container" style="max-width: 100%;"><span class="marquee-text">${App._esc(app.name)}</span></div>
           <div class="assignment-app-meta">
-            ${hasGPO ? `<span class="badge badge-info">${this.esc(app.gpoName)}</span>` : `<span class="badge badge-warning">${t('ous.noGpoBadge')}</span>`}
+            ${hasGPO ? `<span class="badge badge-info">${App._esc(app.gpoName)}</span>` : `<span class="badge badge-warning">${t('ous.noGpoBadge')}</span>`}
             ${isOrphan ? `<span class="badge badge-warning" title="${this.escAttr(t('ous.orphanGpoDetected').replace('{n}', 1))}">GPO missing</span>` : ''}
-            ${app.installerType ? `<span class="badge badge-neutral">${this.esc(app.installerType.toUpperCase())}</span>` : ''}
+            ${app.installerType ? `<span class="badge badge-neutral">${App._esc(app.installerType.toUpperCase())}</span>` : ''}
             ${hasPendingForRow ? `<span class="badge badge-pending">${t('ous.pendingBadge')}</span>` : ''}
           </div>
         </div>
@@ -499,7 +499,7 @@ Object.assign(OUsPage, {
 
       if (result.failures.length > 0) {
         const errorList = result.failures.slice(0, 5).map(f =>
-          `<li><strong>${this.esc(f.appName || f.appId)}</strong> → ${this.esc(f.ouDN.split(',')[0].replace(/^OU=/i, ''))}: ${this.esc(f.error)}</li>`
+          `<li><strong>${App._esc(f.appName || f.appId)}</strong> → ${App._esc(f.ouDN.split(',')[0].replace(/^OU=/i, ''))}: ${App._esc(f.error)}</li>`
         ).join('');
         const body = `
           <p>${t('ous.applyPartial').replace('{ok}', succeededKeys.size).replace('{fail}', result.failures.length)}</p>

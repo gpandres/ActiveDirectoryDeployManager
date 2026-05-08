@@ -112,7 +112,7 @@ const DashboardPage = {
           <div style="margin-top:12px;border-top:1px solid var(--border-color);padding-top:12px">
             ${healthStatus.issues.slice(0, 5).map(issue => `
               <div style="font-size:var(--font-sm);color:${issue.type === 'warn' ? 'var(--accent-warning)' : 'var(--accent-danger)'};padding:4px 0">
-                ${issue.type === 'warn' ? '⚠' : '❌'} ${this.esc(issue.msg)}
+                ${issue.type === 'warn' ? '⚠' : '❌'} ${App._esc(issue.msg)}
               </div>
             `).join('')}
           </div>
@@ -264,7 +264,7 @@ const DashboardPage = {
       if (result.success) {
         el.innerHTML = `
           <div style="width:10px;height:10px;border-radius:50%;background:var(--accent-secondary);box-shadow:0 0 8px rgba(0,212,170,.5);flex-shrink:0;"></div>
-          <span style="color:var(--text-secondary);">${t('dashboard.netShareAccessible')} — <code style="background:rgba(0,0,0,0.2);padding:2px 6px;border-radius:3px;font-size:var(--font-xs);">${this.esc(config.networkSharePath)}</code></span>
+          <span style="color:var(--text-secondary);">${t('dashboard.netShareAccessible')} — <code style="background:rgba(0,0,0,0.2);padding:2px 6px;border-radius:3px;font-size:var(--font-xs);">${App._esc(config.networkSharePath)}</code></span>
         `;
       } else {
         el.innerHTML = `
@@ -278,8 +278,8 @@ const DashboardPage = {
             <div style="padding:12px;background:var(--accent-danger-dim);border:1px solid rgba(239,68,68,0.25);border-radius:var(--radius-sm);margin-top:4px;">
               <div style="font-size:var(--font-sm);color:#fca5a5;">
                 <strong>❌ ${t('dashboard.netShareInaccessible')}</strong>
-                <p style="margin-top:4px;color:var(--text-muted);">Ruta: <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:3px;font-size:var(--font-xs);">${this.esc(config.networkSharePath)}</code></p>
-                <p style="margin-top:4px;color:var(--text-muted);">${this.esc(result.error)}</p>
+                <p style="margin-top:4px;color:var(--text-muted);">Ruta: <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:3px;font-size:var(--font-xs);">${App._esc(config.networkSharePath)}</code></p>
+                <p style="margin-top:4px;color:var(--text-muted);">${App._esc(result.error)}</p>
               </div>
             </div>
           `);
@@ -288,7 +288,7 @@ const DashboardPage = {
     } catch (err) {
       el.innerHTML = `
         <div style="width:10px;height:10px;border-radius:50%;background:var(--accent-danger);box-shadow:0 0 8px rgba(239,68,68,.5);flex-shrink:0;"></div>
-        <span style="color:#fca5a5;">Error: ${this.esc(err.message)}</span>
+        <span style="color:#fca5a5;">Error: ${App._esc(err.message)}</span>
       `;
     }
   },
@@ -329,8 +329,9 @@ const DashboardPage = {
   getActivityColor(action) {
     const safeAction = String(action || '');
     const colors = {
-      app_create: 'var(--accent-secondary-dim)',
-      app_update: 'var(--accent-info-dim)',
+      app_create:              'var(--accent-secondary-dim)',
+      app_update:              'var(--accent-info-dim)',
+      app_scripts_regenerated: 'var(--accent-info-dim)',
       app_uninstall_prepare: 'var(--accent-warning-dim)',
       app_disable: 'var(--accent-warning-dim)',
       app_delete: 'var(--accent-danger-dim)',
@@ -360,15 +361,11 @@ const DashboardPage = {
     return '&#128203;';
   },
 
-  esc(str) {
-    const div = document.createElement('div');
-    div.textContent = str || '';
-    return div.innerHTML;
-  },
+
 
   getActivityText(entry) {
     entry = entry || {};
-    const e = s => this.esc(String(s ?? '?'));
+    const e = s => App._esc(String(s ?? '?'));
     const appName    = e(entry.appName);
     const bundleName = e(entry.bundleName);
     const gpoName    = e(entry.gpoName);
@@ -401,8 +398,12 @@ const DashboardPage = {
       log_backend_enrolled:   `Enrolled en servidor de logs`,
       log_backend_reconnected:`Servidor de logs reconectado`,
       log_backend_offline:    `Servidor de logs no disponible`,
-      log_share_config_published: `Config de logging publicada`,
+      log_share_config_published:           `Config de logging publicada`,
+      app_scripts_regenerated:              `Scripts regenerados: <strong>${appName}</strong>`,
+      script_update_background_started:     `Actualización de scripts iniciada`,
+      script_update_background_completed:   `Actualización de scripts completada`,
+      ps_error:                             `Error de PowerShell`,
     };
-    return texts[String(entry.action || '')] || this.esc(entry.action || entry.message || '');
+    return texts[String(entry.action || '')] || App._esc(entry.action || entry.message || '');
   }
 };

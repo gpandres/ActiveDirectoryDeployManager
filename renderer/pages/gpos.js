@@ -224,27 +224,27 @@ const GposPage = {
         <tr style="border-bottom: 1px solid var(--border-color); transition: background 0.2s;${isSelected ? 'background:rgba(59,130,246,0.06);' : ''}">
           <td style="padding: 16px;">
             <label class="checkbox-wrapper checkbox-wrapper--compact" style="width:22px;margin:0 auto;">
-              <input type="checkbox" class="checkbox-select gpo-cb" data-id="${this.esc(g.Id)}" ${isSelected ? 'checked' : ''}>
-              <span class="sr-only">Seleccionar ${this.esc(g.DisplayName)}</span>
+              <input type="checkbox" class="checkbox-select gpo-cb" data-id="${App._esc(g.Id)}" ${isSelected ? 'checked' : ''}>
+              <span class="sr-only">Seleccionar ${App._esc(g.DisplayName)}</span>
             </label>
           </td>
           <td style="padding: 16px;">
             <div style="font-weight: 500; display:flex; align-items:center; gap:8px;">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-              ${this.esc(g.DisplayName)}
+              ${App._esc(g.DisplayName)}
             </div>
           </td>
           <td style="padding: 16px; text-align: center;">
             ${linkBadge}
           </td>
           <td style="padding: 16px; font-family: monospace; font-size: 13px; color: var(--text-muted);">
-            ${this.esc(g.Id)}
+            ${App._esc(g.Id)}
           </td>
           <td style="padding: 16px; font-size: 13px; color: var(--text-muted);">
-            ${this.formatDate(g.ModificationTime)}
+            ${App.formatDate(g.ModificationTime)}
           </td>
           <td style="padding: 16px; text-align: center;">
-            <button class="btn btn-sm btn-danger gpo-delete-btn" data-name="${this.esc(g.DisplayName)}">${t('common.delete')}</button>
+            <button class="btn btn-sm btn-danger gpo-delete-btn" data-name="${App._esc(g.DisplayName)}">${t('common.delete')}</button>
           </td>
         </tr>`;
     }).join('');
@@ -277,8 +277,8 @@ const GposPage = {
     }
 
     const listHtml = names.length <= 8
-      ? names.map(n => `<li style="font-family:monospace;font-size:13px;">${this.esc(n)}</li>`).join('')
-      : names.slice(0, 6).map(n => `<li style="font-family:monospace;font-size:13px;">${this.esc(n)}</li>`).join('')
+      ? names.map(n => `<li style="font-family:monospace;font-size:13px;">${App._esc(n)}</li>`).join('')
+      : names.slice(0, 6).map(n => `<li style="font-family:monospace;font-size:13px;">${App._esc(n)}</li>`).join('')
         + `<li style="color:var(--text-muted);font-size:13px;">... y ${names.length - 6} mas</li>`;
 
     App.openModal(t('apps.deleteConfirm'), `
@@ -324,7 +324,7 @@ const GposPage = {
 
   async deleteGPO(gpoName) {
     App.openModal(t('apps.deleteConfirm'), `
-      <p>${t('gpos.deleteWarning').replace('{gpo}', `<strong>${this.esc(gpoName)}</strong>`)}</p>
+      <p>${t('gpos.deleteWarning').replace('{gpo}', `<strong>${App._esc(gpoName)}</strong>`)}</p>
       <div class="rsat-warning" style="margin-top:16px;">
         ⚠️ ${t('gpos.deleteConsequence')}
       </div>
@@ -349,12 +349,6 @@ const GposPage = {
         this.loadGPOs();
       }
     });
-  },
-
-  esc(str) {
-    if (!str) return '';
-    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-    return str.toString().replace(/[&<>"']/g, m => map[m]);
   },
 
   async loadLocalLinkCounts() {
@@ -391,14 +385,4 @@ const GposPage = {
     return [...new Set(raw.filter(Boolean))];
   },
 
-  formatDate(dateStr) {
-    if (!dateStr) return '';
-    let ts = dateStr;
-    if (typeof dateStr === 'string' && dateStr.includes('Date(')) {
-      const match = dateStr.match(/\d+/);
-      ts = match ? parseInt(match[0]) : dateStr;
-    }
-    const d = new Date(ts);
-    return isNaN(d.getTime()) ? dateStr : d.toLocaleString();
-  }
 };
