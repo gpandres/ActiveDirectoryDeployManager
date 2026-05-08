@@ -576,6 +576,11 @@ const UpdateApi = {
     try { return await window.api.updates.openReleasePage(); }
     catch (err) { _ipcErr('updates:openReleasePage', err); throw err; }
   },
+
+  async getScriptStatus() {
+    try { return await window.api.scriptUpdates.getStatus(); }
+    catch (err) { _ipcErr('scriptUpdates:getStatus', err); throw err; }
+  },
 };
 
 

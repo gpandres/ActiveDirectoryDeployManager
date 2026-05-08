@@ -418,7 +418,11 @@ const LogsPage = {
       log_backend_reconnected:    `Servidor de logs reconectado`,
       log_backend_offline:        `Servidor de logs no disponible`,
       log_share_config_published: `Config de logging publicada en share`,
-      ou_external_changes_detected: `Cambios externos en OU detectados`,
+      ou_external_changes_detected:         `Cambios externos en OU detectados`,
+      app_scripts_regenerated:              `Scripts regenerados${app ? ': ' + app : ''}`,
+      script_update_background_started:     `Actualización de scripts iniciada${ctx.outdatedCount ? ` (${ctx.outdatedCount} apps)` : ''}`,
+      script_update_background_completed:   `Actualización de scripts completada${ctx.updatedCount != null ? ` — ${ctx.updatedCount} actualizadas` : ''}${ctx.failedCount ? `, ${ctx.failedCount} errores` : ''}`,
+      ps_error:                             `Error de PowerShell${ctx.stage ? ` [${e(ctx.stage)}]` : ''}`,
     };
 
     const key = String(r.message || '');

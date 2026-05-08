@@ -329,8 +329,9 @@ const DashboardPage = {
   getActivityColor(action) {
     const safeAction = String(action || '');
     const colors = {
-      app_create: 'var(--accent-secondary-dim)',
-      app_update: 'var(--accent-info-dim)',
+      app_create:              'var(--accent-secondary-dim)',
+      app_update:              'var(--accent-info-dim)',
+      app_scripts_regenerated: 'var(--accent-info-dim)',
       app_uninstall_prepare: 'var(--accent-warning-dim)',
       app_disable: 'var(--accent-warning-dim)',
       app_delete: 'var(--accent-danger-dim)',
@@ -397,7 +398,11 @@ const DashboardPage = {
       log_backend_enrolled:   `Enrolled en servidor de logs`,
       log_backend_reconnected:`Servidor de logs reconectado`,
       log_backend_offline:    `Servidor de logs no disponible`,
-      log_share_config_published: `Config de logging publicada`,
+      log_share_config_published:           `Config de logging publicada`,
+      app_scripts_regenerated:              `Scripts regenerados: <strong>${appName}</strong>`,
+      script_update_background_started:     `Actualización de scripts iniciada`,
+      script_update_background_completed:   `Actualización de scripts completada`,
+      ps_error:                             `Error de PowerShell`,
     };
     return texts[String(entry.action || '')] || App._esc(entry.action || entry.message || '');
   }
