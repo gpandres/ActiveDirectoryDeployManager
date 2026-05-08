@@ -487,7 +487,12 @@ function buildAppDeploymentManifest(appConfig, details = {}) {
       wingetSource: uninstallConfig.wingetSource || '',
       scriptPath: uninstallScriptPath,
       generatedAt
-    }
+    },
+    // Baked at deploy time — used by install detection without querying the binary
+    productCode: appConfig.msiProductCode || uninstallConfig.productCode || existingManifest.productCode || '',
+    installerSignature: appConfig.installerSignature && typeof appConfig.installerSignature === 'object'
+      ? { type: appConfig.installerSignature.type || '', confidence: appConfig.installerSignature.confidence || '', publisher: appConfig.installerSignature.publisher || '' }
+      : (existingManifest.installerSignature || null)
   };
 }
 
@@ -2015,6 +2020,37 @@ function psSingleQuote(str) {
 // Returns '' when the rule is 'tracker' (the caller's existing tracker logic handles it).
 function buildDetectionSnippet(cfg) {
   const d = cfg?.detection;
+  const installerType = inferInstallerType(cfg);
+
+  // MSI: prefer ProductCode registry check — zero invasive, reads Windows Installer registry
+  // Auto-apply when detection type is 'tracker' (default) and installer is MSI
+  const useMsiProductCode = (
+    d?.type === 'msi-productcode'
+    || ((!d?.type || d?.type === 'tracker') && installerType === 'msi')
+  );
+
+  if (useMsiProductCode) {
+    return `
+function Test-AppInstalled {
+    # Read ProductCode from version.json manifest (baked at deploy time)
+    $pc = if ($Manifest) { [string]($Manifest.productCode) } else { '' }
+    # Fallback: local tracker may have a ProductCode discovered at first install
+    if (-not $pc -and $TrackerFile -and (Test-Path -LiteralPath $TrackerFile)) {
+        try {
+            $t = Get-Content -LiteralPath $TrackerFile -Raw | ConvertFrom-Json
+            $pc = [string]($t.detectedProductCode)
+        } catch {}
+    }
+    if (-not $pc) { return $false }
+    $paths = @(
+        "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\$pc",
+        "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\$pc",
+        "HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\$pc"
+    )
+    return ($paths | Where-Object { Test-Path $_ } | Measure-Object).Count -gt 0
+}`;
+  }
+
   if (!d || !d.type || d.type === 'tracker') return '';
 
   if (d.type === 'file') {
@@ -2221,6 +2257,24 @@ function getDedicatedRuntimeDetectionLogic() {
     '    param([hashtable]$Payload)',
     '    if (-not $TrackerFile) { return }',
     '    try { $Payload | ConvertTo-Json | Set-Content -Path $TrackerFile -Force -Encoding UTF8 } catch { }',
+    '}',
+    'function Get-UninstallSnapshot {',
+    '    $snap = @{}',
+    '    $paths = @(',
+    '        "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",',
+    '        "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall",',
+    '        "HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"',
+    '    )',
+    '    foreach ($path in $paths) {',
+    '        if (-not (Test-Path $path)) { continue }',
+    '        Get-ChildItem -Path $path -ErrorAction SilentlyContinue | ForEach-Object {',
+    '            $n = $_.PSChildName',
+    '            if ($n -match "^\\{[0-9A-Fa-f\\-]{36}\\}$") {',
+    '                try { $dn = ($_ | Get-ItemProperty -ErrorAction SilentlyContinue).DisplayName; if ($dn) { $snap[$n] = $dn } } catch {}',
+    '            }',
+    '        }',
+    '    }',
+    '    return $snap',
     '}'
   ].join('\n');
 }
@@ -2457,7 +2511,7 @@ if (Test-AppInstalled) {
   ].join('\n');
 }
 
-function getTrackerSaveLogic(notifyUser = false) {
+function getTrackerSaveLogic(notifyUser = false, useSnapshotDiff = false) {
   const config = configService.getConfig();
   const dict = i18nService.getTranslations(config.language || 'en');
   const ToastTitleDone = dict.apps?.toastTitleDone || "Installation complete";
@@ -2476,7 +2530,9 @@ function getTrackerSaveLogic(notifyUser = false) {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OK: $NombreApp instalado correctamente (v$CurrentVersion)"
     }
 ${notifyAfter}
-    Save-AppDeployTracker -Payload @{ hash = $CurrentHash; version = $CurrentVersion; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success' }
+    ${useSnapshotDiff ? `$_tp = @{ hash = $CurrentHash; version = $CurrentVersion; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success' }
+    if ($DetectedProductCode) { $_tp.detectedProductCode = $DetectedProductCode; $_tp.detectedDisplayName = $DetectedDisplayName }
+    Save-AppDeployTracker -Payload $_tp` : `Save-AppDeployTracker -Payload @{ hash = $CurrentHash; version = $CurrentVersion; installedAt = (Get-Date).ToString('o'); computer = $env:COMPUTERNAME; result = 'success' }`}
     Send-AppDeployLog -Level "info" -Source "install" -Message "install_success" -Context @{ appName = $NombreApp; version = $CurrentVersion; hash = $CurrentHash; disposition = $InstallDisposition }
     Invoke-DeployCacheCleanupWithFallback -CacheDir $CacheDir -MarkerPath $CleanupMarkerPath | Out-Null
 
@@ -2515,9 +2571,21 @@ try {
         if ($ArgumentosExe) { $psArgs += " " + $ArgumentosExe }
         ${getManagedInstallerInvocation('ps1', '$psArgs')}
     } else {
+        $UninstallSnapshot = Get-UninstallSnapshot
         ${getManagedInstallerInvocation('exe', '$ArgumentosExe')}
+        $DetectedProductCode = $null
+        $DetectedDisplayName = $null
+        if ($null -ne $UninstallSnapshot) {
+            $afterSnap = Get-UninstallSnapshot
+            $newKeys = @($afterSnap.Keys | Where-Object { -not $UninstallSnapshot.ContainsKey($_) })
+            if ($newKeys.Count -gt 0) {
+                $DetectedProductCode = $newKeys[0]
+                $DetectedDisplayName = $afterSnap[$DetectedProductCode]
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ProductCode detectado post-instalacion: $DetectedProductCode ($DetectedDisplayName)"
+            }
+        }
     }
-${getTrackerSaveLogic(notify)}
+${getTrackerSaveLogic(notify, true)}
 `;
 }
 

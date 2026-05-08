@@ -85,7 +85,8 @@ contextBridge.exposeInMainWorld('api', {
     applyAssignmentPlan: (plan, allVisibleOUs = []) => ipcRenderer.invoke('apps:applyAssignmentPlan', plan, allVisibleOUs),
     reconcileManagedAssignments: (ouDNs = []) => ipcRenderer.invoke('apps:reconcileManagedAssignments', ouDNs),
     getInstallerVersion: (filePath) => ipcRenderer.invoke('apps:getInstallerVersion', filePath),
-    computeHash: (filePath) => ipcRenderer.invoke('apps:computeHash', filePath)
+    computeHash: (filePath) => ipcRenderer.invoke('apps:computeHash', filePath),
+    detectInstallerSignature: (filePath) => ipcRenderer.invoke('apps:detectInstallerSignature', filePath)
   },
 
   // Scripts

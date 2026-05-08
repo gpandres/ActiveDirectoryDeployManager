@@ -490,6 +490,68 @@ function syncAppShareManifest(appRecord) {
   } catch (err) {}
 }
 
+// ── Installer signature detection ──────────────────────────────────────────
+// Maps installer type to recommended silent arguments.
+const INSTALLER_SILENT_ARGS = {
+  nsis:                 '/S',                                        // case-sensitive UPPERCASE
+  innosetup:            '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-',
+  'wix-burn':           '/quiet /norestart',
+  installshield:        '/s /v"/qn /norestart"',
+  squirrel:             '--silent',
+  iexpress:             '/Q:A /R:N',
+  'advanced-installer': '/exenoui /qn /norestart',
+  'setup-factory':      '/S',
+  wise:                 '/S /v/qn',
+  java:                 '/s',                                        // Oracle — lowercase /s!
+  adobe:                '/sAll /rs /msi EULA_ACCEPT=YES',
+  vcredist:             '/install /quiet /norestart',
+  dotnet:               '/quiet /norestart',
+  msi:                  '/qn /norestart',
+  ps1:                  '',
+  exe:                  '/S',
+};
+
+// Publisher/product overrides — applied before binary scanning
+const PUBLISHER_OVERRIDES = [
+  { pubRe: /oracle|sun microsystems/i,  prodRe: /java|jdk|jre/i,               type: 'java' },
+  { pubRe: /adobe/i,                    prodRe: /reader|acrobat/i,              type: 'adobe' },
+  { pubRe: /microsoft/i,                prodRe: /visual c\+\+|vcredist/i,       type: 'vcredist' },
+  { pubRe: /microsoft/i,                prodRe: /\.net|dotnet runtime|dotnet sdk/i, type: 'dotnet' },
+];
+
+function _detectSignatureFromContent(searchable, productName, publisher, fileDescription) {
+  const pubStr  = publisher.toLowerCase();
+  const prodStr = (productName + ' ' + fileDescription).toLowerCase();
+
+  // Publisher/product special cases (highest confidence)
+  for (const ov of PUBLISHER_OVERRIDES) {
+    if (ov.pubRe.test(pubStr) && ov.prodRe.test(prodStr)) {
+      return { type: ov.type, confidence: 'high', suggestedArgs: INSTALLER_SILENT_ARGS[ov.type] };
+    }
+  }
+
+  // Binary signatures (ordered by specificity)
+  const checks = [
+    { strings: ['Nullsoft Install System', 'NullsoftInst', 'NSIS Error'],                            type: 'nsis' },
+    { strings: ['Inno Setup Setup Data', 'JR.Inno.Setup', 'Inno Setup version', 'is_SetupIcon'],     type: 'innosetup' },
+    { strings: ['WixBurn', '.wixburn', 'Burn v3.', 'Burn v4.', 'Burn v5.'],                          type: 'wix-burn' },
+    { strings: ['InstallShield', '_IDriver', 'ISSetupPrerequisites'],                                 type: 'installshield' },
+    { strings: ['SquirrelSetup', 'Squirrel-Windows'],                                                 type: 'squirrel' },
+    { strings: ['IExpress', 'WEXTRACT', 'WExtract.exe'],                                              type: 'iexpress' },
+    { strings: ['Advanced Installer'],                                                                 type: 'advanced-installer' },
+    { strings: ['Setup Factory'],                                                                      type: 'setup-factory' },
+    { strings: ['Wise Installation', 'WiseMain'],                                                     type: 'wise' },
+  ];
+
+  for (const c of checks) {
+    if (c.strings.some(s => searchable.includes(s))) {
+      return { type: c.type, confidence: 'high', suggestedArgs: INSTALLER_SILENT_ARGS[c.type] };
+    }
+  }
+
+  return { type: 'exe', confidence: 'low', suggestedArgs: INSTALLER_SILENT_ARGS.exe };
+}
+
 const appService = {
   getAll() {
     return loadApps();
@@ -782,6 +844,52 @@ const appService = {
     return finalAssignmentResults;
   },
 
+  async detectInstallerSignature(filePath) {
+    try {
+      if (!filePath || !fs.existsSync(filePath)) return { success: false, error: 'File not found' };
+      if (/[;|`$&{}]/.test(filePath)) return { success: false, error: 'Invalid path' };
+      const ext = path.extname(filePath).toLowerCase();
+
+      if (ext === '.msi') return { success: true, type: 'msi', confidence: 'definitive', suggestedArgs: '/qn /norestart', productName: '', publisher: '' };
+      if (ext === '.ps1') return { success: true, type: 'ps1', confidence: 'definitive', suggestedArgs: '', productName: '', publisher: '' };
+      if (!['.exe'].includes(ext)) return { success: false, error: 'Unsupported file type' };
+
+      // Read first 384 KB for signature matching
+      const BUFFER_SIZE = 384 * 1024;
+      let buf;
+      try {
+        const fd = fs.openSync(filePath, 'r');
+        buf = Buffer.alloc(BUFFER_SIZE);
+        const bytesRead = fs.readSync(fd, buf, 0, BUFFER_SIZE, 0);
+        fs.closeSync(fd);
+        buf = buf.slice(0, bytesRead);
+      } catch (e) { return { success: false, error: e.message }; }
+
+      // Strip NUL bytes — makes UTF-16LE resource strings searchable alongside ASCII
+      const searchable = buf.toString('binary').replace(/\x00/g, '');
+
+      // Get FileVersionInfo via PowerShell
+      let productName = '', publisher = '', fileDescription = '';
+      try {
+        const vInfo = await new Promise((resolve) => {
+          const safePath = filePath.replace(/'/g, "''");
+          const cmd = `$v=(Get-Item -LiteralPath '${safePath}').VersionInfo;[PSCustomObject]@{P=$v.ProductName;C=$v.CompanyName;D=$v.FileDescription}|ConvertTo-Json -Compress`;
+          const ps = execFile('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', '-'],
+            { maxBuffer: 64 * 1024, timeout: 10000 },
+            (err, stdout) => { try { resolve(JSON.parse((stdout || '').trim())); } catch { resolve(null); } }
+          );
+          ps.stdin.write(cmd); ps.stdin.end();
+        });
+        if (vInfo) { productName = (vInfo.P || '').trim(); publisher = (vInfo.C || '').trim(); fileDescription = (vInfo.D || '').trim(); }
+      } catch (e) { /* non-fatal */ }
+
+      const sig = _detectSignatureFromContent(searchable, productName, publisher, fileDescription);
+      return { success: true, ...sig, productName, publisher, fileDescription };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
   getInstallerVersion(filePath) {
     return new Promise((resolve) => {
       try {
@@ -805,14 +913,19 @@ const appService = {
             $msiPath = '${filePath.replace(/'/g, "''")}'
             $installer = New-Object -ComObject WindowsInstaller.Installer
             $db = $installer.GetType().InvokeMember('OpenDatabase','InvokeMethod',$null,$installer,@($msiPath,0))
-            $view = $db.GetType().InvokeMember('OpenView','InvokeMethod',$null,$db,@("SELECT Value FROM Property WHERE Property = 'ProductVersion'"))
-            $view.GetType().InvokeMember('Execute','InvokeMethod',$null,$view,$null) | Out-Null
-            $record = $view.GetType().InvokeMember('Fetch','InvokeMethod',$null,$view,$null)
-            if ($record) {
-              $ver = $record.GetType().InvokeMember('StringData','GetProperty',$null,$record,1)
-              Write-Output $ver
+            function Get-MsiProp($db,$prop) {
+              $v=$db.GetType().InvokeMember('OpenView','InvokeMethod',$null,$db,@("SELECT Value FROM Property WHERE Property = '$prop'"))
+              $v.GetType().InvokeMember('Execute','InvokeMethod',$null,$v,$null)|Out-Null
+              $r=$v.GetType().InvokeMember('Fetch','InvokeMethod',$null,$v,$null)
+              $v.GetType().InvokeMember('Close','InvokeMethod',$null,$v,$null)|Out-Null
+              if($r){$r.GetType().InvokeMember('StringData','GetProperty',$null,$r,1)}else{''}
             }
-            $view.GetType().InvokeMember('Close','InvokeMethod',$null,$view,$null) | Out-Null
+            [PSCustomObject]@{
+              version     = Get-MsiProp $db 'ProductVersion'
+              productCode = Get-MsiProp $db 'ProductCode'
+              productName = Get-MsiProp $db 'ProductName'
+              publisher   = Get-MsiProp $db 'Manufacturer'
+            } | ConvertTo-Json -Compress
           `;
         } else {
           return resolve({ success: false, error: 'Unsupported file type' });
@@ -824,9 +937,25 @@ const appService = {
           { maxBuffer: 1024 * 1024, timeout: 15000 },
           (error, stdout) => {
             if (error) return resolve({ success: false, error: error.message });
-            const version = (stdout || '').trim();
-            if (!version) return resolve({ success: false, error: 'No version metadata found' });
-            resolve({ success: true, version });
+            const raw = (stdout || '').trim();
+            if (!raw) return resolve({ success: false, error: 'No version metadata found' });
+            if (ext === '.msi') {
+              try {
+                const obj = JSON.parse(raw);
+                const version = (obj.version || '').trim();
+                if (!version) return resolve({ success: false, error: 'No version metadata found' });
+                resolve({
+                  success: true,
+                  version,
+                  productCode: (obj.productCode || '').trim(),
+                  productName: (obj.productName || '').trim(),
+                  publisher:   (obj.publisher   || '').trim(),
+                });
+                return;
+              } catch (e) { /* fall through to plain text path */ }
+            }
+            if (!raw) return resolve({ success: false, error: 'No version metadata found' });
+            resolve({ success: true, version: raw });
           }
         );
         ps.stdin.write(psCommand);

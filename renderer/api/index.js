@@ -81,6 +81,11 @@ const AppApi = {
     catch (err) { _ipcErr('apps:computeHash', err); throw err; }
   },
 
+  async detectInstallerSignature(filePath) {
+    try { return await window.api.apps.detectInstallerSignature(filePath); }
+    catch (err) { _ipcErr('apps:detectInstallerSignature', err); throw err; }
+  },
+
   async applyAssignmentPlan(plan, visibleOUs = []) {
     try { return await window.api.apps.applyAssignmentPlan(plan, visibleOUs); }
     catch (err) { _ipcErr('apps:applyAssignmentPlan', err); throw err; }

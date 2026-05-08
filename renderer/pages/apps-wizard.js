@@ -629,6 +629,27 @@ const AppsWizardModule = {
                 <input class="form-input" id="wiz-installer" value="${App._esc(state.installerPath)}" placeholder="C:\\Descargas\\app.exe" readonly style="flex:1">
                 <button class="btn btn-secondary" id="btn-pick-installer">${t('apps.browse')}</button>
               </div>
+              ${state.installerSignature ? (() => {
+                const sig = state.installerSignature;
+                const typeLabels = {
+                  nsis: 'NSIS', innosetup: 'InnoSetup', 'wix-burn': 'WiX Burn',
+                  installshield: 'InstallShield', squirrel: 'Squirrel', iexpress: 'IExpress',
+                  'advanced-installer': 'Advanced Installer', 'setup-factory': 'Setup Factory',
+                  wise: 'Wise', java: 'Java', adobe: 'Adobe', vcredist: 'VC++ Redist',
+                  dotnet: '.NET Runtime', msi: 'MSI', ps1: 'PowerShell', exe: 'EXE genérico'
+                };
+                const label = typeLabels[sig.type] || sig.type;
+                const confColor = sig.confidence === 'high' || sig.confidence === 'definitive'
+                  ? 'var(--accent-secondary,#22c55e)' : 'var(--text-muted)';
+                const pubInfo = sig.publisher ? ` · ${App._esc(sig.publisher)}` : '';
+                return `<p class="form-hint" style="margin-top:4px;">
+                  <span style="display:inline-flex;align-items:center;gap:5px;">
+                    <span class="badge" style="background:rgba(99,102,241,.15);color:var(--primary-color);font-size:10px;">🔍 ${App._esc(label)}</span>
+                    <span style="color:${confColor};font-size:11px;">${sig.confidence === 'low' ? '(no detectado — usando /S genérico)' : 'detectado'}${pubInfo}</span>
+                    ${sig.suggestedArgs ? `<code style="font-size:10px;background:var(--bg-input);padding:1px 5px;border-radius:3px;">${App._esc(sig.suggestedArgs)}</code>` : ''}
+                  </span>
+                </p>`;
+              })() : ''}
               <p class="form-hint">${t('apps.installerHint')}</p>
             </div>
           ` : ''}
@@ -1256,20 +1277,7 @@ const AppsWizardModule = {
         const file = await window.api.config.selectFile([{ name: 'Instaladores', extensions: ['exe', 'msi', 'ps1'] }]);
         if (file) {
           state.installerPath = file;
-
-          if (file.toLowerCase().endsWith('.msi')) {
-             if (!state.silentArgs || state.silentArgs === '/S') {
-                 state.silentArgs = '/qn /norestart';
-             }
-          } else if (file.toLowerCase().endsWith('.exe')) {
-             if (!state.silentArgs || state.silentArgs === '/qn /norestart' || state.silentArgs === '/qn') {
-                 state.silentArgs = '/S';
-             }
-          } else if (file.toLowerCase().endsWith('.ps1')) {
-             if (!state.silentArgs || state.silentArgs === '/S' || state.silentArgs === '/qn /norestart' || state.silentArgs === '/qn') {
-                 state.silentArgs = '';
-              }
-          }
+          state.installerSignature = null;
 
           if (!['manual', 'none', 'winget'].includes(state.uninstallMode)) {
             state.uninstallMode = AppUtils.getDefaultUninstallMode(
@@ -1279,7 +1287,7 @@ const AppsWizardModule = {
             );
           }
 
-          // Auto-suggest name from filename â€” only if user hasn't typed one yet
+          // Auto-suggest name from filename — only if user hasn't typed one yet
           if (!state.name.trim()) {
             const basename = file.split(/[\\/]/).pop() || '';
             const nameWithoutExt = basename.replace(/\.[^.]+$/, '');
@@ -1287,23 +1295,55 @@ const AppsWizardModule = {
             if (suggestedName) state.name = suggestedName;
           }
 
-          // Try to auto-detect version from installer metadata
-          try {
-            const verResult = await window.api.apps.getInstallerVersion(file);
-            if (verResult && verResult.success && verResult.version) {
-              state.suggestedVersion = verResult.version;
-              // Auto-apply only if user hasn't set a meaningful version yet
-              if (!state.version || state.version === '1.0.0') {
-                state.version = verResult.version;
-              }
-            } else {
-              state.suggestedVersion = '';
+          renderWizard();
+
+          // Detect installer type + extract version in parallel
+          const [sigResult, verResult] = await Promise.allSettled([
+            window.api.apps.detectInstallerSignature(file),
+            window.api.apps.getInstallerVersion(file)
+          ]);
+
+          let sigChanged = false;
+
+          // Apply signature detection
+          if (sigResult.status === 'fulfilled' && sigResult.value?.success) {
+            const sig = sigResult.value;
+            state.installerSignature = sig;
+            // Auto-fill silentArgs unless admin already typed something meaningful
+            const prevArgs = (state.silentArgs || '').trim();
+            const defaultArgs = ['/S', '/qn', '/qn /norestart', ''];
+            if (!prevArgs || defaultArgs.includes(prevArgs)) {
+              state.silentArgs = sig.suggestedArgs || '';
             }
-          } catch (e) {
+            // Auto-fill productName/publisher if not yet set
+            if (sig.productName && !state.name.trim()) state.name = sig.productName;
+            sigChanged = true;
+          } else {
+            // Fallback: extension-based defaults
+            const ext = file.split('.').pop().toLowerCase();
+            const prevArgs = (state.silentArgs || '').trim();
+            if (ext === 'msi'  && (!prevArgs || prevArgs === '/S')) state.silentArgs = '/qn /norestart';
+            if (ext === 'exe'  && (!prevArgs || prevArgs === '/qn /norestart' || prevArgs === '/qn')) state.silentArgs = '/S';
+            if (ext === 'ps1'  && (!prevArgs || prevArgs === '/S' || prevArgs === '/qn /norestart' || prevArgs === '/qn')) state.silentArgs = '';
+          }
+
+          // Apply version from installer metadata
+          if (verResult.status === 'fulfilled' && verResult.value?.success) {
+            const vr = verResult.value;
+            state.suggestedVersion = vr.version || '';
+            if (vr.version && (!state.version || state.version === '1.0.0')) {
+              state.version = vr.version;
+            }
+            // Store MSI metadata for version.json
+            if (vr.productCode) state.msiProductCode = vr.productCode;
+            if (vr.publisher && !state.installerSignature?.publisher) {
+              if (state.installerSignature) state.installerSignature.publisher = vr.publisher;
+            }
+          } else {
             state.suggestedVersion = '';
           }
 
-          renderWizard();
+          if (sigChanged || verResult.status === 'fulfilled') renderWizard();
         }
       });
     }
@@ -2068,6 +2108,10 @@ const AppsWizardModule = {
         notifyUser: state.notifyUser || false,
         uninstall: uninstallConfig,
         detection: state.detection || { type: 'tracker' },
+        installerSignature: state.installerSignature
+          ? { type: state.installerSignature.type, confidence: state.installerSignature.confidence, publisher: state.installerSignature.publisher || '' }
+          : null,
+        msiProductCode: state.msiProductCode || '',
         dependsOn: state.dependsOn && state.dependsOn.appId
           ? {
               appId: state.dependsOn.appId,
