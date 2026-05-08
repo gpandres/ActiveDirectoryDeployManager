@@ -38,6 +38,8 @@ const App = {
   dismissedAppUpdateVersion: '',
   sessionDismissedAppUpdateVersion: '',
   _updateCheckPromise: null,
+  _gpoSyncTimer: null,
+  _gpoSyncVisibilityListener: null,
 
   async init() {
     await window.initI18n();
@@ -63,6 +65,10 @@ const App = {
     }
 
     this.checkAppUpdates().catch(() => {});
+    if (this.rsatAvailable) {
+      setTimeout(() => this._silentGpoSyncCheck(), 12_000);
+      this.startGpoSyncPolling();
+    }
   },
 
   updateSidebarLanguage() {
@@ -412,7 +418,49 @@ const App = {
       </div>`;
   },
 
-  // ─── Share Health Check ────────────────────────────
+  // ─── Background GPO Sync ──────────────────────────
+  _flattenOUTree(nodes, result = []) {
+    for (const n of (nodes || [])) {
+      result.push(n.dn);
+      if (n.children?.length) this._flattenOUTree(n.children, result);
+    }
+    return result;
+  },
+
+  async _silentGpoSyncCheck() {
+    if (!this.rsatAvailable || document.hidden) return;
+    try {
+      const ouResult = await window.api.ad.getOUs().catch(() => null);
+      if (!ouResult?.success || !Array.isArray(ouResult.data)) return;
+      const visibleOUs = this._flattenOUTree(ouResult.data);
+      if (!visibleOUs.length) return;
+      const reconcile = await window.api.apps.reconcileManagedAssignments(visibleOUs).catch(() => null);
+      const changed = Number(reconcile?.changed || 0);
+      if (changed > 0 && this.currentPage !== 'ous') {
+        this.toast(t('ous.externalChangesDetected').replace('{n}', changed), 'warning');
+      }
+    } catch (e) { /* silent */ }
+  },
+
+  startGpoSyncPolling(intervalMs = 8 * 60 * 1000) {
+    this.stopGpoSyncPolling();
+    if (!this.rsatAvailable) return;
+    this._gpoSyncTimer = setInterval(() => this._silentGpoSyncCheck(), intervalMs);
+    this._gpoSyncVisibilityListener = () => {
+      if (!document.hidden) this._silentGpoSyncCheck();
+    };
+    document.addEventListener('visibilitychange', this._gpoSyncVisibilityListener);
+  },
+
+  stopGpoSyncPolling() {
+    if (this._gpoSyncTimer) { clearInterval(this._gpoSyncTimer); this._gpoSyncTimer = null; }
+    if (this._gpoSyncVisibilityListener) {
+      document.removeEventListener('visibilitychange', this._gpoSyncVisibilityListener);
+      this._gpoSyncVisibilityListener = null;
+    }
+  },
+
+  // ─── Share Health Check ──────────────────────────────
   async checkShareHealth() {
     try {
       const status = await window.api.share.checkHealth();

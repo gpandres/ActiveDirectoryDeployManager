@@ -576,7 +576,16 @@ const SettingsPage = {
     if (!r.success) { el.innerHTML = `<div class="logs-muted">${App._esc(r.error)}</div>`; return; }
     const rows = r.data || [];
     if (!rows.length) { el.innerHTML = `<div class="logs-muted">${t('settings.empty') || 'Sin entradas'}</div>`; return; }
+
+    const LIMIT = 3;
+    const collapsible = rows.length > LIMIT;
+
     el.innerHTML = `
+      ${collapsible ? `
+      <div style="margin-bottom:6px;">
+        <input class="form-input" id="cfg-keys-search" placeholder="Buscar API key..."
+          style="font-size:12px;padding:4px 8px;height:28px;width:100%;">
+      </div>` : ''}
       <table class="logs-table">
         <thead><tr>
           <th>${t('settings.colName') || 'Nombre'}</th>
@@ -587,8 +596,9 @@ const SettingsPage = {
           <th style="width:90px;"></th>
         </tr></thead>
         <tbody>
-          ${rows.map(k => `
-            <tr>
+          ${rows.map((k, i) => `
+            <tr data-key-idx="${i}" data-key-name="${App._esc((k.name || '').toLowerCase())}"
+                ${collapsible && i >= LIMIT ? 'class="cfg-key-extra" style="display:none;"' : ''}>
               <td>${App._esc(k.name)}</td>
               <td><span class="level-pill level-${k.scope === 'admin' ? 'error' : k.scope === 'read' ? 'info' : 'warn'}">${k.scope}</span></td>
               <td class="mono">${this._fmtTs(k.createdAt)}</td>
@@ -599,7 +609,12 @@ const SettingsPage = {
           `).join('')}
         </tbody>
       </table>
+      ${collapsible ? `
+      <button class="btn btn-ghost btn-sm" id="cfg-keys-toggle" style="margin-top:4px;font-size:12px;">
+        ${t('settings.showAll') || 'Ver todas'} (${rows.length})
+      </button>` : ''}
     `;
+
     el.querySelectorAll('[data-revoke]').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (!confirm(t('settings.confirmRevoke') || '¿Revocar?')) return;
@@ -608,6 +623,31 @@ const SettingsPage = {
         await this._loadKeysTable();
       });
     });
+
+    if (!collapsible) return;
+
+    let expanded = false;
+    const toggleBtn = document.getElementById('cfg-keys-toggle');
+    const searchInput = document.getElementById('cfg-keys-search');
+
+    const applyFilter = (query) => {
+      const q = query.toLowerCase().trim();
+      el.querySelectorAll('tbody tr').forEach((row, i) => {
+        const nameMatch = !q || (row.dataset.keyName || '').includes(q);
+        row.style.display = nameMatch ? '' : 'none';
+      });
+      if (toggleBtn) toggleBtn.style.display = q ? 'none' : '';
+    };
+
+    toggleBtn.addEventListener('click', () => {
+      expanded = !expanded;
+      el.querySelectorAll('.cfg-key-extra').forEach(row => { row.style.display = expanded ? '' : 'none'; });
+      toggleBtn.textContent = expanded
+        ? (t('settings.showLess') || 'Ver menos')
+        : `${t('settings.showAll') || 'Ver todas'} (${rows.length})`;
+    });
+
+    searchInput.addEventListener('input', (e) => applyFilter(e.target.value));
   },
 
   async _loadSecretsTable() {
